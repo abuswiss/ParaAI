@@ -1,6 +1,15 @@
 import React, { useState } from 'react';
 import { generateDraftWithAI, createTemplate, createDraftFromTemplate } from '../../services/templateService';
 
+const US_STATES = [
+  'Alabama', 'Alaska', 'Arizona', 'Arkansas', 'California', 'Colorado', 'Connecticut', 'Delaware', 'Florida', 'Georgia',
+  'Hawaii', 'Idaho', 'Illinois', 'Indiana', 'Iowa', 'Kansas', 'Kentucky', 'Louisiana', 'Maine', 'Maryland', 'Massachusetts',
+  'Michigan', 'Minnesota', 'Mississippi', 'Missouri', 'Montana', 'Nebraska', 'Nevada', 'New Hampshire', 'New Jersey',
+  'New Mexico', 'New York', 'North Carolina', 'North Dakota', 'Ohio', 'Oklahoma', 'Oregon', 'Pennsylvania', 'Rhode Island',
+  'South Carolina', 'South Dakota', 'Tennessee', 'Texas', 'Utah', 'Vermont', 'Virginia', 'Washington', 'West Virginia',
+  'Wisconsin', 'Wyoming'
+];
+
 interface AIDraftModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -8,9 +17,15 @@ interface AIDraftModalProps {
   onExport?: (content: string) => void;
 }
 
+type DocumentType = 'contract' | 'letter' | 'pleading' | 'memorandum' | 'agreement' | 'other';
+
 const AIDraftModal: React.FC<AIDraftModalProps> = ({ isOpen, onClose, context, onExport }) => {
   const [step, setStep] = useState<'input' | 'draft' | 'refine'>('input');
   const [requirements, setRequirements] = useState('');
+  const [docType, setDocType] = useState<DocumentType>('contract');
+  const [jurisdiction, setJurisdiction] = useState('US Federal');
+  const [audience, setAudience] = useState('');
+  const [specialInstructions, setSpecialInstructions] = useState('');
   const [draftContent, setDraftContent] = useState('');
   const [draftName, setDraftName] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -18,12 +33,23 @@ const AIDraftModal: React.FC<AIDraftModalProps> = ({ isOpen, onClose, context, o
   const [refinePrompt, setRefinePrompt] = useState('');
   const [notification, setNotification] = useState<string | null>(null);
 
+  // Compose a detailed prompt for the AI
+  const buildAIPrompt = () => {
+    let prompt = `Type of Document: ${docType}\n`;
+    prompt += `Jurisdiction: ${jurisdiction}\n`;
+    if (audience.trim()) prompt += `Intended Audience: ${audience}\n`;
+    if (specialInstructions.trim()) prompt += `Special Instructions: ${specialInstructions}\n`;
+    prompt += `Requirements: ${requirements}`;
+    return prompt;
+  };
+
   // Use the real AI call for initial draft
   const handleGenerateDraft = async () => {
     setIsLoading(true);
     setError(null);
     try {
-      const { data, error } = await generateDraftWithAI(requirements, undefined, context);
+      const aiPrompt = buildAIPrompt();
+      const { data, error } = await generateDraftWithAI(aiPrompt, undefined, context);
       if (error || !data) {
         setError(error?.message || 'Failed to generate draft.');
         setIsLoading(false);
@@ -68,10 +94,10 @@ const AIDraftModal: React.FC<AIDraftModalProps> = ({ isOpen, onClose, context, o
         const { data, error } = await createTemplate({
           name: draftName || 'Untitled Template',
           description: requirements,
-          category: 'other',
+          category: docType,
           content: draftContent,
           variables: [],
-          tags: [],
+          tags: [jurisdiction, ...(audience ? [audience] : []), ...(specialInstructions ? [specialInstructions] : [])],
           isPublic: false
         });
         if (error || !data) throw error || new Error('Failed to save template');
@@ -118,88 +144,139 @@ const AIDraftModal: React.FC<AIDraftModalProps> = ({ isOpen, onClose, context, o
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-70">
-      <div className="bg-gray-900 rounded-lg shadow-lg w-full max-w-2xl mx-4 p-6 relative">
+      <div className="bg-gray-900 rounded-lg shadow-lg w-full max-w-4xl mx-4 p-8 relative">
         {/* Close button */}
         <button
-          className="absolute top-3 right-3 text-gray-400 hover:text-white"
+          className="absolute top-4 right-4 text-gray-400 hover:text-white"
           onClick={onClose}
         >
           <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
           </svg>
         </button>
-        <h2 className="text-xl font-semibold text-text-primary mb-4 text-center">
+        <h2 className="text-2xl font-semibold text-text-primary mb-6 text-center">
           AI Draft {context === 'template' ? 'Template' : 'Document'}
         </h2>
         {notification && (
-          <div className="mb-4 p-2 bg-green-800 text-green-200 rounded text-center">{notification}</div>
+          <div className="mb-6 p-3 bg-green-800 text-green-200 rounded text-center">{notification}</div>
         )}
         {step === 'input' && (
           <>
+            <div className="mb-6 grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div>
+                <label className="block text-text-secondary mb-2">Type of Document</label>
+                <select
+                  className="w-full bg-gray-800 border border-gray-700 rounded px-4 py-3 text-text-primary"
+                  value={docType}
+                  onChange={e => setDocType(e.target.value as DocumentType)}
+                >
+                  <option value="contract">Contract</option>
+                  <option value="letter">Letter</option>
+                  <option value="pleading">Pleading</option>
+                  <option value="memorandum">Memorandum</option>
+                  <option value="agreement">Agreement</option>
+                  <option value="other">Other</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-text-secondary mb-2">Jurisdiction</label>
+                <select
+                  className="w-full bg-gray-800 border border-gray-700 rounded px-4 py-3 text-text-primary"
+                  value={jurisdiction}
+                  onChange={e => setJurisdiction(e.target.value)}
+                >
+                  <option value="US Federal">US Federal</option>
+                  {US_STATES.map(state => (
+                    <option key={state} value={state}>{state}</option>
+                  ))}
+                  <option value="Other/None">Other/None</option>
+                </select>
+              </div>
+            </div>
+            <div className="mb-6 grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div>
+                <label className="block text-text-secondary mb-2">Intended Audience <span className="text-xs text-gray-500">(optional)</span></label>
+                <textarea
+                  className="w-full bg-gray-800 border border-gray-700 rounded px-4 py-3 text-text-primary min-h-[80px]"
+                  value={audience}
+                  onChange={e => setAudience(e.target.value)}
+                  placeholder="E.g. Client, Court, Opposing Counsel"
+                />
+              </div>
+              <div>
+                <label className="block text-text-secondary mb-2">Special Instructions <span className="text-xs text-gray-500">(optional)</span></label>
+                <textarea
+                  className="w-full bg-gray-800 border border-gray-700 rounded px-4 py-3 text-text-primary min-h-[80px]"
+                  value={specialInstructions}
+                  onChange={e => setSpecialInstructions(e.target.value)}
+                  placeholder="E.g. Use plain English, include indemnification clause"
+                />
+              </div>
+            </div>
             <label className="block text-text-secondary mb-2">Describe what you want the AI to draft:</label>
             <textarea
-              className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-text-primary mb-4 min-h-[100px]"
+              className="w-full bg-gray-800 border border-gray-700 rounded px-4 py-3 text-text-primary mb-6 min-h-[150px]"
               value={requirements}
               onChange={e => setRequirements(e.target.value)}
               placeholder="E.g. Draft a contract for..."
             />
             <button
-              className="w-full py-2 bg-primary text-white rounded hover:bg-primary-hover disabled:opacity-50"
+              className="w-full py-3 bg-gradient-to-r from-purple-600 to-blue-500 text-white rounded-lg hover:from-purple-700 hover:to-blue-600 disabled:opacity-50 transition-all duration-200 shadow-lg"
               onClick={handleGenerateDraft}
               disabled={!requirements.trim() || isLoading}
             >
               {isLoading ? 'Generating...' : 'Generate Draft'}
             </button>
-            {error && <div className="text-red-400 mt-2">{error}</div>}
+            {error && <div className="text-red-400 mt-4">{error}</div>}
           </>
         )}
         {step === 'draft' && (
           <>
             <label className="block text-text-secondary mb-2">Draft Name</label>
             <input
-              className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-text-primary mb-4"
+              className="w-full bg-gray-800 border border-gray-700 rounded px-4 py-3 text-text-primary mb-6"
               value={draftName}
               onChange={e => setDraftName(e.target.value)}
               placeholder={`Untitled ${context === 'template' ? 'Template' : 'Document'}`}
             />
             <label className="block text-text-secondary mb-2">AI Draft</label>
             <textarea
-              className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-text-primary mb-4 min-h-[200px]"
+              className="w-full bg-gray-800 border border-gray-700 rounded px-4 py-3 text-text-primary mb-6 min-h-[300px]"
               value={draftContent}
               onChange={e => setDraftContent(e.target.value)}
             />
-            <div className="flex gap-2 mb-4">
+            <div className="flex gap-4 mb-6">
               <input
-                className="flex-1 bg-gray-800 border border-gray-700 rounded px-3 py-2 text-text-primary"
+                className="flex-1 bg-gray-800 border border-gray-700 rounded px-4 py-3 text-text-primary"
                 value={refinePrompt}
                 onChange={e => setRefinePrompt(e.target.value)}
                 placeholder="Refine or add instructions (optional)"
               />
               <button
-                className="px-4 py-2 bg-accent-500 text-white rounded hover:bg-accent-600 disabled:opacity-50"
+                className="px-6 py-3 bg-gradient-to-r from-purple-600 to-blue-500 text-white rounded-lg hover:from-purple-700 hover:to-blue-600 disabled:opacity-50 transition-all duration-200 shadow-lg"
                 onClick={handleRefineDraft}
                 disabled={!refinePrompt.trim() || isLoading}
               >
                 {isLoading ? 'Refining...' : 'Refine'}
               </button>
             </div>
-            <div className="flex gap-2 justify-end">
+            <div className="flex gap-4 justify-end">
               <button
-                className="px-4 py-2 bg-primary text-white rounded hover:bg-primary-hover"
+                className="px-6 py-3 bg-gradient-to-r from-purple-600 to-blue-500 text-white rounded-lg hover:from-purple-700 hover:to-blue-600 disabled:opacity-50 transition-all duration-200 shadow-lg"
                 onClick={handleSave}
                 disabled={!draftContent.trim() || isLoading}
               >
                 Save
               </button>
               <button
-                className="px-4 py-2 bg-gray-700 text-white rounded hover:bg-gray-600"
+                className="px-6 py-3 bg-gray-700 text-white rounded-lg hover:bg-gray-600 transition-all duration-200"
                 onClick={handleExport}
                 disabled={!draftContent.trim()}
               >
                 Export
               </button>
             </div>
-            {error && <div className="text-red-400 mt-2">{error}</div>}
+            {error && <div className="text-red-400 mt-4">{error}</div>}
           </>
         )}
       </div>
