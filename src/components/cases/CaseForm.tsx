@@ -11,6 +11,7 @@ const CaseForm: React.FC<CaseFormProps> = ({ isOpen, onClose, onCaseCreated }) =
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [loading, setLoading] = useState(false);
+  const [success, setSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -22,25 +23,51 @@ const CaseForm: React.FC<CaseFormProps> = ({ isOpen, onClose, onCaseCreated }) =
     }
     
     try {
+      console.log('Form submitted with name:', name);
       setLoading(true);
       setError(null);
       
-      const { error } = await createCase(name, description);
+      // Make sure to add a timeout to avoid UI hanging forever
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Case creation timed out after 15 seconds')), 15000);
+      });
       
-      if (error) {
-        throw error;
+      // Race against timeout
+      const result = await Promise.race([
+        createCase(name, description),
+        timeoutPromise
+      ]) as { data: any, error: any };
+      
+      // Check for result
+      if (result.error) {
+        console.error('Error received from createCase:', result.error);
+        throw result.error;
       }
       
+      console.log('Case created successfully:', result.data);
+      
+      // Set success state
+      setSuccess(true);
       setName('');
       setDescription('');
-      onClose();
-      if (onCaseCreated) {
-        onCaseCreated();
-      }
+      
+      // Even if there's an error with the onCaseCreated callback, we should still close the modal
+      setTimeout(() => {
+        try {
+          if (onCaseCreated) {
+            console.log('Calling onCaseCreated callback');
+            onCaseCreated();
+          }
+        } catch (callbackErr) {
+          console.error('Error in onCaseCreated callback:', callbackErr);
+        } finally {
+          onClose();
+        }
+      }, 1500);
     } catch (err) {
       console.error('Error creating case:', err);
-      setError('Failed to create case. Please try again.');
-    } finally {
+      const errorMessage = err instanceof Error ? err.message : 'Failed to create case. Please try again.';
+      setError(errorMessage);
       setLoading(false);
     }
   };
@@ -108,8 +135,10 @@ const CaseForm: React.FC<CaseFormProps> = ({ isOpen, onClose, onCaseCreated }) =
                     </button>
                     <button
                       type="submit"
-                      disabled={loading}
-                      className="bg-primary hover:bg-primary-hover text-white font-medium py-2 px-4 rounded-md transition flex items-center"
+                      disabled={loading || success}
+                      className={`font-medium py-2 px-4 rounded-md transition flex items-center ${success 
+                        ? 'bg-green-600 hover:bg-green-700 text-white' 
+                        : 'bg-primary hover:bg-primary-hover text-white'}`}
                     >
                       {loading ? (
                         <>
@@ -119,7 +148,14 @@ const CaseForm: React.FC<CaseFormProps> = ({ isOpen, onClose, onCaseCreated }) =
                           </svg>
                           Creating...
                         </>
-                      ) : 'Create Case'}
+                      ) : success ? (
+                        <>
+                          <svg className="-ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                            <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                          </svg>
+                          Created!
+                        </>
+                      ) : 'Create'}
                     </button>
                   </div>
                 </form>

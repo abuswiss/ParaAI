@@ -15,23 +15,47 @@ const Cases: React.FC = () => {
   const [isFormOpen, setIsFormOpen] = useState(false);
 
   const fetchCases = async () => {
-    if (!user) return;
+    if (!user) {
+      console.log('No user found, cannot fetch cases');
+      return;
+    }
     
+    console.log('Starting to fetch cases for user:', user.id);
     try {
       setLoading(true);
-      const { data, error } = await getUserCases();
+      
+      // Add a timeout to prevent infinite loading
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Fetch cases timeout after 10 seconds')), 10000);
+      });
+      
+      // Race the actual fetch against the timeout
+      const result = await Promise.race([
+        getUserCases(),
+        timeoutPromise
+      ]) as { data: any, error: any };
+      
+      const { data, error } = result;
       
       if (error) {
+        console.error('Supabase returned an error:', error);
         throw error;
       }
       
+      console.log('Received cases data:', data);
       if (data) {
         setCases(data);
+      } else {
+        console.log('No cases data returned, setting empty array');
+        setCases([]);
       }
     } catch (err) {
       console.error('Error fetching cases:', err);
+      // Even with error, set the cases to empty array to finish loading
+      setCases([]);
       setError('Failed to load cases. Please try again later.');
     } finally {
+      console.log('Finished fetching cases, setting loading to false');
       setLoading(false);
     }
   };

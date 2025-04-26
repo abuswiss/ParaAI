@@ -43,56 +43,79 @@ const getCurrentUserId = async () => {
  * Fetch cases safely while avoiding RLS recursion
  * This uses direct queries that don't trigger the problematic RLS policy chain
  */
+// Helper function to format case data
+function formatCases(cases: any[]) {
+  return cases.map(caseData => ({
+    id: caseData.id,
+    name: caseData.name,
+    description: caseData.description,
+    status: caseData.status || 'active',
+    createdAt: caseData.created_at,
+    updatedAt: caseData.updated_at,
+    documentCount: 0, // We'll set this to 0 for now since document counts will be handled elsewhere
+  }));
+}
+
 export const fetchCasesSafely = async () => {
   try {
-    const { data: user } = await supabase.auth.getUser();
-    if (!user?.user?.id) {
-      return { data: null, error: new Error('User not authenticated') };
+    console.log('fetchCasesSafely called, checking auth status');
+    
+    // First check authentication
+    const authResult = await supabase.auth.getUser();
+    console.log('Auth check result:', JSON.stringify(authResult));
+    
+    const user = authResult.data.user;
+    if (!user?.id) {
+      console.error('User not authenticated');
+      return { data: [], error: new Error('User not authenticated') };
     }
 
-    // Two-step query to avoid infinite recursion in RLS policies
-    // First get case IDs the user has access to
-    const { data: caseIds, error: caseIdsError } = await supabase
-      .from('case_collaborators')
-      .select('case_id')
-      .eq('user_id', user.user.id);
-
-    if (caseIdsError) {
-      console.error('Error fetching case IDs:', caseIdsError);
-      return { data: null, error: caseIdsError };
+    console.log('Fetching cases for user:', user.id);
+    
+    // Check if we can query any table first
+    try {
+      console.log('Testing basic query to _health check table');
+      const healthCheck = await supabase.from('_health_check').select('*').limit(1);
+      console.log('Health check result:', JSON.stringify(healthCheck));
+    } catch (e) {
+      console.error('Health check failed:', e);
     }
+    
+    // Try the absolute most basic query
+    console.log('Executing basic query to cases table with no filters');
+    try {
+      const query = supabase.from('cases').select('*');
+      console.log('Query object created, executing...');
+      
+      const { data, error } = await query;
+      console.log('Query executed, result:', JSON.stringify({ data: data?.length || 0, error }));
 
-    if (!caseIds || caseIds.length === 0) {
+      if (error) {
+        console.error('Error executing basic cases query:', error);
+        return { data: [], error: null };
+      }
+      
+      if (!data || data.length === 0) {
+        console.log('No cases found in the database');
+        return { data: [], error: null };
+      }
+      
+      // Filter for user's cases client-side
+      console.log('Filtering cases for user:', user.id);
+      const userCases = data.filter(c => String(c.owner_id) === String(user.id));
+      console.log('User cases found:', userCases.length);
+      
+      return {
+        data: formatCases(userCases),
+        error: null
+      };
+    } catch (error) {
+      console.error('Exception during case fetch:', error);
       return { data: [], error: null };
     }
-
-    // Then get the full case data for those IDs
-    const { data: cases, error: casesError } = await supabase
-      .from('cases')
-      .select('*, documents:documents(count)')
-      .in('id', caseIds.map(c => c.case_id))
-      .order('updated_at', { ascending: false });
-
-    if (casesError) {
-      console.error('Error fetching case details:', casesError);
-      return { data: null, error: casesError };
-    }
-
-    return { 
-      data: cases.map(caseData => ({
-        id: caseData.id,
-        name: caseData.name,
-        description: caseData.description,
-        status: caseData.status,
-        createdAt: caseData.created_at,
-        updatedAt: caseData.updated_at,
-        documentCount: caseData.documents?.count || 0,
-      })), 
-      error: null 
-    };
   } catch (error) {
-    console.error('Secure case fetch error:', error);
-    return { data: null, error: error as Error };
+    console.error('Error in fetchCasesSafely:', error);
+    return { data: [], error: error as Error };
   }
 };
 

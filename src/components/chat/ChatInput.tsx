@@ -108,26 +108,19 @@ const ChatInput: React.FC<ChatInputProps> = ({
   };
   
   const handleFiles = (files: File[]) => {
-    // In a real implementation, you would call your document upload service
-    // For now, we'll just mock the document upload process
-    const newMockDoc = {
-      id: `doc-${Date.now()}`,
-      filename: files[0].name,
-      fileType: files[0].type,
-      fileSize: files[0].size,
-      uploadedAt: new Date().toISOString(),
-      extractedText: `Sample extracted text from ${files[0].name}`
-    };
-    
-    // Set this as the active document
-    setActiveDocument(newMockDoc as any as Document);
-    
-    // Show a notification or feedback that the document was uploaded
-    console.log('Document uploaded:', newMockDoc.filename);
-    
-    // If parent component provided onFileUpload callback, call it
-    if (onFileUpload) {
-      onFileUpload(files);
+    // Pass files to parent component for proper processing
+    if (files.length > 0) {
+      console.log('Sending files to be processed:', files[0].name);
+      
+      // Clear any previously active document in this component
+      setActiveDocument(null);
+      setSelectedAnalysis(null);
+      setAvailableAnalyses([]);
+      
+      // If parent component provided onFileUpload callback, call it
+      if (onFileUpload) {
+        onFileUpload(files);
+      }
     }
   };
   

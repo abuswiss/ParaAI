@@ -3,6 +3,8 @@ import { sendMessageStream, getConversationMessages } from '../../services/chatS
 import { DocumentAnalysisResult } from '../../services/documentAnalysisService';
 import { motion } from 'framer-motion';
 import ReactMarkdown from 'react-markdown';
+import { supabase } from '../../lib/supabaseClient';
+import { v4 as uuidv4 } from 'uuid';
 
 // Import the separate components - only using ChatInput now since we're rendering messages directly
 import ChatInput from './ChatInput';
@@ -26,13 +28,16 @@ interface ChatInterfaceProps {
   conversationId?: string;
 }
 
-const ChatInterface: React.FC<ChatInterfaceProps> = ({ conversationId }) => {
+// Define component using function declaration instead of arrow function
+function ChatInterface({ conversationId }: ChatInterfaceProps) {
   // State management
   const [messages, setMessages] = useState<Message[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [activeContext, setActiveContext] = useState<string | null>(null);
   const [activeDocumentName, setActiveDocumentName] = useState<string | null>(null);
+  const [activeContext, setActiveContext] = useState<string | null>(null);
   const [activeAnalysis, setActiveAnalysis] = useState<DocumentAnalysisResult | null>(null);
+  const [isProcessingDocument, setIsProcessingDocument] = useState(false);
+  const [documentProcessingProgress, setDocumentProcessingProgress] = useState(0);
   const [isDraggingFile, setIsDraggingFile] = useState(false);
   const [isSendingMessage, setIsSendingMessage] = useState(false);
   const [isUIDisabled, setIsUIDisabled] = useState(false);
@@ -125,6 +130,11 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ conversationId }) => {
       return 'Unknown time';
     }
   };
+  
+  // Helper function to add a message to the chat
+  const addMessage = (message: Message) => {
+    setMessages(prevMessages => [...prevMessages, message]);
+  };
 
   // Loading messages that rotate while waiting for AI response
   const loadingMessages = [
@@ -147,11 +157,11 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ conversationId }) => {
       setIsUIDisabled(true);
       
       // Create a placeholder message ID for streaming updates
-      const placeholderId = crypto.randomUUID();
+      const placeholderId = uuidv4();
       
       // Pre-add user message to UI
       const userMessage: Message = {
-        id: crypto.randomUUID(),
+        id: uuidv4(),
         role: 'user',
         content: content,
         timestamp: new Date().toISOString()
@@ -380,10 +390,137 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ conversationId }) => {
   // Function to retry a previous message if needed
   // We'll keep this for future functionality but it's not used yet
 
-  // Handle file upload
+  // Handle file upload and processing
   const handleFiles = async (files: File[]) => {
-    console.log('Files received:', files);
-    // Implement file upload logic here
+    if (!files.length) return;
+    
+    try {
+      setIsProcessingDocument(true);
+      setDocumentProcessingProgress(10);
+      setError(null); // Clear any previous errors
+      console.log('Processing document:', files[0].name);
+      
+      // Import the document services
+      const { uploadDocument, processDocument, getDocumentById } = await import('../../services/documentService');
+      
+      // Get current user ID from Supabase
+      const { data: userData } = await supabase.auth.getUser();
+      const userId = userData?.user?.id;
+      
+      if (!userId) {
+        throw new Error('User not authenticated. Please sign in to upload documents.');
+      }
+
+      // Upload document first
+      setDocumentProcessingProgress(30);
+      console.log('Uploading document to storage...');
+      try {
+        const uploadResult = await uploadDocument(files[0], userId);
+        
+        // Store document info for processing
+        const docId = uploadResult.id;
+        // URL may be used later for direct access to the document
+        // const docUrl = uploadResult.url;
+        
+        console.log('Document uploaded successfully with ID:', docId);
+        
+        if (!docId) {
+          throw new Error("Failed to upload document: No document ID returned");
+        }
+      
+        // Now process it to extract text
+        setDocumentProcessingProgress(60);
+        console.log('Extracting text from document...');
+        const { error: processError } = await processDocument(docId);
+        
+        if (processError) {
+          console.error('Document processing error:', processError);
+          throw new Error(`Processing failed: ${processError.message || 'Could not extract text from document'}`); 
+        }
+        
+        // Fetch the document with extracted text
+        setDocumentProcessingProgress(90);
+        console.log('Fetching processed document...');
+        const { data: processedDoc, error: fetchError } = await getDocumentById(docId);
+      
+        if (fetchError) {
+          console.error('Error fetching processed document:', fetchError);
+          throw new Error(`Could not retrieve document: ${fetchError.message}`); 
+        }
+      
+        // Check if document was processed successfully
+        if (!processedDoc || !processedDoc.extractedText) {
+          console.warn('Document processed but no text was extracted');
+          // Continue with a fallback message
+          const fallbackContent = `Document '${files[0].name}' was uploaded, but text extraction was not successful. The AI will not have access to the document content.`;
+          
+          // Alert the user
+          setError(`Could not extract text from ${files[0].name}. The document might be scanned or contain text in images.`);
+          setDocumentProcessingProgress(0);
+
+          // Add a system message with the fallback
+          addMessage({
+            id: uuidv4(),
+            role: 'system',
+            content: fallbackContent,
+            timestamp: new Date().toISOString(),
+          });
+          
+          return; // Exit early
+        }
+
+        // Set the active document context for the chat
+        setActiveContext(processedDoc.extractedText);
+        setActiveDocumentName(processedDoc.filename);
+        
+        // Check if this is fallback content by looking for marker phrases in the text
+        const isFallback = 
+          processedDoc.extractedText.includes('[AI ASSISTANT NOTE:') ||
+          processedDoc.extractedText.includes('[PDF EXTRACTION FALLBACK]') ||
+          processedDoc.extractedText.includes('[DOCX EXTRACTION FALLBACK]') ||
+          // Also check in the database record if this exists
+          (processedDoc as any).is_fallback_content === true;
+        
+        if (isFallback) {
+          console.warn("Using fallback content for document:", processedDoc.filename);
+          // Show a message but don't throw an error since we still have usable content
+          setError("Note: Using AI-generated document summary. The original document could not be accessed.");
+        } else {
+          console.log("Document processed successfully:", processedDoc.filename);
+        }
+      
+        // Success! Add the document to the context
+        setDocumentProcessingProgress(100);
+        
+        // Display to the user
+        addMessage({
+          id: uuidv4(),
+          role: 'system',
+          content: `Document '${files[0].name}' has been uploaded and processed successfully.`,
+          timestamp: new Date().toISOString(),
+          documentContext: processedDoc.extractedText
+        });
+        
+        // Reduce the progress back to zero
+        setTimeout(() => {
+          setDocumentProcessingProgress(0);
+        }, 1000);
+      } catch (innerError) {
+        // Handle inner-specific errors here if needed
+        console.error('Error in document processing step:', innerError);
+        throw innerError; // Re-throw to be caught by the outer catch
+      }
+    } catch (error) {
+      console.error('Error processing document:', error);
+      setError(`Error processing document: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      setDocumentProcessingProgress(0);
+    } finally {
+      // Reset progress after a delay to show completion
+      setTimeout(() => {
+        setIsProcessingDocument(false);
+        setDocumentProcessingProgress(0);
+      }, 1500);
+    }
   };
 
   // Show welcome state ONLY for new conversations with no messages
@@ -443,13 +580,53 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ conversationId }) => {
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
+      {/* Document processing indicator */}
+      {isProcessingDocument && (
+        <div className="px-4 py-2 bg-gray-800 flex items-center space-x-3 text-sm border-b border-gray-700 text-text-secondary">
+          <div className="w-5 h-5 relative">
+            <div className="absolute inset-0 rounded-full border-2 border-primary border-t-transparent animate-spin"></div>
+          </div>
+          <div className="flex-1">
+            <div className="flex justify-between items-center mb-1">
+              <span>Processing document...</span>
+              <span className="text-xs">{documentProcessingProgress}%</span>
+            </div>
+            <div className="h-1 bg-gray-700 rounded-full overflow-hidden">
+              <div 
+                className="h-full bg-primary transition-all duration-300 ease-out rounded-full" 
+                style={{ width: `${documentProcessingProgress}%` }}
+              ></div>
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {/* Error message display */}
+      {error && (
+        <div className="px-4 py-2 bg-gray-800 flex items-center space-x-2 text-sm border-b border-gray-700">
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-red-400" viewBox="0 0 20 20" fill="currentColor">
+            <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+          </svg>
+          <span>{error}</span>
+          <button 
+            onClick={() => setError(null)}
+            className="ml-auto text-gray-400 hover:text-white"
+            aria-label="Dismiss error"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+            </svg>
+          </button>
+        </div>
+      )}
+
       {/* Document context indicator */}
-      {activeContext && activeDocumentName && (
+      {activeContext && activeDocumentName && !isProcessingDocument && (
         <div className="px-4 py-2 bg-gray-800 flex items-center space-x-2 text-sm border-b border-gray-700">
           <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-primary" viewBox="0 0 20 20" fill="currentColor">
             <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clipRule="evenodd" />
           </svg>
-          <span>Context: {activeDocumentName}</span>
+          <span>Using document context: {activeDocumentName}</span>
           <button 
             onClick={() => { setActiveContext(null); setActiveDocumentName(null); }}
             className="ml-auto text-gray-400 hover:text-white"
