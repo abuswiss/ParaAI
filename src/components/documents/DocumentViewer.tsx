@@ -312,7 +312,7 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ documentId, onClose }) 
           <div className="flex items-center gap-2 self-end sm:self-auto">
             <button
               onClick={() => setShowAnalyzer(!showAnalyzer)}
-              className="text-sm bg-gray-700 hover:bg-gray-600 text-white py-1 px-2 rounded-md flex items-center"
+              className="text-sm bg-gradient-to-r from-purple-600 to-blue-500 text-white py-2 px-4 rounded-lg flex items-center shadow-lg hover:from-purple-700 hover:to-blue-600 transition-all duration-200"
               title="AI Analysis"
             >
               <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" viewBox="0 0 20 20" fill="currentColor">
