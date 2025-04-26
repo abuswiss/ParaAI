@@ -1,5 +1,6 @@
 import React, { useState, KeyboardEvent, useRef, useEffect, DragEvent } from 'react';
 import { Document } from '../../types/document';
+import { getUserDocuments } from '../../services/documentService';
 import { DocumentAnalysisResult, getDocumentAnalyses } from '../../services/documentAnalysisService';
 import { AnimatePresence, motion } from 'framer-motion';
 
@@ -11,15 +12,7 @@ interface ChatInputProps {
   messagesCount?: number;
 }
 
-// Define a type for the mock document used in the picker
-interface MockDoc {
-  id: string;
-  filename: string;
-  fileType: string;
-  fileSize: number;
-  uploadedAt: string;
-  extractedText?: string;
-}
+// We'll use the Document type from the document service
 
 const ChatInput: React.FC<ChatInputProps> = ({ 
   onSendMessage, 
@@ -29,7 +22,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
   messagesCount = 0
 }) => {
   const [message, setMessage] = useState('');
-  const [isExpanded, setIsExpanded] = useState(false);
+
   const [activeDocument, setActiveDocument] = useState<Document | null>(null);
   const [showDocumentPicker, setShowDocumentPicker] = useState(false);
   const [showAnalysisPicker, setShowAnalysisPicker] = useState(false);
@@ -37,6 +30,9 @@ const ChatInput: React.FC<ChatInputProps> = ({
   const [selectedAnalysis, setSelectedAnalysis] = useState<DocumentAnalysisResult | null>(null);
   const [loadingAnalyses, setLoadingAnalyses] = useState(false);
   const [isDraggingFile, setIsDraggingFile] = useState(false);
+  const [userDocuments, setUserDocuments] = useState<Document[]>([]);
+  const [loadingDocuments, setLoadingDocuments] = useState(false);
+  const [documentContextWarning, setDocumentContextWarning] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const documentPickerRef = useRef<HTMLDivElement>(null);
   const analysisPickerRef = useRef<HTMLDivElement>(null);
@@ -61,9 +57,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
     }
   };
 
-  const toggleExpand = () => {
-    setIsExpanded(!isExpanded);
-  };
+
 
   // File upload handling functions
   const handleFileButtonClick = () => {
@@ -124,8 +118,44 @@ const ChatInput: React.FC<ChatInputProps> = ({
     }
   };
   
-  // We now use direct file selection instead of a document picker
-  // Keeping the showDocumentPicker state for backward compatibility
+  // Toggle document picker to select from existing documents
+  const toggleDocumentPicker = () => {
+    if (!showDocumentPicker) {
+      // Load documents when opening the picker
+      fetchUserDocuments();
+    }
+    
+    setShowDocumentPicker(!showDocumentPicker);
+    if (showAnalysisPicker) setShowAnalysisPicker(false);
+  };
+  
+  // Fetch user documents from the backend
+  const fetchUserDocuments = async () => {
+    try {
+      setLoadingDocuments(true);
+      const { data, error } = await getUserDocuments();
+      
+      if (error) throw error;
+      
+      // Make sure we get complete documents with extracted text
+      const documentsWithText = data?.map(doc => {
+        // If document doesn't have extracted text, add a placeholder
+        if (!doc.extractedText) {
+          return {
+            ...doc,
+            extractedText: ''
+          };
+        }
+        return doc;
+      }) || [];
+      
+      setUserDocuments(documentsWithText);
+    } catch (err) {
+      console.error('Error fetching documents:', err);
+    } finally {
+      setLoadingDocuments(false);
+    }
+  }
 
   const toggleAnalysisPicker = () => {
     if (!activeDocument) return;
@@ -165,24 +195,33 @@ const ChatInput: React.FC<ChatInputProps> = ({
     };
   }, []);
 
-  // Simulate selecting a document for context - in a real implementation,
-  // this would be wired up to a document selector component
-  const selectDocumentForContext = (doc: MockDoc) => {
-    // Convert the mock document to match the Document type
-    const document: Document = {
-      id: doc.id,
-      filename: doc.filename,
-      contentType: doc.fileType === 'pdf' ? 'application/pdf' : 'application/octet-stream',
-      size: doc.fileSize,
-      uploadedAt: doc.uploadedAt,
-      processingStatus: 'completed',
-      storagePath: `/documents/${doc.id}`,
-      extractedText: doc.extractedText
-    };
-    
-    setActiveDocument(document);
-    setSelectedAnalysis(null);
-    setShowDocumentPicker(false);
+  // Select a document from the user's existing documents to use as context
+  const selectDocumentForContext = (doc: Document) => {
+    try {
+      // Set loading state
+      setLoadingDocuments(true);
+      
+      // Set the document as active
+      setActiveDocument(doc);
+      
+      // Check if document has extracted text
+      if (doc.extractedText) {
+        setDocumentContextWarning(null);
+        // If document has extracted text, load available analyses
+        if (doc.id) {
+          loadDocumentAnalyses(doc.id);
+        }
+      } else {
+        console.warn('Document has no extracted text content');
+        setDocumentContextWarning('This document has no extracted text content. The AI may not be able to reference it properly.');
+      }
+    } catch (err) {
+      console.error('Error setting document context:', err);
+    } finally {
+      setLoadingDocuments(false);
+      setSelectedAnalysis(null);
+      setShowDocumentPicker(false);
+    }
   };
   
   // Load analyses for a document from the service
@@ -213,6 +252,53 @@ const ChatInput: React.FC<ChatInputProps> = ({
       textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
     }
   }, [message]);
+  
+  // Load document from localStorage when component mounts
+  useEffect(() => {
+    // Check for document in localStorage that was set by the DocumentViewer
+    const storedDocumentJson = localStorage.getItem('activeDocumentForChat');
+    if (storedDocumentJson) {
+      try {
+        const storedDocData = JSON.parse(storedDocumentJson);
+        
+        // Check if the document is recent (within the last 10 minutes)
+        const docTimestamp = new Date(storedDocData.timestamp).getTime();
+        const now = new Date().getTime();
+        const tenMinutesMs = 10 * 60 * 1000;
+        
+        if (now - docTimestamp < tenMinutesMs) {
+          // Create a Document object for the stored data
+          const document: Document = {
+            id: storedDocData.id,
+            filename: storedDocData.filename,
+            contentType: 'application/pdf', // Assume PDF as a default
+            size: 0, // Size is not critical here, we already have the text
+            uploadedAt: storedDocData.timestamp,
+            processingStatus: 'completed',
+            storagePath: `/documents/${storedDocData.id}`,
+            extractedText: storedDocData.extractedText
+          };
+          
+          // Set the document as active
+          setActiveDocument(document);
+          
+          // Clear from localStorage to prevent it being used again on refresh
+          localStorage.removeItem('activeDocumentForChat');
+          
+          // If we have a document with text, check for analyses
+          if (document.id && document.extractedText) {
+            loadDocumentAnalyses(document.id);
+          }
+        } else {
+          // Document is too old, remove it
+          localStorage.removeItem('activeDocumentForChat');
+        }
+      } catch (error) {
+        console.error('Error loading document from localStorage:', error);
+        localStorage.removeItem('activeDocumentForChat');
+      }
+    }
+  }, []);
 
   // Determine if the input should be centered (for new chats) or at the bottom (for active chats)
   const isCentered = isNewChat || messagesCount === 0;
@@ -256,9 +342,14 @@ const ChatInput: React.FC<ChatInputProps> = ({
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-primary mr-2" viewBox="0 0 20 20" fill="currentColor">
                   <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clipRule="evenodd" />
                 </svg>
-                <span className="text-sm text-text-primary truncate max-w-[220px]">
-                  <span className="text-gray-400">Using document context:</span> {activeDocument.filename}
-                </span>
+                <div className="flex flex-col">
+                  <span className="text-sm text-text-primary truncate max-w-[220px]">
+                    <span className="text-gray-400">Using document:</span> {activeDocument.filename}
+                  </span>
+                  {documentContextWarning && (
+                    <span className="text-xs text-yellow-500">{documentContextWarning}</span>
+                  )}
+                </div>
               </div>
               <button
                 onClick={clearDocument}
@@ -305,7 +396,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
           )}
         </AnimatePresence>
 
-        {/* Document picker (only shown when toggled) */}
+          {/* Document picker (only shown when toggled) */}
         <AnimatePresence>
           {showDocumentPicker && (
             <motion.div 
@@ -316,34 +407,42 @@ const ChatInput: React.FC<ChatInputProps> = ({
               exit={{ opacity: 0, y: 10, scale: 0.95 }}
               transition={{ duration: 0.2 }}
             >
-              <div className="text-sm text-gray-400 mb-2 p-2">Select a document for context</div>
+              <div className="flex justify-between items-center text-sm text-gray-400 mb-2 p-2">
+                <span>Select a document for context</span>
+                {loadingDocuments && (
+                  <motion.div 
+                    className="h-4 w-4 border-2 border-gray-400 border-t-primary rounded-full"
+                    animate={{ rotate: 360 }}
+                    transition={{ repeat: Infinity, duration: 1, ease: 'linear' }}
+                  />
+                )}
+              </div>
               <div className="max-h-60 overflow-y-auto">
-                {/* This would typically map over actual documents */}
-                {[1, 2, 3].map((num) => {
-                  const mockDoc: MockDoc = {
-                    id: `doc-${num}`,
-                    filename: `Example Document ${num}.pdf`,
-                    fileType: 'pdf',
-                    fileSize: 1024 * 1024 * num,
-                    uploadedAt: new Date().toISOString(),
-                    extractedText: `This is extracted text for document ${num}. It would contain the actual content of the document that will be used as context for the AI.`
-                  };
-                  
-                  return (
+                {userDocuments.length === 0 ? (
+                  <div className="p-4 text-center text-sm text-gray-500">
+                    {loadingDocuments 
+                      ? 'Loading documents...' 
+                      : 'No documents found. Upload a document first.'}
+                  </div>
+                ) : (
+                  userDocuments.map((doc) => (
                     <div
-                      key={mockDoc.id}
+                      key={doc.id}
                       className="p-2 hover:bg-gray-700 rounded cursor-pointer"
-                      onClick={() => selectDocumentForContext(mockDoc)}
+                      onClick={() => selectDocumentForContext(doc)}
                     >
                       <div className="flex items-center">
                         <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-primary mr-2" viewBox="0 0 20 20" fill="currentColor">
                           <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clipRule="evenodd" />
                         </svg>
-                        <div className="text-text-primary truncate">{mockDoc.filename}</div>
+                        <div className="flex-1">
+                          <div className="text-white truncate">{doc.filename}</div>
+                          <div className="text-xs text-gray-400">{new Date(doc.uploadedAt).toLocaleDateString()}</div>
+                        </div>
                       </div>
                     </div>
-                  );
-                })}
+                  ))
+                )}
               </div>
             </motion.div>
           )}
@@ -367,32 +466,15 @@ const ChatInput: React.FC<ChatInputProps> = ({
             onChange={(e) => setMessage(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder={isCentered ? "Ask me anything about legal documents..." : "Type your message..."}
-            rows={isExpanded ? 5 : 1}
+            rows={1}
             className="w-full bg-transparent text-text-primary px-3 py-3 pr-12 pb-14 resize-none focus:outline-none rounded-lg transition-all duration-200"
             disabled={disabled}
-            style={{ minHeight: isExpanded ? '120px' : '50px' }}
+            style={{ minHeight: '50px' }}
           />
           
           {/* Action buttons container with improved visuals */}
           <div className="absolute bottom-2 left-2 flex items-center p-1 bg-gray-800 rounded-lg space-x-2">
-            {/* Expand/collapse button */}
-            <button
-              className="p-2 rounded-md bg-gray-700 text-gray-300 hover:text-primary hover:bg-gray-600 transition-colors"
-              onClick={toggleExpand}
-              type="button"
-              aria-label={isExpanded ? "Collapse input" : "Expand input"}
-              title={isExpanded ? "Collapse input" : "Expand input"}
-            >
-              {isExpanded ? (
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                  <path fillRule="evenodd" d="M14.707 12.707a1 1 0 01-1.414 0L10 9.414l-3.293 3.293a1 1 0 01-1.414-1.414l4-4a1 1 0 011.414 0l4 4a1 1 0 010 1.414z" clipRule="evenodd" />
-                </svg>
-              ) : (
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                  <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
-                </svg>
-              )}
-            </button>
+
 
             {/* Upload document button */}
             <button
@@ -405,6 +487,20 @@ const ChatInput: React.FC<ChatInputProps> = ({
             >
               <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
                 <path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd" />
+              </svg>
+            </button>
+            
+            {/* Select existing document button */}
+            <button
+              className="p-2 rounded-md bg-gray-700 text-gray-300 hover:text-primary hover:bg-gray-600 transition-colors"
+              onClick={toggleDocumentPicker}
+              type="button"
+              disabled={disabled}
+              aria-label="Select document"
+              title="Select existing document"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clipRule="evenodd" />
               </svg>
             </button>
             

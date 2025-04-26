@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { getDocumentById, getDocumentUrl, processDocument } from '../../services/documentService';
 import { Document as DocumentType } from '../../types/document';
 import DocumentAnalyzer from './DocumentAnalyzer';
+import { useNavigate } from 'react-router-dom';
 
 interface DocumentViewerProps {
   documentId: string;
@@ -9,6 +10,7 @@ interface DocumentViewerProps {
 }
 
 const DocumentViewer: React.FC<DocumentViewerProps> = ({ documentId, onClose }) => {
+  const navigate = useNavigate();
   const [document, setDocument] = useState<DocumentType | null>(null);
   const [documentUrl, setDocumentUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -255,39 +257,76 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ documentId, onClose }) 
     );
   }
 
-  // Render document analyzer if it's active
+  // Render document analyzer in a more compact overlay
   if (showAnalyzer && document) {
-    return <DocumentAnalyzer document={document} onClose={() => setShowAnalyzer(false)} />;
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-75 flex items-start sm:items-center justify-center z-50 p-4 overflow-y-auto">
+        <div className="bg-background rounded-lg shadow-lg w-full max-w-4xl max-h-[90vh] flex flex-col my-8 sm:my-0">
+          <div className="sticky top-0 p-3 border-b border-gray-800 flex justify-between items-center bg-gray-900 rounded-t-lg">
+            <h2 className="text-lg font-medium text-text-primary">Document Analysis</h2>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => {
+                  // This would be connected to a state that minimizes the analyzer
+                  // For now just a visual element
+                }}
+                className="text-gray-400 hover:text-text-primary p-1 rounded hover:bg-gray-800"
+                title="Minimize"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M5 10a1 1 0 011-1h8a1 1 0 110 2H6a1 1 0 01-1-1z" clipRule="evenodd" />
+                </svg>
+              </button>
+              <button 
+                onClick={() => setShowAnalyzer(false)}
+                className="text-gray-400 hover:text-text-primary p-1 rounded hover:bg-gray-800"
+                title="Close"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+                </svg>
+              </button>
+            </div>
+          </div>
+          <div className="flex-1 overflow-auto p-4">
+            <DocumentAnalyzer document={document} onClose={() => setShowAnalyzer(false)} />
+          </div>
+        </div>
+      </div>
+    );
   }
   
   // Main document viewer UI
   return (
     <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
       <div className="bg-gray-900 rounded-lg p-6 max-w-4xl w-full mx-4 max-h-[90vh] overflow-hidden flex flex-col">
-        {/* Header with document title and actions */}
-        <div className="flex justify-between items-center mb-4">
-          <h2 className="text-xl font-semibold text-text-primary truncate">{document.filename}</h2>
-          <div className="flex items-center space-x-2">
-            {document.extractedText && (
-              <button
-                onClick={() => setShowAnalyzer(true)}
-                className="text-primary hover:text-primary-hover p-1"
-                aria-label="Analyze document"
-                title="Analyze document"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" viewBox="0 0 20 20" fill="currentColor">
-                  <path d="M9 9a2 2 0 114 0 2 2 0 01-4 0z" />
-                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-13a4 4 0 00-3.446 6.032l-2.261 2.26a1 1 0 101.414 1.415l2.261-2.261A4 4 0 1011 5z" clipRule="evenodd" />
-                </svg>
-              </button>
-            )}
+        {/* Compact header with close button, document info and expandable options */}
+        <div className="bg-background border-b border-gray-800 p-3 md:p-4 relative flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+          <div className="flex-grow overflow-hidden">
+            <h2 className="text-lg font-medium text-text-primary truncate">{document?.filename}</h2>
+            <p className="text-xs text-text-secondary">
+              {document?.contentType} • {document?.size && typeof document.size === 'number' ? 
+                `${Math.round(document.size / 1024)} KB` : 'Unknown size'}
+            </p>
+          </div>
+          <div className="flex items-center gap-2 self-end sm:self-auto">
+            <button
+              onClick={() => setShowAnalyzer(!showAnalyzer)}
+              className="text-sm bg-gray-700 hover:bg-gray-600 text-white py-1 px-2 rounded-md flex items-center"
+              title="AI Analysis"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+              </svg>
+              AI Analysis
+            </button>
             {onClose && (
-              <button
+              <button 
                 onClick={onClose}
-                className="text-gray-400 hover:text-text-primary"
-                aria-label="Close"
+                className="text-gray-400 hover:text-text-primary transition p-1 rounded-md hover:bg-gray-800"
+                title="Close"
               >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                 </svg>
               </button>
@@ -296,56 +335,134 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ documentId, onClose }) 
         </div>
         
         {/* View mode selector */}
-        <div className="flex mb-4 border-b border-gray-700">
-          <button
-            className={`px-4 py-2 ${viewMode === 'preview' ? 'text-primary border-b-2 border-primary' : 'text-text-secondary'}`}
-            onClick={() => setViewMode('preview')}
-          >
-            Preview
-          </button>
-          <button
-            className={`px-4 py-2 ${viewMode === 'text' ? 'text-primary border-b-2 border-primary' : 'text-text-secondary'}`}
-            onClick={() => setViewMode('text')}
-          >
-            Extracted Text
-          </button>
+        <div className="flex py-2 px-3 md:px-4 border-b border-gray-700 overflow-x-auto bg-gray-900 justify-between items-center">
+          <div className="flex">
+            <button
+              className={`px-3 py-1.5 text-sm font-medium ${viewMode === 'preview' ? 'text-primary border-b-2 border-primary' : 'text-text-secondary hover:text-text-primary'}`}
+              onClick={() => setViewMode('preview')}
+            >
+              Preview
+            </button>
+            <button
+              className={`px-3 py-1.5 text-sm font-medium ${viewMode === 'text' ? 'text-primary border-b-2 border-primary' : 'text-text-secondary hover:text-text-primary'}`}
+              onClick={() => setViewMode('text')}
+            >
+              Extracted Text
+            </button>
+          </div>
+          <div className="flex items-center text-text-secondary text-sm">
+            <span className="hidden sm:inline">Uploaded: </span>
+            <span className="text-xs">{document?.uploadedAt ? new Date(document.uploadedAt).toLocaleDateString() : 'Unknown'}</span>
+          </div>
         </div>
 
-        {/* Document content area */}
-        <div className="flex-1 overflow-auto">
-          {viewMode === 'preview' ? renderFilePreview() : renderTextContent()}
-        </div>
-
-        {/* Footer with metadata and actions */}
-        <div className="mt-4 flex justify-between items-center">
-          <div className="text-sm text-gray-400">
-            Uploaded: {new Date(document.uploadedAt).toLocaleString()}
+        {/* Document content area with resize handles */}
+        <div className="flex-1 overflow-auto relative">
+          {/* Document content */}
+          <div className="h-full overflow-auto p-1 md:p-3">
+            {viewMode === 'preview' ? renderFilePreview() : renderTextContent()}
           </div>
           
-          <div className="flex space-x-2">
+          {/* Resize handles (visual indicators only) */}
+          <div className="absolute bottom-3 right-3 text-gray-500 cursor-nwse-resize opacity-50 hover:opacity-100 transition-opacity">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+            </svg>
+          </div>
+        </div>
+
+        {/* Footer with actions - more compact and responsive */}
+        <div className="p-3 border-t border-gray-800 flex flex-col sm:flex-row gap-2 sm:justify-between sm:items-center bg-gray-900">
+          {/* Mobile view: Stacked buttons */}
+          <div className="flex justify-between sm:hidden w-full">
+            <div className="flex gap-1">
+              {documentUrl && (
+                <a
+                  href={documentUrl}
+                  download={document.filename}
+                  className="bg-gray-700 hover:bg-gray-600 text-white text-xs font-medium py-1.5 px-2 rounded transition flex items-center"
+                  title="Download Document"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clipRule="evenodd" />
+                  </svg>
+                  <span className="ml-1">Download</span>
+                </a>
+              )}
+            </div>
+            <button
+              onClick={() => {
+                // Add document to conversation context
+                if (document) {
+                  // Store the document in localStorage to be used in the chat
+                  localStorage.setItem('activeDocumentForChat', JSON.stringify({
+                    id: document.id,
+                    filename: document.filename,
+                    extractedText: document.extractedText,
+                    timestamp: new Date().toISOString()
+                  }));
+
+                  // Navigate to chat page
+                  navigate('/chat');
+                }
+              }}
+              className="bg-primary hover:bg-primary-dark text-white text-xs font-medium py-1.5 px-2 rounded transition flex items-center"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 mr-1" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M18 5v8a2 2 0 01-2 2h-5l-5 4v-4H4a2 2 0 01-2-2V5a2 2 0 012-2h12a2 2 0 012 2zM7 8H5v2h2V8zm2 0h2v2H9V8zm6 0h-2v2h2V8z" clipRule="evenodd" />
+              </svg>
+              <span className="ml-1">Use in Chat</span>
+            </button>
+          </div>
+          
+          {/* Desktop view: Horizontal layout */}
+          <div className="hidden sm:flex items-center gap-4">
+            <div className="text-xs text-gray-400 flex items-center">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 mr-1" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zm0 5a1 1 0 000 2h8a1 1 0 100-2H6z" clipRule="evenodd" />
+              </svg>
+              {new Date(document.uploadedAt).toLocaleDateString()}
+            </div>
+            <div className="text-xs text-gray-400">
+              {document.processingStatus === 'completed' ? 'Processing completed' : 
+               document.processingStatus === 'processing' ? 'Processing in progress' : 
+               document.processingStatus === 'pending' ? 'Processing pending' : 'Processing failed'}
+            </div>
+          </div>
+          
+          <div className="hidden sm:flex gap-2">
             {documentUrl && (
               <a
                 href={documentUrl}
                 download={document.filename}
-                className="bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium py-1.5 px-3 rounded-md transition flex items-center"
+                className="bg-gray-700 hover:bg-gray-600 text-white text-xs font-medium py-1.5 px-2 rounded transition flex items-center"
               >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" viewBox="0 0 20 20" fill="currentColor">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 mr-1" viewBox="0 0 20 20" fill="currentColor">
                   <path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clipRule="evenodd" />
                 </svg>
                 Download
               </a>
             )}
-            
             <button
               onClick={() => {
                 // Add document to conversation context
-                if (onClose) onClose();
+                if (document) {
+                  // Store the document in localStorage to be used in the chat
+                  localStorage.setItem('activeDocumentForChat', JSON.stringify({
+                    id: document.id,
+                    filename: document.filename,
+                    extractedText: document.extractedText,
+                    timestamp: new Date().toISOString()
+                  }));
+
+                  // Navigate to chat page
+                  navigate('/chat');
+                }
               }}
-              className="bg-primary hover:bg-primary-hover text-white text-sm font-medium py-1.5 px-3 rounded-md transition flex items-center"
+              className="bg-primary hover:bg-primary-dark text-white text-xs font-medium py-1.5 px-2 rounded transition flex items-center"
             >
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" viewBox="0 0 20 20" fill="currentColor">
-                <path d="M2 5a2 2 0 012-2h7a2 2 0 012 2v4a2 2 0 01-2 2H9l-3 3v-3H4a2 2 0 01-2-2V5z" />
-                <path d="M15 7v2a4 4 0 01-4 4H9.828l-1.766 1.767c.28.149.599.233.938.233h2l3 3v-3h2a2 2 0 002-2V9a2 2 0 00-2-2h-1z" />
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 mr-1" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M18 5v8a2 2 0 01-2 2h-5l-5 4v-4H4a2 2 0 01-2-2V5a2 2 0 012-2h12a2 2 0 012 2zM7 8H5v2h2V8zm2 0h2v2H9V8zm6 0h-2v2h2V8z" clipRule="evenodd" />
               </svg>
               Use in Chat
             </button>

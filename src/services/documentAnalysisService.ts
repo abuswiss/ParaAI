@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabaseClient';
+import { OPENAI_CONFIG } from '../config/apiConfig';
 
 // Maximum length for text chunks to avoid token limitations in AI analysis
 const MAX_CHUNK_SIZE = 4000;
@@ -270,14 +271,14 @@ export const analyzeDocument = async (
     // For other analysis types or if multi-chunk processing failed, just use the first chunk
     
     // Call OpenAI
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    const response = await fetch(`${OPENAI_CONFIG.baseUrl}/chat/completions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`
+        'Authorization': `Bearer ${OPENAI_CONFIG.apiKey}`
       },
       body: JSON.stringify({
-        model: 'gpt-4-turbo',
+        model: OPENAI_CONFIG.model,
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: prompt }

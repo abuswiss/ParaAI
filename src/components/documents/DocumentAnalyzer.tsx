@@ -5,6 +5,7 @@ import TimelineView, { TimelineEvent } from '../timeline/TimelineView';
 // Tooltip component is imported but used directly in JSX rather than as a React component
 import { RiskAssessment } from './RiskAssessment';
 import { DocumentMinimap } from './DocumentMinimap';
+import ReactMarkdown from 'react-markdown';
 
 interface AnalysisTab {
   id: 'summary' | 'entities' | 'clauses' | 'risks' | 'timeline' | 'custom';
@@ -161,6 +162,108 @@ const DocumentAnalyzer: React.FC<DocumentAnalyzerProps> = ({ document, onClose }
     }
   }, [activeTab, document, analysisResults, runAnalysis]);
 
+  useEffect(() => {
+    if (typeof document === 'undefined' || typeof document.createElement !== 'function') return;
+    // Add CSS styles for markdown rendering (copied from ChatInterface)
+    const styleEl = document.createElement('style');
+    styleEl.innerHTML = `
+      .markdown-content {
+        font-size: 0.875rem;
+        line-height: 1.5;
+      }
+      .markdown-content p {
+        margin-bottom: 1em;
+      }
+      .markdown-content h1, 
+      .markdown-content h2, 
+      .markdown-content h3, 
+      .markdown-content h4 {
+        font-weight: bold;
+        margin-top: 1.5em;
+        margin-bottom: 0.5em;
+        line-height: 1.2;
+      }
+      .markdown-content h1 {
+        font-size: 1.5rem;
+      }
+      .markdown-content h2 {
+        font-size: 1.25rem;
+      }
+      .markdown-content h3 {
+        font-size: 1.125rem;
+      }
+      .markdown-content ul {
+        list-style-type: disc;
+        padding-left: 1.5em;
+        margin-bottom: 1em;
+      }
+      .markdown-content ol {
+        list-style-type: decimal;
+        padding-left: 1.5em;
+        margin-bottom: 1em;
+      }
+      .markdown-content li {
+        margin-bottom: 0.25em;
+      }
+      .markdown-content pre {
+        background-color: rgba(30, 30, 30, 0.7);
+        border-radius: 4px;
+        padding: 0.75em;
+        margin: 1em 0;
+        overflow-x: auto;
+      }
+      .markdown-content code {
+        font-family: monospace;
+        background-color: rgba(30, 30, 30, 0.7);
+        padding: 0.2em 0.4em;
+        border-radius: 3px;
+        font-size: 0.85em;
+      }
+      .markdown-content pre code {
+        background-color: transparent;
+        padding: 0;
+      }
+      .markdown-content blockquote {
+        border-left: 3px solid rgba(200, 200, 200, 0.5);
+        padding-left: 1em;
+        margin: 1em 0;
+        font-style: italic;
+        color: rgba(255, 255, 255, 0.8);
+      }
+      .markdown-content a {
+        color: #F2A494;
+        text-decoration: underline;
+      }
+      .markdown-content strong {
+        font-weight: bold;
+      }
+      .markdown-content em {
+        font-style: italic;
+      }
+      .markdown-content table {
+        border-collapse: collapse;
+        width: 100%;
+        margin: 1em 0;
+      }
+      .markdown-content th,
+      .markdown-content td {
+        border: 1px solid rgba(200, 200, 200, 0.2);
+        padding: 0.5em;
+        text-align: left;
+      }
+      .markdown-content th {
+        background-color: rgba(30, 30, 30, 0.5);
+      }
+      .markdown-content hr {
+        border: 0;
+        border-top: 1px solid rgba(200, 200, 200, 0.2);
+        margin: 1.5em 0;
+      }
+    `;
+    document.head.appendChild(styleEl);
+    return () => { document.head.removeChild(styleEl); };
+  }, []);
+
   const handleCustomAnalysis = () => {
     if (customPrompt.trim()) {
       runAnalysis('custom');
@@ -200,12 +303,18 @@ const DocumentAnalyzer: React.FC<DocumentAnalyzerProps> = ({ document, onClose }
     if (loading) {
       return (
         <div className="flex flex-col items-center justify-center p-8">
-          <div className="flex space-x-2 mb-4">
-            <div className="w-3 h-3 bg-primary rounded-full animate-bounce"></div>
-            <div className="w-3 h-3 bg-primary rounded-full animate-bounce delay-150"></div>
-            <div className="w-3 h-3 bg-primary rounded-full animate-bounce delay-300"></div>
+          <div className="flex flex-col items-center mb-4">
+            {/* Rotating theme color square loader */}
+            <div
+              className="h-12 w-12 rounded-md bg-primary shadow-lg animate-rotate-square"
+              style={{ boxShadow: '0 0 24px 4px var(--color-primary, #f2a494)' }}
+            ></div>
+            <style>{`
+              @keyframes rotate-square { 100% { transform: rotate(360deg); } }
+              .animate-rotate-square { animation: rotate-square 1.2s linear infinite; }
+            `}</style>
           </div>
-          <p className="text-text-primary">Analyzing document...</p>
+          <p className="text-text-primary text-lg font-medium mt-2 animate-pulse">Analyzing your document with AI...</p>
         </div>
       );
     }
@@ -266,7 +375,9 @@ const DocumentAnalyzer: React.FC<DocumentAnalyzerProps> = ({ document, onClose }
           <div className="prose prose-invert max-w-none">
             <h3 className="text-xl font-medium mb-4">Document Summary</h3>
             <div className="bg-gray-700 rounded-lg p-5">
-              <div className="whitespace-pre-wrap">{result.result}</div>
+              <div className="markdown-content">
+                <ReactMarkdown>{result.result}</ReactMarkdown>
+              </div>
             </div>
           </div>
         )}
@@ -336,7 +447,7 @@ const DocumentAnalyzer: React.FC<DocumentAnalyzerProps> = ({ document, onClose }
                 
                 if (nonEmptyCategories.length === 0) {
                   // Fallback if parsing fails - just display the raw text
-                  return <div className="whitespace-pre-wrap">{result.result}</div>;
+                  return <div className="markdown-content"><ReactMarkdown>{result.result}</ReactMarkdown></div>;
                 }
                 
                 return (
@@ -390,32 +501,43 @@ const DocumentAnalyzer: React.FC<DocumentAnalyzerProps> = ({ document, onClose }
                     .filter((block: string) => block.trim());
                   
                   if (clauseBlocks.length > 0) {
-                    return clauseBlocks.map((block: string, index: number) => {
-                      // Try to extract a title/header if it exists
-                      const lines = block.split('\n');
-                      let title = '';
-                      let content = block;
-                      
-                      // Check if first line looks like a header (e.g., ends with colon or is in all caps or starts with number)
-                      if (lines[0].match(/^\d+\./) || lines[0].endsWith(':') || lines[0].toUpperCase() === lines[0]) {
-                        title = lines[0].replace(/:\s*$/, '');
-                        content = lines.slice(1).join('\n').trim();
-                      }
-                      
-                      return (
-                        <div key={index} className="bg-gray-700 rounded-lg p-4 border-l-4 border-primary">
-                          {title && <h4 className="font-medium text-lg text-primary mb-2">{title}</h4>}
-                          <div className="whitespace-pre-wrap">{content}</div>
+                    // Group every 3 blocks (title, key text, analysis) into one card
+                    const groupedClauses = [];
+                    for (let i = 0; i < clauseBlocks.length; i += 3) {
+                      const titleBlock = clauseBlocks[i] || '';
+                      const keyTextBlock = clauseBlocks[i + 1] || '';
+                      const analysisBlock = clauseBlocks[i + 2] || '';
+                      groupedClauses.push({ titleBlock, keyTextBlock, analysisBlock });
+                    }
+                    return groupedClauses.map((clause, index) => (
+                      <div key={index} className="bg-gray-800 rounded-lg border border-primary/30 p-5 space-y-3">
+                        {/* Title */}
+                        <div className="text-lg font-semibold text-primary mb-1">
+                          {clause.titleBlock.replace(/^#+\s*/, '')}
                         </div>
-                      );
-                    });
+                        {/* Key Text */}
+                        {clause.keyTextBlock && (
+                          <div className="bg-gray-900 rounded p-3 border-l-4 border-primary/50">
+                            <div className="text-xs text-gray-400 font-bold mb-1">Key Text:</div>
+                            <div className="text-text-primary text-sm whitespace-pre-line">{clause.keyTextBlock.replace(/^Key Text:?/i, '').trim()}</div>
+                          </div>
+                        )}
+                        {/* Analysis */}
+                        {clause.analysisBlock && (
+                          <div className="bg-gray-900 rounded p-3 border-l-4 border-accent-500">
+                            <div className="text-xs text-gray-400 font-bold mb-1">Analysis:</div>
+                            <div className="text-text-secondary text-sm whitespace-pre-line">{clause.analysisBlock.replace(/^Analysis:?/i, '').trim()}</div>
+                          </div>
+                        )}
+                      </div>
+                    ));
                   }
                 } catch (e: unknown) {
                   console.error('Error parsing clauses', e);
                 }
                 
                 // Fallback to raw text
-                return <div className="whitespace-pre-wrap">{result.result}</div>;
+                return <div className="markdown-content"><ReactMarkdown>{result.result}</ReactMarkdown></div>;
               })()}
             </div>
           </div>
@@ -457,16 +579,16 @@ const DocumentAnalyzer: React.FC<DocumentAnalyzerProps> = ({ document, onClose }
                         const description = restParts.join(':').trim();
                         
                         // Basic date parsing - this is a simple approach
-                        // In a real app, we'd want more robust date parsing
-                        let date = new Date();
-                        try {
-                          date = new Date(datePart.trim());
-                        } catch {
-                          // If date parsing fails, use current date
+                        let dateObj = new Date(datePart.trim());
+                        let date: string | Date = dateObj;
+                        if (isNaN(dateObj.getTime())) {
+                          // If date parsing fails, use the raw string
+                          date = datePart.trim();
+                        } else {
+                          date = dateObj.toISOString();
                         }
-                        
                         return {
-                          date: date.toISOString(),
+                          date,
                           title: description.split('\n')[0] || 'Event',
                           description: description.split('\n').slice(1).join('\n') || description
                         };
@@ -482,11 +604,11 @@ const DocumentAnalyzer: React.FC<DocumentAnalyzerProps> = ({ document, onClose }
                   return <TimelineView events={timelineData} />;
                 } else {
                   // If we failed to parse the timeline, just display the raw text
-                  return <div className="whitespace-pre-wrap">{result.result}</div>;
+                  return <div className="markdown-content"><ReactMarkdown>{result.result}</ReactMarkdown></div>;
                 }
               } catch (e: unknown) {
                 console.error('Error parsing timeline', e);
-                return <div className="whitespace-pre-wrap">{result.result}</div>;
+                return <div className="markdown-content"><ReactMarkdown>{result.result}</ReactMarkdown></div>;
               }
             })()}
           </div>
@@ -497,7 +619,9 @@ const DocumentAnalyzer: React.FC<DocumentAnalyzerProps> = ({ document, onClose }
             <h3 className="text-xl font-medium mb-4">Custom Analysis</h3>
             <div className="bg-gray-700 rounded-lg p-5">
               <div className="text-sm text-gray-400 mb-2">Prompt: {customPrompt}</div>
-              <div className="whitespace-pre-wrap">{result.result}</div>
+              <div className="markdown-content">
+                <ReactMarkdown>{result.result}</ReactMarkdown>
+              </div>
             </div>
             
             <div className="mt-4">

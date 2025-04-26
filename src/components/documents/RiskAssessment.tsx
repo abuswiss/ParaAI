@@ -30,40 +30,46 @@ export const RiskAssessment: React.FC<RiskAssessmentProps> = ({ analysis }) => {
     return (
       <div className="space-y-4">
         {sections.map((section: string, index: number) => {
+          // Remove leading markdown headers (###, ##, etc)
+          const cleanedSection = section.replace(/^#+\s*/, '');
+          // Split into title and description
+          const [rawTitle, ...descLines] = cleanedSection.split('\n');
+          const title = rawTitle.trim();
+          const description = descLines.join('\n').trim();
+
           // Determine risk level by pattern matching
           let riskLevel = 'Unspecified';
           let colorClass = 'bg-gray-700';
           let indicatorClass = 'bg-gray-500';
-          
+          let badgeClass = 'bg-gray-500 text-white';
+
           if (highRiskPattern.test(section)) {
             riskLevel = 'High';
             colorClass = 'bg-red-900/50 border-l-4 border-red-600';
             indicatorClass = 'bg-red-700';
+            badgeClass = 'bg-red-700 text-white';
           } else if (mediumRiskPattern.test(section)) {
             riskLevel = 'Medium';
             colorClass = 'bg-yellow-900/50 border-l-4 border-yellow-600';
             indicatorClass = 'bg-yellow-700';
+            badgeClass = 'bg-yellow-700 text-white';
           } else if (lowRiskPattern.test(section)) {
             riskLevel = 'Low';
             colorClass = 'bg-green-900/50 border-l-4 border-green-600';
             indicatorClass = 'bg-green-700';
+            badgeClass = 'bg-green-700 text-white';
           }
-          
+
           return (
-            <div key={index} className={`p-3 rounded-md ${colorClass}`}>
-              {riskLevel !== 'Unspecified' && (
-                <div className="flex items-center mb-2">
-                  <span className={`mr-2 inline-block w-3 h-3 rounded-full ${indicatorClass}`}></span>
-                  <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${
-                    riskLevel === 'High' ? 'bg-red-700 text-white' :
-                    riskLevel === 'Medium' ? 'bg-yellow-700 text-white' :
-                    'bg-green-700 text-white'
-                  }`}>
-                    {riskLevel} Risk
-                  </span>
-                </div>
-              )}
-              <div className="text-sm whitespace-pre-wrap">{section}</div>
+            <div key={index} className={`p-4 rounded-md ${colorClass}`}>
+              <div className="flex items-center mb-2">
+                <span className={`mr-2 inline-block w-3 h-3 rounded-full ${indicatorClass}`}></span>
+                <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${badgeClass}`}>
+                  {riskLevel} Risk
+                </span>
+              </div>
+              <div className="font-semibold text-text-primary mb-1">{title}</div>
+              <div className="text-sm text-text-secondary whitespace-pre-wrap">{description}</div>
             </div>
           );
         })}

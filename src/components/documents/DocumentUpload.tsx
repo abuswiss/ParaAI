@@ -1,6 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { uploadDocument } from '../../services/documentService';
 import { DocumentUploadProgress } from '../../types/document';
+import { useAuth } from '../../context/AuthContext';
 
 interface DocumentUploadProps {
   caseId?: string;
@@ -14,6 +15,7 @@ const DocumentUpload: React.FC<DocumentUploadProps> = ({
   const [dragActive, setDragActive] = useState(false);
   const [uploadingFiles, setUploadingFiles] = useState<DocumentUploadProgress[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const { user } = useAuth();
 
   const handleDrag = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -60,6 +62,11 @@ const DocumentUpload: React.FC<DocumentUploadProps> = ({
 
   const uploadFile = async (file: File, index: number) => {
     try {
+      // Make sure we have a user
+      if (!user || !user.id) {
+        throw new Error('You must be logged in to upload documents');
+      }
+
       // Simulate upload progress
       const progressInterval = setInterval(() => {
         setUploadingFiles(prev => {
@@ -74,12 +81,13 @@ const DocumentUpload: React.FC<DocumentUploadProps> = ({
         });
       }, 300);
 
-      // Upload the file
-      const { error } = await uploadDocument(file, caseId);
-      
-      clearInterval(progressInterval);
-      
-      if (error) {
+      // Upload the file with the correct parameters: file, userId, caseId
+      try {
+        await uploadDocument(file, user.id, caseId);
+        clearInterval(progressInterval);
+      } catch (error) {
+        clearInterval(progressInterval);
+        console.error('Error uploading file:', error);
         throw error;
       }
       
