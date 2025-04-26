@@ -9,6 +9,7 @@ import {
 } from '../../../services/templateService';
 import mammoth from 'mammoth';
 import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf';
+import type { TextItem } from 'pdfjs-dist/types/src/display/api';
 pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
 
 interface TemplateSelectorProps {
@@ -42,48 +43,43 @@ const TemplateSelector: React.FC<TemplateSelectorProps> = ({
   const [importCategory, setImportCategory] = useState('');
   const [importTags, setImportTags] = useState('');
 
-  // Load all templates when the active category changes
-  useEffect(() => {
-    const loadTemplates = async () => {
-      setIsLoading(true);
-      setError(null);
-      
-      try {
-        const { data, error } = await getAvailableTemplates(activeCategory);
-        
-        if (error) throw error;
-        
-        if (data) {
-          // Mark favorites in the templates list
-          const templatesWithFavorites = data.map(template => ({
-            ...template,
-            isFavorite: template.isFavorite || false
-          }));
-          
-          setTemplates(templatesWithFavorites);
-          
-          // Extract unique categories
-          const uniqueCategories = Array.from(new Set(data.map(template => template.category)));
-          setCategories(uniqueCategories);
-          
-          // Extract unique tags
-          const allTags = data.flatMap(template => template.tags);
-          const uniqueTags = Array.from(new Set(allTags));
-          setAvailableTags(uniqueTags);
-          
-          // Filter favorites
-          const favorites = templatesWithFavorites.filter(template => template.isFavorite);
-          setFavoriteTemplates(favorites);
-        }
-      } catch (err) {
-        console.error('Error loading templates:', err);
-        setError('Failed to load templates. Please try again.');
-      } finally {
-        setIsLoading(false);
+  // Move loadTemplates outside useEffect so it can be called directly
+  const loadTemplates = async (category = activeCategory) => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const { data, error } = await getAvailableTemplates(category);
+      if (error) throw error;
+      if (data) {
+        // Mark favorites in the templates list
+        const templatesWithFavorites = data.map(template => ({
+          ...template,
+          isFavorite: template.isFavorite || false
+        }));
+        setTemplates(templatesWithFavorites);
+        // Extract unique categories
+        const uniqueCategories = Array.from(new Set(data.map(template => template.category)));
+        setCategories(uniqueCategories);
+        // Extract unique tags
+        const allTags = data.flatMap(template => template.tags);
+        const uniqueTags = Array.from(new Set(allTags));
+        setAvailableTags(uniqueTags);
+        // Filter favorites
+        const favorites = templatesWithFavorites.filter(template => template.isFavorite);
+        setFavoriteTemplates(favorites);
       }
-    };
-    
+    } catch (err) {
+      console.error('Error loading templates:', err);
+      setError('Failed to load templates. Please try again.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // useEffect just calls loadTemplates
+  useEffect(() => {
     loadTemplates();
+    // eslint-disable-next-line
   }, [activeCategory]);
   
   // Load recently used templates
@@ -162,15 +158,6 @@ const TemplateSelector: React.FC<TemplateSelectorProps> = ({
     return matchesSearch && matchesTags;
   });
   
-  // Toggle tag selection
-  const toggleTag = (tag: string) => {
-    if (selectedTags.includes(tag)) {
-      setSelectedTags(selectedTags.filter(t => t !== tag));
-    } else {
-      setSelectedTags([...selectedTags, tag]);
-    }
-  };
-
   // Handle importing templates from file
   const handleFileImport = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -213,7 +200,7 @@ const TemplateSelector: React.FC<TemplateSelectorProps> = ({
     reader.onload = async (e) => {
       try {
         const arrayBuffer = e.target?.result;
-        if (!arrayBuffer) throw new Error('Could not read DOCX file.');
+        if (!(arrayBuffer instanceof ArrayBuffer)) throw new Error('Could not read DOCX file.');
         const { value: text } = await mammoth.extractRawText({ arrayBuffer });
         setImportContent(text);
         setShowImportModal(true);
@@ -236,7 +223,7 @@ const TemplateSelector: React.FC<TemplateSelectorProps> = ({
         for (let i = 1; i <= pdf.numPages; i++) {
           const page = await pdf.getPage(i);
           const content = await page.getTextContent();
-          text += content.items.map((item: any) => item.str).join(' ') + '\n';
+          text += (content.items as TextItem[]).map(item => item.str).join(' ') + '\n';
         }
         setImportContent(text);
         setShowImportModal(true);
@@ -286,33 +273,6 @@ const TemplateSelector: React.FC<TemplateSelectorProps> = ({
       }
     };
     reader.readAsText(file);
-  };
-  
-  // Handle importing templates from JSON
-  const handleImportTemplate = async () => {
-    try {
-      setIsImporting(true);
-      setImportError(null);
-      
-      const { error } = await importTemplate(importContent);
-      
-      if (error) throw error;
-      
-      // Success - close modal and refresh template list
-      setShowImportModal(false);
-      setImportContent('');
-      
-      // Refresh the template lists
-      const categoryCopy = activeCategory;
-      setActiveCategory(undefined);
-      setTimeout(() => setActiveCategory(categoryCopy), 100);
-      
-    } catch (err) {
-      console.error('Error importing template:', err);
-      setImportError(`Failed to import template: ${err instanceof Error ? err.message : 'Unknown error'}`);
-    } finally {
-      setIsImporting(false);
-    }
   };
   
   // Handle exporting templates
@@ -725,6 +685,8 @@ const TemplateSelector: React.FC<TemplateSelectorProps> = ({
                     setImportDescription('');
                     setImportCategory('');
                     setImportTags('');
+                    // Refresh the template list immediately
+                    await loadTemplates();
                   }
                   setIsImporting(false);
                 }}

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Document } from '../../types/document';
 import { analyzeDocument, DocumentAnalysisResult } from '../../services/documentAnalysisService';
 import TimelineView, { TimelineEvent } from '../timeline/TimelineView';
@@ -108,7 +108,7 @@ const DocumentAnalyzer: React.FC<DocumentAnalyzerProps> = ({ document, onClose }
     },
   ];
 
-  const runAnalysis = async (type: AnalysisTab['id']) => {
+  const runAnalysis = useCallback(async (type: AnalysisTab['id']) => {
     if (!document) return;
 
     setLoading(true);
@@ -138,7 +138,7 @@ const DocumentAnalyzer: React.FC<DocumentAnalyzerProps> = ({ document, onClose }
     } finally {
       setLoading(false);
     }
-  };
+  }, [document, customPrompt]);
 
   useEffect(() => {
     // Reset state when document changes
@@ -163,106 +163,109 @@ const DocumentAnalyzer: React.FC<DocumentAnalyzerProps> = ({ document, onClose }
   }, [activeTab, document, analysisResults, runAnalysis]);
 
   useEffect(() => {
-    if (typeof document === 'undefined' || typeof document.createElement !== 'function') return;
-    // Add CSS styles for markdown rendering (copied from ChatInterface)
-    const styleEl = document.createElement('style');
-    styleEl.innerHTML = `
-      .markdown-content {
-        font-size: 0.875rem;
-        line-height: 1.5;
+    const globalDoc = document as globalThis.Document | null;
+    if (globalDoc) {
+      const styleEl = globalDoc.createElement('style');
+      styleEl.innerHTML = `
+        .markdown-content {
+          font-size: 0.875rem;
+          line-height: 1.5;
+        }
+        .markdown-content p {
+          margin-bottom: 1em;
+        }
+        .markdown-content h1, 
+        .markdown-content h2, 
+        .markdown-content h3, 
+        .markdown-content h4 {
+          font-weight: bold;
+          margin-top: 1.5em;
+          margin-bottom: 0.5em;
+          line-height: 1.2;
+        }
+        .markdown-content h1 {
+          font-size: 1.5rem;
+        }
+        .markdown-content h2 {
+          font-size: 1.25rem;
+        }
+        .markdown-content h3 {
+          font-size: 1.125rem;
+        }
+        .markdown-content ul {
+          list-style-type: disc;
+          padding-left: 1.5em;
+          margin-bottom: 1em;
+        }
+        .markdown-content ol {
+          list-style-type: decimal;
+          padding-left: 1.5em;
+          margin-bottom: 1em;
+        }
+        .markdown-content li {
+          margin-bottom: 0.25em;
+        }
+        .markdown-content pre {
+          background-color: rgba(30, 30, 30, 0.7);
+          border-radius: 4px;
+          padding: 0.75em;
+          margin: 1em 0;
+          overflow-x: auto;
+        }
+        .markdown-content code {
+          font-family: monospace;
+          background-color: rgba(30, 30, 30, 0.7);
+          padding: 0.2em 0.4em;
+          border-radius: 3px;
+          font-size: 0.85em;
+        }
+        .markdown-content pre code {
+          background-color: transparent;
+          padding: 0;
+        }
+        .markdown-content blockquote {
+          border-left: 3px solid rgba(200, 200, 200, 0.5);
+          padding-left: 1em;
+          margin: 1em 0;
+          font-style: italic;
+          color: rgba(255, 255, 255, 0.8);
+        }
+        .markdown-content a {
+          color: #F2A494;
+          text-decoration: underline;
+        }
+        .markdown-content strong {
+          font-weight: bold;
+        }
+        .markdown-content em {
+          font-style: italic;
+        }
+        .markdown-content table {
+          border-collapse: collapse;
+          width: 100%;
+          margin: 1em 0;
+        }
+        .markdown-content th,
+        .markdown-content td {
+          border: 1px solid rgba(200, 200, 200, 0.2);
+          padding: 0.5em;
+          text-align: left;
+        }
+        .markdown-content th {
+          background-color: rgba(30, 30, 30, 0.5);
+        }
+        .markdown-content hr {
+          border: 0;
+          border-top: 1px solid rgba(200, 200, 200, 0.2);
+          margin: 1.5em 0;
+        }
+      `;
+      if (globalDoc.head) {
+        globalDoc.head.appendChild(styleEl);
       }
-      .markdown-content p {
-        margin-bottom: 1em;
-      }
-      .markdown-content h1, 
-      .markdown-content h2, 
-      .markdown-content h3, 
-      .markdown-content h4 {
-        font-weight: bold;
-        margin-top: 1.5em;
-        margin-bottom: 0.5em;
-        line-height: 1.2;
-      }
-      .markdown-content h1 {
-        font-size: 1.5rem;
-      }
-      .markdown-content h2 {
-        font-size: 1.25rem;
-      }
-      .markdown-content h3 {
-        font-size: 1.125rem;
-      }
-      .markdown-content ul {
-        list-style-type: disc;
-        padding-left: 1.5em;
-        margin-bottom: 1em;
-      }
-      .markdown-content ol {
-        list-style-type: decimal;
-        padding-left: 1.5em;
-        margin-bottom: 1em;
-      }
-      .markdown-content li {
-        margin-bottom: 0.25em;
-      }
-      .markdown-content pre {
-        background-color: rgba(30, 30, 30, 0.7);
-        border-radius: 4px;
-        padding: 0.75em;
-        margin: 1em 0;
-        overflow-x: auto;
-      }
-      .markdown-content code {
-        font-family: monospace;
-        background-color: rgba(30, 30, 30, 0.7);
-        padding: 0.2em 0.4em;
-        border-radius: 3px;
-        font-size: 0.85em;
-      }
-      .markdown-content pre code {
-        background-color: transparent;
-        padding: 0;
-      }
-      .markdown-content blockquote {
-        border-left: 3px solid rgba(200, 200, 200, 0.5);
-        padding-left: 1em;
-        margin: 1em 0;
-        font-style: italic;
-        color: rgba(255, 255, 255, 0.8);
-      }
-      .markdown-content a {
-        color: #F2A494;
-        text-decoration: underline;
-      }
-      .markdown-content strong {
-        font-weight: bold;
-      }
-      .markdown-content em {
-        font-style: italic;
-      }
-      .markdown-content table {
-        border-collapse: collapse;
-        width: 100%;
-        margin: 1em 0;
-      }
-      .markdown-content th,
-      .markdown-content td {
-        border: 1px solid rgba(200, 200, 200, 0.2);
-        padding: 0.5em;
-        text-align: left;
-      }
-      .markdown-content th {
-        background-color: rgba(30, 30, 30, 0.5);
-      }
-      .markdown-content hr {
-        border: 0;
-        border-top: 1px solid rgba(200, 200, 200, 0.2);
-        margin: 1.5em 0;
-      }
-    `;
-    document.head.appendChild(styleEl);
-    return () => { document.head.removeChild(styleEl); };
-  }, []);
+      return () => { if (globalDoc.head) globalDoc.head.removeChild(styleEl); };
+    }
+  }, [document]);
 
   const handleCustomAnalysis = () => {
     if (customPrompt.trim()) {
@@ -579,7 +582,7 @@ const DocumentAnalyzer: React.FC<DocumentAnalyzerProps> = ({ document, onClose }
                         const description = restParts.join(':').trim();
                         
                         // Basic date parsing - this is a simple approach
-                        let dateObj = new Date(datePart.trim());
+                        const dateObj = new Date(datePart.trim());
                         let date: string | Date = dateObj;
                         if (isNaN(dateObj.getTime())) {
                           // If date parsing fails, use the raw string
