@@ -1,17 +1,46 @@
-import { supabase } from './supabaseClient';
+import { supabase, refreshSession, checkSupabaseConnection } from './supabaseClient';
 
 /**
  * SecureDataClient provides utilities for safely accessing data 
  * while avoiding RLS policy recursion issues
  */
 
-// Helper function to get current user ID
+/**
+ * Helper function to get current user ID with authentication verification
+ * This will attempt to refresh the session if needed
+ * @returns User ID string
+ * @throws Error if user is not authenticated
+ */
 const getCurrentUserId = async () => {
+  // First try to get the user directly
   const { data: user } = await supabase.auth.getUser();
-  if (!user?.user?.id) {
-    throw new Error('User not authenticated');
+  
+  // If we have a user, return the ID
+  if (user?.user?.id) {
+    return user.user.id;
   }
-  return user.user.id;
+  
+  // Otherwise, try to refresh the session
+  const refreshed = await refreshSession();
+  if (refreshed) {
+    const { data: refreshedUser } = await supabase.auth.getUser();
+    if (refreshedUser?.user?.id) {
+      return refreshedUser.user.id;
+    }
+  }
+  
+  // If we still don't have a user, check connection status for better error messages
+  const connectionStatus = await checkSupabaseConnection();
+  
+  if (!connectionStatus.connected) {
+    throw new Error(`Cannot connect to the database. ${connectionStatus.error || ''}`);
+  }
+  
+  if (!connectionStatus.authenticated) {
+    throw new Error('Not authenticated. Please sign in again.');
+  }
+  
+  throw new Error('User not authenticated despite successful connection');
 };
 
 /**
@@ -72,25 +101,30 @@ export const fetchCasesSafely = async () => {
 };
 
 /**
- * Create a conversation safely to avoid RLS recursion issues
+ * Create a conversation securely while avoiding RLS recursion issues
  */
 export const createConversationSafely = async (
   title?: string,
   caseId?: string
 ) => {
   try {
+    // Get the current user ID - this will attempt to refresh auth if needed
     const userId = await getCurrentUserId();
     
-    // Create conversation without using the RLS policies that cause recursion
+    // Generate a unique conversation ID
+    const conversationId = crypto.randomUUID();
+    
+    // Create conversation with proper data validation
     const conversationData = {
-      id: crypto.randomUUID(),
-      title: title || 'New Conversation',
+      id: conversationId,
+      title: title?.trim() || 'New Conversation',
       case_id: caseId || null,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
-      user_id: userId,
+      owner_id: userId, // Using owner_id as per the database schema
     };
 
+    // Store in Supabase
     const { data, error } = await supabase
       .from('conversations')
       .insert([conversationData])
@@ -98,6 +132,23 @@ export const createConversationSafely = async (
       .single();
 
     if (error) {
+      // Check if this is a connection or auth issue
+      const connectionStatus = await checkSupabaseConnection();
+      
+      if (!connectionStatus.connected) {
+        return { 
+          data: null, 
+          error: new Error(`Database connection failed: ${connectionStatus.error || 'Unknown error'}`) 
+        };
+      }
+      
+      if (!connectionStatus.authenticated) {
+        return { 
+          data: null, 
+          error: new Error('Authentication error. Please sign in again.') 
+        };
+      }
+      
       console.error('Error creating conversation:', error);
       return { data: null, error };
     }
@@ -131,7 +182,7 @@ export const getConversationSafely = async (conversationId: string) => {
       .from('conversations')
       .select('id')
       .eq('id', conversationId)
-      .eq('user_id', userId)
+      .eq('owner_id', userId) // Using owner_id as per the database schema
       .maybeSingle();
 
     if (accessError) {

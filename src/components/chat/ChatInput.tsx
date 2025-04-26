@@ -5,6 +5,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 
 interface ChatInputProps {
   onSendMessage: (message: string, documentContext?: string, analysisContext?: DocumentAnalysisResult) => void;
+  onFileUpload?: (files: File[]) => void; // Add prop for parent component to handle file uploads
   disabled?: boolean;
   isNewChat?: boolean;
   messagesCount?: number;
@@ -22,6 +23,7 @@ interface MockDoc {
 
 const ChatInput: React.FC<ChatInputProps> = ({ 
   onSendMessage, 
+  onFileUpload, 
   disabled = false, 
   isNewChat = false,
   messagesCount = 0
@@ -122,6 +124,11 @@ const ChatInput: React.FC<ChatInputProps> = ({
     
     // Show a notification or feedback that the document was uploaded
     console.log('Document uploaded:', newMockDoc.filename);
+    
+    // If parent component provided onFileUpload callback, call it
+    if (onFileUpload) {
+      onFileUpload(files);
+    }
   };
   
   // We now use direct file selection instead of a document picker

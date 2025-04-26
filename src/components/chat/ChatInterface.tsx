@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, DragEvent } from 'react';
 import { sendMessageStream } from '../../services/chatService';
 import { DocumentAnalysisResult } from '../../services/documentAnalysisService';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -27,19 +27,28 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ conversationId }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeContext, setActiveContext] = useState<string | null>(null);
+const [activeDocumentName, setActiveDocumentName] = useState<string | null>(null);
   const [activeAnalysis, setActiveAnalysis] = useState<DocumentAnalysisResult | null>(null);
   const [messageIdBeingEdited, setMessageIdBeingEdited] = useState<string | null>(null);
   const [lastUserMessageId, setLastUserMessageId] = useState<string | null>(null);
+  const [isDraggingFile, setIsDraggingFile] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // State to store the active conversation ID (possibly created on demand)
+  const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
 
   // Reset state and add initial system message when conversationId changes
   useEffect(() => {
     // Reset the state
     setActiveContext(null);
+    setActiveDocumentName(null);
     setActiveAnalysis(null);
     setMessageIdBeingEdited(null);
     setLastUserMessageId(null);
     setError(null);
+    // Set the active conversation ID, handling the case where conversationId might be undefined
+    setActiveConversationId(conversationId && conversationId !== 'new' ? conversationId : null);
     
     // Load conversation if we have an ID, otherwise show welcome message
     if (conversationId && conversationId !== 'new') {
@@ -221,8 +230,55 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ conversationId }) => {
     try {
       const chunks: string[] = [];
 
+      // Create a new conversation for the first message if needed
+      if (!activeConversationId) {
+        try {
+          // Import the conversation creation function
+          const { createConversation } = await import('../../services/chatService');
+          const { data: newConversation, error } = await createConversation('New Conversation');
+          
+          if (error) {
+            console.error('Error creating conversation:', error);
+            
+            // Show specific error messages based on type
+            if (error.message.includes('authentication') || error.message.includes('sign in')) {
+              setError(`Authentication error: ${error.message}. Please sign in again.`);
+              // Redirect to login after a delay
+              setTimeout(() => {
+                window.location.href = '/auth';
+              }, 5000);
+            } else if (error.message.includes('connection') || error.message.includes('database')) {
+              setError(`Database connection error: ${error.message}. Please try again later.`);
+            } else {
+              setError(`Error: ${error.message}`);
+            }
+            
+            setIsLoading(false);
+            return; // Stop message sending if we can't create a conversation
+          } 
+          
+          if (newConversation) {
+            console.log('Created new conversation:', newConversation.id);
+            setActiveConversationId(newConversation.id);
+            // Clear any previous errors
+            setError(null);
+          } else {
+            // Unexpected case - no error but no conversation either
+            console.warn('No conversation created and no error reported');
+            setError('Unable to create conversation. Please try again.');
+            setIsLoading(false);
+            return;
+          }
+        } catch (err) {
+          console.error('Failed to create conversation:', err);
+          setError('An unexpected error occurred. Please try again.');
+          setIsLoading(false);
+          return;
+        }
+      }
+      
       await sendMessageStream(
-        conversationId || 'default',
+        activeConversationId!, // Now we have a real conversation ID
         content,
         (chunk) => {
           chunks.push(chunk);
@@ -283,18 +339,124 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ conversationId }) => {
   // Show welcome state if no messages except system message
   // Show welcome screen for new conversations or when explicitly resetting
   const showWelcome = (messages.length === 1 && messages[0].role === 'system') || !conversationId || conversationId === 'new';
+  
+  // File upload handling functions
+  const handleDragEnter = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDraggingFile(true);
+  };
+  
+  const handleDragOver = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    // Keep the isDraggingFile state true during dragover
+    setIsDraggingFile(true);
+  };
+  
+  const handleDragLeave = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    // Only set to false if we're leaving the chat container (not entering a child element)
+    // Check if we're not entering a child element
+    const relatedTarget = e.relatedTarget as Node;
+    const currentTarget = e.currentTarget as Node;
+    
+    if (!currentTarget.contains(relatedTarget)) {
+      setIsDraggingFile(false);
+    }
+  };
+  
+  const handleDrop = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDraggingFile(false);
+    
+    const files = e.dataTransfer.files;
+    if (files && files.length > 0) {
+      handleFiles(Array.from(files));
+    }
+  };
+  
+  const handleFiles = (files: File[]) => {
+    try {
+      if (!files.length) {
+        console.warn('No files provided to handleFiles');
+        return;
+      }
+
+      // In a real implementation, you would call your document upload service
+      // For now, we'll just extract basic info and mock the extraction
+      const file = files[0];
+      const mockDocument = {
+        id: `doc-${Date.now()}`,
+        filename: file.name,
+        fileType: file.type,
+        fileSize: file.size,
+        uploadedAt: new Date().toISOString(),
+        extractedText: `Sample extracted text from ${file.name}. This is a placeholder for actual text extraction.`
+      };
+      
+      // Set the active context and document name
+      setActiveContext(mockDocument.extractedText);
+      setActiveDocumentName(file.name);
+      
+      // Clear any previous errors
+      setError(null);
+      
+      // Show a notification or feedback that the document was uploaded
+      console.log('Document uploaded to chat:', mockDocument.filename);
+      
+      // Always add a system message about the document to make behavior consistent regardless of upload method
+      setMessages(prev => [
+        ...prev,
+        {
+          id: `system-doc-${Date.now()}`,
+          role: 'system',
+          content: `Document "${file.name}" has been uploaded and is ready for analysis.`,
+          timestamp: new Date().toISOString(),
+        }
+      ]);
+    } catch (err) {
+      console.error('Error handling files:', err);
+      setError(`Failed to process document: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    }
+  };
+  
+  const handleFileButtonClick = () => {
+    if (fileInputRef.current) {
+      fileInputRef.current.click();
+    }
+  };
+  
+  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = event.target.files;
+    if (files && files.length > 0) {
+      handleFiles(Array.from(files));
+    }
+  };
 
   return (
-    <div className="flex flex-col h-full">
+    <div 
+      className={`flex flex-col h-full relative ${isDraggingFile ? 'bg-opacity-90' : ''}`}
+      onDragEnter={handleDragEnter}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
       {/* Document context indicator */}
-      {activeContext && (
+      {activeContext && activeDocumentName && (
         <div className="px-4 py-2 bg-gray-800 flex items-center space-x-2 text-sm border-b border-gray-700">
           <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-primary" viewBox="0 0 20 20" fill="currentColor">
             <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1z" clipRule="evenodd" />
           </svg>
-          <span className="text-gray-400">Using document context for enhanced responses</span>
+          <span className="text-gray-400 truncate max-w-xs">Using document context: {activeDocumentName}</span>
           <button 
-            onClick={() => setActiveContext(null)} 
+            onClick={() => {
+              setActiveContext(null);
+              setActiveDocumentName(null);
+            }} 
             className="text-gray-500 hover:text-gray-300 ml-auto"
             aria-label="Clear document context"
           >
@@ -326,7 +488,37 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ conversationId }) => {
       )}
       
       {/* Messages container with animations */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-5 relative">
+        {/* Drag overlay indicator */}
+        {isDraggingFile && (
+          <div className="absolute inset-0 bg-surface-darker bg-opacity-70 backdrop-blur-sm flex items-center justify-center z-50 border-2 border-dashed border-primary rounded-md">
+            <div className="text-center p-6 rounded-lg">
+              <svg className="mx-auto h-12 w-12 text-primary animate-bounce" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+              </svg>
+              <h3 className="mt-2 text-lg font-medium text-text-primary">Drop your files here</h3>
+              <p className="mt-1 text-sm text-text-secondary">Drop files to upload and analyze them</p>
+              <button 
+                onClick={handleFileButtonClick}
+                className="mt-4 inline-flex items-center px-4 py-2 bg-primary hover:bg-primary-dark text-white text-sm font-medium rounded-md shadow-sm transition-colors duration-200"
+              >
+                <svg className="mr-2 h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                </svg>
+                Select File
+              </button>
+            </div>
+          </div>
+        )}
+        
+        {/* Hidden file input */}
+        <input
+          type="file"
+          ref={fileInputRef}
+          onChange={handleFileChange}
+          className="hidden"
+          accept=".pdf,.docx,.doc,.txt"
+        />
         <AnimatePresence>
           {!showWelcome && messages.map((message) => (
             <motion.div
@@ -419,19 +611,29 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ conversationId }) => {
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Error display */}
+      {/* Error display with dismissible option */}
       {error && (
-        <div className="p-2 bg-red-600 bg-opacity-20 border border-red-600 text-red-500 text-sm">
-          {error}
+        <div className="p-4 bg-red-900 bg-opacity-50 border border-red-600 text-red-100 rounded-md shadow-sm mx-4 mb-4 flex justify-between items-start">
+          <p>{error}</p>
+          <button 
+            onClick={() => setError(null)} 
+            className="ml-2 text-red-100 hover:text-white focus:outline-none"
+            aria-label="Dismiss error"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+            </svg>
+          </button>
         </div>
       )}
 
       {/* Input component with dynamic positioning */}
       <ChatInput 
         onSendMessage={handleSendMessage} 
-        disabled={isLoading}
+        disabled={isLoading} 
         isNewChat={showWelcome}
         messagesCount={messages.length}
+        onFileUpload={handleFiles} /* Pass the file handling function to ChatInput */
       />
     </div>
   );

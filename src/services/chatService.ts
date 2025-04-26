@@ -77,7 +77,7 @@ export const getUserConversations = async (): Promise<{
     const { data, error } = await supabase
       .from('conversations')
       .select('*')
-      .eq('user_id', user.user.id)
+      .eq('owner_id', user.user.id) // Using owner_id as per the database schema
       .order('updated_at', { ascending: false });
 
     if (error) {
