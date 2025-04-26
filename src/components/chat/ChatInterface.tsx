@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { sendMessageStream, getConversationMessages } from '../../services/chatService';
 import { DocumentAnalysisResult } from '../../services/documentAnalysisService';
 import { motion } from 'framer-motion';
+import ReactMarkdown from 'react-markdown';
 
 // Import the separate components - only using ChatInput now since we're rendering messages directly
 import ChatInput from './ChatInput';
@@ -125,6 +126,16 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ conversationId }) => {
     }
   };
 
+  // Loading messages that rotate while waiting for AI response
+  const loadingMessages = [
+    "Your AI is thinking...",
+    "Processing your request...",
+    "Analyzing legal context...",
+    "Researching relevant information...",
+    "Formulating a response...",
+    "Connecting the dots..."
+  ];
+
   // Function to handle sending a new message
   const handleSendMessage = async (content: string) => {
     if (!content.trim() || isSendingMessage) return;
@@ -146,17 +157,37 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ conversationId }) => {
         timestamp: new Date().toISOString()
       };
       
-      // Add placeholder for assistant message
+      // Generate a random loading message
+      const initialLoadingMessage = loadingMessages[Math.floor(Math.random() * loadingMessages.length)];
+      
+      // Add placeholder for assistant message with initial loading text
       const assistantMessage: Message = {
         id: placeholderId,
         role: 'assistant',
-        content: '',
+        content: initialLoadingMessage,
         timestamp: new Date().toISOString(),
         isStreaming: true
       };
       
       // Add both messages to the UI
       setMessages(prevMessages => [...prevMessages, userMessage, assistantMessage]);
+      
+      // Set up a rotating loading message until the first chunk arrives
+      let loadingIndex = 0;
+      const loadingInterval = setInterval(() => {
+        loadingIndex = (loadingIndex + 1) % loadingMessages.length;
+        setMessages(prevMessages => {
+          const newMessages = [...prevMessages];
+          const messageIndex = newMessages.findIndex(m => m.id === placeholderId);
+          if (messageIndex !== -1 && newMessages[messageIndex].isStreaming) {
+            newMessages[messageIndex] = {
+              ...newMessages[messageIndex],
+              content: loadingMessages[loadingIndex]
+            };
+          }
+          return newMessages;
+        });
+      }, 2000); // Change message every 2 seconds
       
       // Create a buffer for response chunks
       const chunks: string[] = [];
@@ -168,6 +199,11 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ conversationId }) => {
         activeConversationId,
         content,
         (chunk) => {
+          // Clear the loading interval on first chunk
+          if (chunks.length === 0) {
+            clearInterval(loadingInterval);
+          }
+          
           chunks.push(chunk);
           console.log('Received chunk:', chunk.length > 20 ? chunk.substring(0, 20) + '...' : chunk);
 
@@ -187,6 +223,9 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ conversationId }) => {
         activeContext || undefined, // Pass document context to the API
         activeAnalysis ? JSON.stringify(activeAnalysis) : undefined // Pass analysis context to the API
       );
+      
+      // Clear the loading interval if it's somehow still running
+      clearInterval(loadingInterval);
 
       console.log('Message response:', response);
 
@@ -489,8 +528,40 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ conversationId }) => {
                           </div>
                         </div>
                         <div className="flex-1 max-w-[90%]">
-                          <div className="text-white mb-2 whitespace-pre-wrap">
-                            {message.content}
+                          <div className="text-white mb-2">
+                            {message.isStreaming ? (
+                              <div className="whitespace-pre-wrap">{message.content}</div>
+                            ) : (
+                              <div className="markdown-content">
+                                <ReactMarkdown
+                                  components={{
+                                    // Override component rendering to maintain consistent styles
+                                    h1: ({children}) => <h1 className="text-xl font-bold mt-4 mb-2">{children}</h1>,
+                                    h2: ({children}) => <h2 className="text-lg font-bold mt-3 mb-2">{children}</h2>,
+                                    h3: ({children}) => <h3 className="text-md font-bold mt-3 mb-1">{children}</h3>,
+                                    h4: ({children}) => <h4 className="font-bold mt-2 mb-1">{children}</h4>,
+                                    p: ({children}) => <p className="mb-2">{children}</p>,
+                                    ul: ({children}) => <ul className="list-disc pl-8 mb-2">{children}</ul>,
+                                    ol: ({children}) => <ol className="list-decimal pl-8 mb-2">{children}</ol>,
+                                    li: ({children}) => <li className="mb-1">{children}</li>,
+                                    a: ({href, children}) => <a href={href} className="text-primary underline">{children}</a>,
+                                    code: ({className, children, node}) => {
+                                      const match = /language-(.+)/.exec(className || '');
+                                      const isInline = !match && (node?.position?.start.line === node?.position?.end.line);
+                                      return isInline ? 
+                                        <code className="font-mono bg-gray-800 px-1 rounded text-xs">{children}</code> :
+                                        <code className="font-mono block bg-gray-800 p-2 rounded-md my-2 text-sm overflow-x-auto">{children}</code>;
+                                    },
+                                    pre: ({children}) => <pre className="bg-gray-800 p-2 rounded-md my-2 overflow-x-auto">{children}</pre>,
+                                    blockquote: ({children}) => <blockquote className="border-l-4 border-gray-400 pl-4 italic my-2">{children}</blockquote>,
+                                    em: ({children}) => <em className="italic">{children}</em>,
+                                    strong: ({children}) => <strong className="font-bold">{children}</strong>,
+                                  }}
+                                >
+                                  {message.content}
+                                </ReactMarkdown>
+                              </div>
+                            )}
                           </div>
                           {/* Action buttons for AI messages */}
                           <div className="flex items-center space-x-3 mt-2">
