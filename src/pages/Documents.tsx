@@ -6,6 +6,7 @@ import DraftManagement from '../components/documents/drafting/DraftManagement';
 import TemplateSelector from '../components/documents/drafting/TemplateSelector';
 import { DocumentTemplate } from '../services/templateService';
 import { useParams } from 'react-router-dom';
+import AIDraftModal from '../components/ai/AIDraftModal';
 
 const Documents: React.FC = () => {
   // Extract caseId from URL params if available
@@ -17,6 +18,8 @@ const Documents: React.FC = () => {
   const [showDraftEditor, setShowDraftEditor] = useState(false);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [selectedCategory, setSelectedCategory] = useState<string | undefined>(undefined);
+  const [showAIDraftModal, setShowAIDraftModal] = useState(false);
+  const [aiDraftContext, setAIDraftContext] = useState<'template' | 'document'>('template');
 
   const handleUploadComplete = (success: boolean) => {
     if (success) {
@@ -51,17 +54,41 @@ const Documents: React.FC = () => {
     <div className="h-full flex flex-col">
       <div className="flex justify-between items-center mb-4">
         <h1 className="text-xl font-semibold text-text-primary">Legal Documents</h1>
-        {activeTab === 'documents' ? (
-          <button
-            onClick={() => setShowUploadModal(true)}
-            className="btn-primary flex items-center space-x-2"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-              <path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd" />
-            </svg>
-            <span>Upload Documents</span>
-          </button>
-        ) : null}
+        <div className="flex gap-2">
+          {activeTab === 'documents' && (
+            <button
+              onClick={() => { setAIDraftContext('document'); setShowAIDraftModal(true); }}
+              className="btn-primary flex items-center space-x-2"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd" />
+              </svg>
+              <span>AI Draft</span>
+            </button>
+          )}
+          {activeTab === 'templates' && (
+            <button
+              onClick={() => { setAIDraftContext('template'); setShowAIDraftModal(true); }}
+              className="btn-primary flex items-center space-x-2"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd" />
+              </svg>
+              <span>AI Draft</span>
+            </button>
+          )}
+          {activeTab === 'documents' && (
+            <button
+              onClick={() => setShowUploadModal(true)}
+              className="btn-primary flex items-center space-x-2"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd" />
+              </svg>
+              <span>Upload Documents</span>
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Tab Navigation */}
@@ -275,6 +302,14 @@ const Documents: React.FC = () => {
           </div>
         </div>
       )}
+
+      <AIDraftModal
+        isOpen={showAIDraftModal}
+        onClose={() => setShowAIDraftModal(false)}
+        context={aiDraftContext}
+        onSave={(draft) => { console.log('AI Draft saved:', draft); setShowAIDraftModal(false); }}
+        onExport={(content) => { console.log('AI Draft exported:', content); }}
+      />
     </div>
   );
 };
