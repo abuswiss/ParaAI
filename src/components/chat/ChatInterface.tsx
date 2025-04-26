@@ -147,7 +147,12 @@ function ChatInterface({ conversationId }: ChatInterfaceProps) {
   ];
 
   // Function to handle sending a new message
-  const handleSendMessage = async (content: string, documentContext?: string, analysisContext?: DocumentAnalysisResult) => {
+  const handleSendMessage = async (
+    content: string,
+    documentContext?: string,
+    analysisContext?: DocumentAnalysisResult,
+    suppressUserMessage?: boolean
+  ) => {
     if (!content.trim() || isSendingMessage) return;
     
     console.log('Sending message:', content);
@@ -179,8 +184,12 @@ function ChatInterface({ conversationId }: ChatInterfaceProps) {
         isStreaming: true
       };
       
-      // Add both messages to the UI
-      setMessages(prevMessages => [...prevMessages, userMessage, assistantMessage]);
+      // Add both messages to the UI, or only assistant if suppressUserMessage
+      if (!suppressUserMessage) {
+        setMessages(prevMessages => [...prevMessages, userMessage, assistantMessage]);
+      } else {
+        setMessages(prevMessages => [...prevMessages, assistantMessage]);
+      }
       
       // Set up a rotating loading message until the first chunk arrives
       let loadingIndex = 0;
@@ -767,16 +776,14 @@ function ChatInterface({ conversationId }: ChatInterfaceProps) {
                                 if (messageIndex > 0) {
                                   const userMessage = messages[messageIndex - 1];
                                   if (userMessage.role === 'user') {
-                                    // Handle regeneration in a proper way without adding new messages
-                                    // First remove the AI message
+                                    // Remove the AI message
                                     setMessages(prevMessages => {
                                       const newMessages = [...prevMessages];
                                       newMessages.splice(messageIndex, 1);
                                       return newMessages;
                                     });
-                                    
-                                    // Then regenerate using the same user message
-                                    handleSendMessage(userMessage.content);
+                                    // Regenerate using the same user message, but suppress adding a new user message
+                                    handleSendMessage(userMessage.content, undefined, undefined, true);
                                   }
                                 }
                               }}
