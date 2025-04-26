@@ -356,9 +356,9 @@ const ChatInput: React.FC<ChatInputProps> = ({
           )}
         </AnimatePresence>
 
-        {/* Input area with animations */}
+        {/* Input area with animations - removed border for flatter UI */}
         <motion.div 
-          className={`bg-gray-900 border border-gray-800 hover:border-gray-700 focus-within:border-primary/30 rounded-lg relative overflow-hidden transition-all duration-300 mt-2 w-full ${isDraggingFile ? 'border-primary border-2' : ''}`}
+          className={`bg-gray-900 rounded-lg relative overflow-hidden transition-all duration-300 mt-2 w-full ${isDraggingFile ? 'border-primary border-2' : ''}`}
           whileHover={{ boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' }}
           initial={{ y: 10, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}

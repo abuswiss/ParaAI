@@ -1,134 +1,178 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
-// Default development fallbacks - ONLY FOR DEVELOPMENT
-// These will allow the app to function during development without requiring a full Supabase setup
-const DEV_FALLBACK_URL = 'https://dev-placeholder-project.supabase.co';
-const DEV_FALLBACK_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTl9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0';
-
-// Get the values from environment variables with runtime validation
-// Using explicit string casting to ensure TypeScript compatibility
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
-
-// Console log environment variables for debugging in development
-if (import.meta.env.DEV) {
-  // Don't log the full key for security, just log a prefix to confirm it exists
-  console.log('Supabase URL set:', !!supabaseUrl);
-  console.log('Supabase Key set:', supabaseAnonKey ? `${supabaseAnonKey.substring(0, 5)}...` : 'MISSING');
-  
-  if (!supabaseUrl || !supabaseAnonKey) {
-    console.warn('⚠️ Using development fallbacks for Supabase. Authentication and database operations will be mocked.');
-  }
-}
-
-// Check if we're in development mode
+// Get environment variables for Supabase configuration
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
 const isDevelopment = import.meta.env.DEV;
 
-// Create the Supabase client with proper error handling
-const createSupabaseClient = (): SupabaseClient => {
-  // Validate environment variables or use development fallbacks
-  let finalUrl = supabaseUrl;
-  let finalKey = supabaseAnonKey;
+/**
+ * Validates Supabase configuration and logs helpful messages in development mode
+ */
+function validateConfig(): { isValid: boolean, url: string, key: string } {
+  const url = supabaseUrl?.trim() || '';
+  const key = supabaseAnonKey?.trim() || '';
+  const isValid = !!url && !!key && url !== 'undefined' && key !== 'undefined';
   
-  // In development, use fallbacks when environment variables are missing
-  if (isDevelopment && (!supabaseUrl || supabaseUrl === 'undefined' || supabaseUrl === '')) {
-    console.warn('VITE_SUPABASE_URL is missing or invalid - using development fallback');
-    finalUrl = DEV_FALLBACK_URL;
+  if (isDevelopment) {
+    if (isValid) {
+      console.log('✅ Supabase configuration is valid');
+      // Only show part of the URL for security
+      const urlDisplay = url.includes('://') ? 
+        url.split('://')[0] + '://' + url.split('://')[1].substring(0, 10) + '...' : 
+        url.substring(0, 15) + '...';
+      console.log(`URL: ${urlDisplay}`);
+      
+      // Only check if key has JWT format (starts with eyJ)
+      const keyValid = key.startsWith('eyJ');
+      console.log(`API Key format is ${keyValid ? 'valid' : 'INVALID'} ${keyValid ? '✓' : '✗'}`);
+    } else {
+      console.error('❌ Supabase configuration is INVALID');
+      console.error(`URL present: ${!!url} | Key present: ${!!key}`);
+      console.error('Authentication will not work. Check your .env file values for:');
+      console.error('- VITE_SUPABASE_URL');
+      console.error('- VITE_SUPABASE_ANON_KEY');
+    }
   }
   
-  if (isDevelopment && (!supabaseAnonKey || supabaseAnonKey === 'undefined' || supabaseAnonKey === '')) {
-    console.warn('VITE_SUPABASE_ANON_KEY is missing or invalid - using development fallback');
-    finalKey = DEV_FALLBACK_KEY;
-  }
-  
-  // In production, we must have real credentials
-  if (!isDevelopment) {
-    if (!supabaseUrl || supabaseUrl === 'undefined' || supabaseUrl === '') {
-      throw new Error('Supabase URL is required in production. Please check your environment variables.');
+  return { isValid, url, key };
+}
+
+// Run validation
+const { isValid, url: validUrl, key: validKey } = validateConfig();
+
+// In production, we require valid configuration
+if (!isValid && !isDevelopment) {
+  throw new Error('Missing or invalid Supabase configuration. Check environment variables.');
+}
+
+/**
+ * Creates a configured Supabase client with proper error handling
+ */
+function createSupabaseClient(): SupabaseClient {
+  // Enhanced fetch for better error messaging and debugging
+  const enhancedFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const inputUrl = typeof input === 'string' ? input : input.toString();
+    
+    // Add authentication headers if they're missing
+    const headers = new Headers(init?.headers || {});
+    
+    if (!headers.has('apikey')) {
+      headers.set('apikey', validKey);
     }
     
-    if (!supabaseAnonKey || supabaseAnonKey === 'undefined' || supabaseAnonKey === '') {
-      throw new Error('Supabase Anonymous Key is required in production. Please check your environment variables.');
+    if (!headers.has('Authorization')) {
+      headers.set('Authorization', `Bearer ${validKey}`);
     }
-  }
-
-  const retryCount = isDevelopment ? 3 : 2; // More retries in development
-  const retryDelay = 1000; // 1 second delay between retries
-
-  // Custom fetch wrapper with retry logic
-  const fetchWithRetry = async (input: RequestInfo | URL, options?: RequestInit): Promise<Response> => {
-    let lastError: Error;
     
-    for (let attempt = 0; attempt < retryCount; attempt++) {
-      try {
-        // Add retry attempt header for debugging
-        const requestOptions = {
-          ...options,
-          headers: {
-            ...(options?.headers || {}),
-            'X-Retry-Attempt': `${attempt + 1}`
+    const options = {
+      ...init,
+      headers
+    };
+    
+    try {
+      if (isDevelopment) {
+        // Log request details (without sensitive parts)
+        const urlForLogging = inputUrl.split('?')[0]; // Remove query params for security
+        console.log(`📤 Supabase request: ${urlForLogging}`);
+      }
+      
+      // Make the request
+      const response = await fetch(input, options);
+      
+      // Log helpful error information
+      if (response.status >= 400 && isDevelopment) {
+        console.warn(`⚠️ Supabase response status: ${response.status}`);
+        
+        if (response.status === 401) {
+          console.warn('Authentication error - verify API key and user authentication');
+          // Try to get auth status from localStorage for debugging
+          try {
+            const session = localStorage.getItem('paralegal-app-auth');
+            console.warn('Auth session exists:', !!session);
+          } catch (e) {
+            console.warn('Could not check auth session');
           }
-        };
-
-        // Attempt the fetch
-        const response = await fetch(input, requestOptions);
-        
-        // If we're being rate limited, wait and retry
-        if (response.status === 429) {
-          const retryAfter = response.headers.get('Retry-After');
-          const waitTime = retryAfter ? parseInt(retryAfter, 10) * 1000 : retryDelay;
-          await new Promise(resolve => setTimeout(resolve, waitTime));
-          continue;
-        }
-        
-        return response;
-      } catch (err) {
-        console.warn(`Supabase fetch attempt ${attempt + 1}/${retryCount} failed:`, err);
-        lastError = err as Error;
-        
-        // Wait before retrying
-        if (attempt < retryCount - 1) {
-          await new Promise(resolve => setTimeout(resolve, retryDelay));
         }
       }
+      
+      return response;
+    } catch (error) {
+      console.error('❌ Supabase request failed:', error);
+      throw error;
     }
-    
-    // All attempts failed
-    throw lastError!;
   };
-
-  // Log successful validation in dev mode
+  
   if (isDevelopment) {
-    console.log('Supabase client initialization with valid credentials');
+    console.log('🔄 Initializing Supabase client...');
   }
-
-  // Create the client with enhanced config and explicit string parameters
-  // This ensures the URL and key are properly passed as strings
-  return createClient(finalUrl.trim(), finalKey.trim(), {
+  
+  // Create and return Supabase client with our configuration
+  return createClient(validUrl, validKey, {
     auth: {
       autoRefreshToken: true,
       persistSession: true,
       detectSessionInUrl: true,
-      storageKey: 'paralegal-app-auth', // Use a specific storage key
-      flowType: 'pkce' // Use PKCE flow for enhanced security
+      storageKey: 'paralegal-app-auth',
+      debug: isDevelopment
     },
     global: {
-      fetch: fetchWithRetry
-    },
-    // Add reasonable timeouts
-    realtime: {
-      timeout: 30000 // 30 seconds
+      fetch: enhancedFetch
     }
   });
-};
+}
 
-// Create and export the Supabase client
+// Export the Supabase client
 export const supabase = createSupabaseClient();
 
 /**
- * Utility function to check if Supabase is properly connected and authenticated
- * Returns detailed information about the connection status
+ * Utility function to check if the user is currently authenticated
  */
+export async function isAuthenticated(): Promise<boolean> {
+  try {
+    const { data } = await supabase.auth.getSession();
+    return !!data.session;
+  } catch (error) {
+    console.error('Error checking authentication status:', error);
+    return false;
+  }
+}
+
+/**
+ * Get a formatted string with the current connection status
+ */
+export async function getConnectionStatus(): Promise<string> {
+  try {
+    // Simple connection test
+    const start = Date.now();
+    const { error } = await supabase.from('_dummy_query').select('*').limit(1);
+    const time = Date.now() - start;
+    
+    // If we get a 404 error about relation not existing, that's actually good
+    // It means we connected to the API successfully
+    if (error) {
+      // PostgresError code PGRST116 means "relation does not exist"
+      // Code 42P01 is the PostgreSQL error code for "undefined_table"
+      // Both indicate the API connection worked but the table doesn't exist (expected)
+      const isExpectedError = 
+        error.code === 'PGRST116' || 
+        error.code === '42P01' || 
+        error.message.includes('does not exist');
+      
+      if (isExpectedError) {
+        const authStatus = await isAuthenticated();
+        return `Connected to Supabase (${time}ms) | Auth: ${authStatus ? 'Yes ✓' : 'No ✗'}`;
+      }
+      
+      return `Connection error: ${error.message} (${error.code || 'unknown'})`;
+    }
+    
+    return `Connected to Supabase (${time}ms)`;
+  } catch (error) {
+    return `Error checking connection: ${error instanceof Error ? error.message : 'Unknown error'}`;
+  }
+}
+
+// Export additional utility functions for use in the application
 export const checkSupabaseConnection = async (): Promise<{
   connected: boolean;
   authenticated: boolean;

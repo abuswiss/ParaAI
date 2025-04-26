@@ -1,21 +1,24 @@
-import React, { useState, useEffect, useRef, DragEvent } from 'react';
-import { sendMessageStream } from '../../services/chatService';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { sendMessageStream, getConversationMessages } from '../../services/chatService';
 import { DocumentAnalysisResult } from '../../services/documentAnalysisService';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 
-// Import the separate components
-import ChatMessage from './ChatMessage';
+// Import the separate components - only using ChatInput now since we're rendering messages directly
 import ChatInput from './ChatInput';
 
+// Define interfaces
 interface Message {
   id: string;
   role: 'user' | 'assistant' | 'system';
   content: string;
-  timestamp: string;
+  // Support both timestamp (frontend) and created_at (Supabase schema) for compatibility
+  timestamp?: string;
+  created_at?: string;
   isStreaming?: boolean;
   documentContext?: string; // Reference to document context, if any
   analysisContext?: DocumentAnalysisResult; // Reference to analysis context, if any
   isEditing?: boolean; // For editing mode
+  conversation_id?: string; // For Supabase compatibility
 }
 
 interface ChatInterfaceProps {
@@ -23,20 +26,72 @@ interface ChatInterfaceProps {
 }
 
 const ChatInterface: React.FC<ChatInterfaceProps> = ({ conversationId }) => {
+  // State management
   const [messages, setMessages] = useState<Message[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeContext, setActiveContext] = useState<string | null>(null);
-const [activeDocumentName, setActiveDocumentName] = useState<string | null>(null);
+  const [activeDocumentName, setActiveDocumentName] = useState<string | null>(null);
   const [activeAnalysis, setActiveAnalysis] = useState<DocumentAnalysisResult | null>(null);
-  const [messageIdBeingEdited, setMessageIdBeingEdited] = useState<string | null>(null);
-  const [lastUserMessageId, setLastUserMessageId] = useState<string | null>(null);
   const [isDraggingFile, setIsDraggingFile] = useState(false);
+  const [isSendingMessage, setIsSendingMessage] = useState(false);
+  const [isUIDisabled, setIsUIDisabled] = useState(false);
+
+  // Refs
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // State to store the active conversation ID (possibly created on demand)
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
+
+  // Function to fetch messages for a specific conversation
+  const fetchMessages = useCallback(async (conversationId: string) => {
+    if (!conversationId || conversationId === 'new') return;
+    
+    try {
+      setIsUIDisabled(true);
+      const { data, error } = await getConversationMessages(conversationId);
+      
+      if (error) {
+        console.error('Error fetching messages:', error);
+        throw error;
+      }
+      
+      if (data) {
+        setMessages(data);
+      }
+    } catch (error) {
+      console.error('Error in fetchMessages:', error);
+      setError('Failed to load conversation messages.');
+    } finally {
+      setIsUIDisabled(false);
+    }
+  }, []);
+
+  // Effect to load conversation messages when active conversation changes
+  useEffect(() => {
+    console.log('Conversation ID changed:', conversationId);
+    
+    if (!conversationId) {
+      // No conversation ID provided
+      console.log('No conversation ID, clearing messages');
+      setActiveConversationId(null);
+      setMessages([]);
+    } else if (conversationId === 'new') {
+      // New conversation requested
+      console.log('New conversation requested');
+      setActiveConversationId(null); // Start with null to ensure new creation
+      setMessages([]); // Clear any existing messages
+    } else {
+      // Existing conversation, fetch messages
+      console.log('Loading existing conversation:', conversationId);
+      setActiveConversationId(conversationId);
+      fetchMessages(conversationId);
+    }
+    
+    // Scroll to bottom when conversation changes
+    if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [conversationId, fetchMessages]);
 
   // Reset state and add initial system message when conversationId changes
   useEffect(() => {
@@ -44,254 +99,86 @@ const [activeDocumentName, setActiveDocumentName] = useState<string | null>(null
     setActiveContext(null);
     setActiveDocumentName(null);
     setActiveAnalysis(null);
-    setMessageIdBeingEdited(null);
-    setLastUserMessageId(null);
     setError(null);
-    // Set the active conversation ID, handling the case where conversationId might be undefined
-    setActiveConversationId(conversationId && conversationId !== 'new' ? conversationId : null);
-    
-    // Load conversation if we have an ID, otherwise show welcome message
-    if (conversationId && conversationId !== 'new') {
-      // TODO: Load the conversation messages from the database
-      console.log(`Loading conversation: ${conversationId}`);
-      // For now, just add the welcome message
-      setMessages([
-        {
-          id: '0',
-          role: 'system',
-          content: 'Welcome back to this conversation. How can I help you today?',
-          timestamp: new Date().toISOString(),
-        },
-      ]);
-    } else {
-      // Reset to initial welcome message for new chat
-      setMessages([
-        {
-          id: '0',
-          role: 'system',
-          content: 'Welcome to Paralegal AI Assistant. How can I help you today?',
-          timestamp: new Date().toISOString(),
-        },
-      ]);
-    }
   }, [conversationId]);
 
-  // Scroll to bottom when messages change
+  // Scroll to bottom effect for messages
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
   }, [messages]);
 
-  // Copy message content to clipboard
-  const handleCopyContent = (content: string) => {
-    navigator.clipboard.writeText(content)
-      .then(() => {
-        // Can add a toast notification here if desired
-        console.log('Content copied to clipboard');
-      })
-      .catch((err) => {
-        console.error('Failed to copy content: ', err);
-      });
-  };
+  // Debug messages array contents
+  useEffect(() => {
+    console.log('Current messages state:', messages);
+  }, [messages]);
 
-  // Handle editing a message
-  const handleEditMessage = (messageId: string, newContent: string) => {
-    // If newContent is the same as the original and messageIdBeingEdited is not null,
-    // it means we're canceling the edit
-    if (messageId === messageIdBeingEdited) {
-      setMessages(messages.map(message => {
-        if (message.id === messageId) {
-          return { ...message, isEditing: false };
-        }
-        return message;
-      }));
-      setMessageIdBeingEdited(null);
-      return;
-    }
-
-    // If messageIdBeingEdited is null, it means we're starting a new edit
-    if (messageIdBeingEdited === null) {
-      setMessages(messages.map(message => {
-        if (message.id === messageId) {
-          return { ...message, isEditing: true };
-        }
-        return message;
-      }));
-      setMessageIdBeingEdited(messageId);
-      return;
-    }
-
-    // If we reach here, it means we're saving an edit
-    setMessages(messages.map(message => {
-      if (message.id === messageId) {
-        return { ...message, content: newContent, isEditing: false };
-      }
-      return message;
-    }));
-    setMessageIdBeingEdited(null);
-
-    // If the edited message is the last user message, update lastUserMessageId
-    if (messageId === lastUserMessageId) {
-      // If the message was regenerated, we should trigger the AI response
-      const userMessage = messages.find(m => m.id === messageId);
-      if (userMessage && userMessage.content !== newContent) {
-        // Find the next assistant message to regenerate
-        const msgIndex = messages.findIndex(m => m.id === messageId);
-        if (msgIndex !== -1 && msgIndex < messages.length - 1 && messages[msgIndex + 1].role === 'assistant') {
-          handleRegenerateResponse(messages[msgIndex + 1].id);
-        }
-      }
+  // Format timestamp for display
+  const formatMessageTime = (message: Message): string => {
+    const timestamp = message.created_at || message.timestamp || new Date().toISOString();
+    try {
+      return new Date(timestamp).toLocaleTimeString();
+    } catch (e) {
+      console.error('Error formatting time:', e);
+      return 'Unknown time';
     }
   };
 
-  // Regenerate an AI response
-  const handleRegenerateResponse = async (messageId: string) => {
-    // Find the assistant message
-    const assistantMessage = messages.find(m => m.id === messageId);
-    if (!assistantMessage || assistantMessage.role !== 'assistant') return;
-
-    // Find the preceding user message
-    const msgIndex = messages.findIndex(m => m.id === messageId);
-    if (msgIndex <= 0) return;
+  // Function to handle sending a new message
+  const handleSendMessage = async (content: string) => {
+    if (!content.trim() || isSendingMessage) return;
     
-    const userMessage = messages[msgIndex - 1];
-    if (userMessage.role !== 'user') return;
+    console.log('Sending message:', content);
     
-    // Call handleSendMessage with the user message content and contexts
-    await handleSendMessage(
-      userMessage.content, 
-      userMessage.documentContext, 
-      userMessage.analysisContext,
-      messageId // Pass the messageId to replace
-    );
-  };
-
-  const handleSendMessage = async (
-    content: string, 
-    documentContext?: string, 
-    analysisContext?: DocumentAnalysisResult,
-    messageIdToReplace?: string
-  ) => {
-    if (!content.trim()) return;
-
-    // Update active context if document context is provided
-    if (documentContext) {
-      setActiveContext(documentContext);
-    }
-    
-    // Update active analysis if analysis context is provided
-    if (analysisContext) {
-      setActiveAnalysis(analysisContext);
-    }
-
-    // Add user message
-    // If we're regenerating a response, don't add another user message
-    if (!messageIdToReplace) {
-      const userMessageId = Date.now().toString();
+    try {
+      setIsSendingMessage(true);
+      setIsUIDisabled(true);
+      
+      // Create a placeholder message ID for streaming updates
+      const placeholderId = crypto.randomUUID();
+      
+      // Pre-add user message to UI
       const userMessage: Message = {
-        id: userMessageId,
+        id: crypto.randomUUID(),
         role: 'user',
-        content,
-        timestamp: new Date().toISOString(),
-        documentContext: documentContext || undefined,
-        analysisContext: analysisContext || undefined,
+        content: content,
+        timestamp: new Date().toISOString()
       };
       
-      setMessages((prevMessages) => [...prevMessages, userMessage]);
-      setLastUserMessageId(userMessageId);
-    }
-
-    // This line is now handled in the conditional block above
-    setIsLoading(true);
-    setError(null);
-
-    // Create a placeholder for the AI response
-    const placeholderId = messageIdToReplace || `ai-${Date.now()}`;
-    const placeholderMessage: Message = {
-      id: placeholderId,
-      role: 'assistant',
-      content: '',
-      timestamp: new Date().toISOString(),
-      isStreaming: true,
-      documentContext: documentContext || undefined,
-      analysisContext: analysisContext || undefined,
-    };
-
-    // If we're regenerating, replace the existing message, otherwise add a new one
-    if (messageIdToReplace) {
-      setMessages((prevMessages) => 
-        prevMessages.map(msg => 
-          msg.id === messageIdToReplace ? placeholderMessage : msg
-        )
-      );
-    } else {
-      setMessages((prevMessages) => [...prevMessages, placeholderMessage]);
-    }
-
-    try {
-      const chunks: string[] = [];
-
-      // Create a new conversation for the first message if needed
-      if (!activeConversationId) {
-        try {
-          // Import the conversation creation function
-          const { createConversation } = await import('../../services/chatService');
-          const { data: newConversation, error } = await createConversation('New Conversation');
-          
-          if (error) {
-            console.error('Error creating conversation:', error);
-            
-            // Show specific error messages based on type
-            if (error.message.includes('authentication') || error.message.includes('sign in')) {
-              setError(`Authentication error: ${error.message}. Please sign in again.`);
-              // Redirect to login after a delay
-              setTimeout(() => {
-                window.location.href = '/auth';
-              }, 5000);
-            } else if (error.message.includes('connection') || error.message.includes('database')) {
-              setError(`Database connection error: ${error.message}. Please try again later.`);
-            } else {
-              setError(`Error: ${error.message}`);
-            }
-            
-            setIsLoading(false);
-            return; // Stop message sending if we can't create a conversation
-          } 
-          
-          if (newConversation) {
-            console.log('Created new conversation:', newConversation.id);
-            setActiveConversationId(newConversation.id);
-            // Clear any previous errors
-            setError(null);
-          } else {
-            // Unexpected case - no error but no conversation either
-            console.warn('No conversation created and no error reported');
-            setError('Unable to create conversation. Please try again.');
-            setIsLoading(false);
-            return;
-          }
-        } catch (err) {
-          console.error('Failed to create conversation:', err);
-          setError('An unexpected error occurred. Please try again.');
-          setIsLoading(false);
-          return;
-        }
-      }
+      // Add placeholder for assistant message
+      const assistantMessage: Message = {
+        id: placeholderId,
+        role: 'assistant',
+        content: '',
+        timestamp: new Date().toISOString(),
+        isStreaming: true
+      };
       
-      await sendMessageStream(
-        activeConversationId!, // Now we have a real conversation ID
+      // Add both messages to the UI
+      setMessages(prevMessages => [...prevMessages, userMessage, assistantMessage]);
+      
+      // Create a buffer for response chunks
+      const chunks: string[] = [];
+      
+      console.log('Active conversation ID:', activeConversationId);
+      
+      // Send message and handle streaming response
+      const response = await sendMessageStream(
+        activeConversationId,
         content,
         (chunk) => {
           chunks.push(chunk);
+          console.log('Received chunk:', chunk.length > 20 ? chunk.substring(0, 20) + '...' : chunk);
 
           // Update the message as chunks come in
-          setMessages((prevMessages) => {
+          setMessages(prevMessages => {
             const newMessages = [...prevMessages];
-            const messageIndex = newMessages.findIndex((m) => m.id === placeholderId);
+            const messageIndex = newMessages.findIndex(m => m.id === placeholderId);
             if (messageIndex !== -1) {
               newMessages[messageIndex] = {
                 ...newMessages[messageIndex],
-                content: chunks.join(''),
-                isStreaming: true
+                content: chunks.join('')
               };
             }
             return newMessages;
@@ -301,10 +188,18 @@ const [activeDocumentName, setActiveDocumentName] = useState<string | null>(null
         activeAnalysis ? JSON.stringify(activeAnalysis) : undefined // Pass analysis context to the API
       );
 
+      console.log('Message response:', response);
+
+      // If a new conversation was created, update the active conversation ID
+      if (response.newConversationId) {
+        console.log('New conversation created:', response.newConversationId);
+        setActiveConversationId(response.newConversationId);
+      }
+      
       // Mark streaming as complete
-      setMessages((prevMessages) => {
+      setMessages(prevMessages => {
         const newMessages = [...prevMessages];
-        const messageIndex = newMessages.findIndex((m) => m.id === placeholderId);
+        const messageIndex = newMessages.findIndex(m => m.id === placeholderId);
         if (messageIndex !== -1) {
           newMessages[messageIndex] = {
             ...newMessages[messageIndex],
@@ -314,129 +209,193 @@ const [activeDocumentName, setActiveDocumentName] = useState<string | null>(null
         return newMessages;
       });
       
-    } catch (err) {
-      console.error('Error sending message:', err);
+      console.log('Message sending complete');
+    } catch (error) {
+      console.error('Error sending message:', error);
       setError('Failed to send message. Please try again.');
-
-      // Update placeholder with error message
-      setMessages((prevMessages) => {
-        const newMessages = [...prevMessages];
-        const messageIndex = newMessages.findIndex((m) => m.id === placeholderId);
-        if (messageIndex !== -1) {
-          newMessages[messageIndex] = {
-            ...newMessages[messageIndex],
-            content: 'Sorry, I encountered an error. Please try again.',
-            isStreaming: false
-          };
-        }
-        return newMessages;
-      });
     } finally {
-      setIsLoading(false);
+      setIsSendingMessage(false);
+      setIsUIDisabled(false);
     }
   };
 
-  // Show welcome state if no messages except system message
-  // Show welcome screen for new conversations or when explicitly resetting
-  const showWelcome = (messages.length === 1 && messages[0].role === 'system') || !conversationId || conversationId === 'new';
+  // Effect to reset UI states when component unmounts
+  useEffect(() => {
+    return () => {
+      setIsSendingMessage(false);
+      setIsUIDisabled(false);
+    };
+  }, []);
+
+  // Effect to scroll to bottom whenever messages change
+  useEffect(() => {
+    if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [messages]);
+
+  // Add CSS styles for markdown rendering
+  useEffect(() => {
+    const styleEl = document.createElement('style');
+    styleEl.innerHTML = `
+      .markdown-content {
+        font-size: 0.875rem;
+        line-height: 1.5;
+      }
+      .markdown-content p {
+        margin-bottom: 1em;
+      }
+      .markdown-content h1, 
+      .markdown-content h2, 
+      .markdown-content h3, 
+      .markdown-content h4 {
+        font-weight: bold;
+        margin-top: 1.5em;
+        margin-bottom: 0.5em;
+        line-height: 1.2;
+      }
+      .markdown-content h1 {
+        font-size: 1.5rem;
+      }
+      .markdown-content h2 {
+        font-size: 1.25rem;
+      }
+      .markdown-content h3 {
+        font-size: 1.125rem;
+      }
+      .markdown-content ul {
+        list-style-type: disc;
+        padding-left: 1.5em;
+        margin-bottom: 1em;
+      }
+      .markdown-content ol {
+        list-style-type: decimal;
+        padding-left: 1.5em;
+        margin-bottom: 1em;
+      }
+      .markdown-content li {
+        margin-bottom: 0.25em;
+      }
+      .markdown-content pre {
+        background-color: rgba(30, 30, 30, 0.7);
+        border-radius: 4px;
+        padding: 0.75em;
+        margin: 1em 0;
+        overflow-x: auto;
+      }
+      .markdown-content code {
+        font-family: monospace;
+        background-color: rgba(30, 30, 30, 0.7);
+        padding: 0.2em 0.4em;
+        border-radius: 3px;
+        font-size: 0.85em;
+      }
+      .markdown-content pre code {
+        background-color: transparent;
+        padding: 0;
+      }
+      .markdown-content blockquote {
+        border-left: 3px solid rgba(200, 200, 200, 0.5);
+        padding-left: 1em;
+        margin: 1em 0;
+        font-style: italic;
+        color: rgba(255, 255, 255, 0.8);
+      }
+      .markdown-content a {
+        color: #F2A494;
+        text-decoration: underline;
+      }
+      .markdown-content strong {
+        font-weight: bold;
+      }
+      .markdown-content em {
+        font-style: italic;
+      }
+      .markdown-content table {
+        border-collapse: collapse;
+        width: 100%;
+        margin: 1em 0;
+      }
+      .markdown-content th,
+      .markdown-content td {
+        border: 1px solid rgba(200, 200, 200, 0.2);
+        padding: 0.5em;
+        text-align: left;
+      }
+      .markdown-content th {
+        background-color: rgba(30, 30, 30, 0.5);
+      }
+      .markdown-content hr {
+        border: 0;
+        border-top: 1px solid rgba(200, 200, 200, 0.2);
+        margin: 1.5em 0;
+      }
+    `;
+    document.head.appendChild(styleEl);
+    
+    return () => {
+      document.head.removeChild(styleEl);
+    };
+  }, []);
+
+  // Function to retry a previous message if needed
+  // We'll keep this for future functionality but it's not used yet
+
+  // Handle file upload
+  const handleFiles = async (files: File[]) => {
+    console.log('Files received:', files);
+    // Implement file upload logic here
+  };
+
+  // Show welcome state ONLY for new conversations with no messages
+  // This ensures we don't show the welcome screen when messages exist in the database
+  const showWelcome = messages.length === 0 && (!conversationId || conversationId === 'new');
+  
+  // Sample quick questions for the welcome screen - reduced to 4 in a 2x2 grid
+  const suggestionItems = [
+    "What are the key elements of a valid contract?",
+    "How do I file a trademark application?",
+    "What's the difference between a patent and copyright?",
+    "What steps should I take if I receive a cease and desist?",
+  ];
   
   // File upload handling functions
-  const handleDragEnter = (e: DragEvent<HTMLDivElement>) => {
+  const handleDragEnter = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     e.stopPropagation();
     setIsDraggingFile(true);
   };
   
-  const handleDragOver = (e: DragEvent<HTMLDivElement>) => {
+  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     e.stopPropagation();
     // Keep the isDraggingFile state true during dragover
     setIsDraggingFile(true);
   };
   
-  const handleDragLeave = (e: DragEvent<HTMLDivElement>) => {
+  const handleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     e.stopPropagation();
     
-    // Only set to false if we're leaving the chat container (not entering a child element)
-    // Check if we're not entering a child element
-    const relatedTarget = e.relatedTarget as Node;
-    const currentTarget = e.currentTarget as Node;
-    
-    if (!currentTarget.contains(relatedTarget)) {
-      setIsDraggingFile(false);
+    // Only set to false if we're leaving the drop zone
+    if (e.currentTarget.contains(e.relatedTarget as Node)) {
+      return;
     }
+    
+    setIsDraggingFile(false);
   };
   
-  const handleDrop = (e: DragEvent<HTMLDivElement>) => {
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     e.stopPropagation();
     setIsDraggingFile(false);
     
-    const files = e.dataTransfer.files;
-    if (files && files.length > 0) {
-      handleFiles(Array.from(files));
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      const filesArray = Array.from(e.dataTransfer.files);
+      handleFiles(filesArray);
     }
   };
   
-  const handleFiles = (files: File[]) => {
-    try {
-      if (!files.length) {
-        console.warn('No files provided to handleFiles');
-        return;
-      }
-
-      // In a real implementation, you would call your document upload service
-      // For now, we'll just extract basic info and mock the extraction
-      const file = files[0];
-      const mockDocument = {
-        id: `doc-${Date.now()}`,
-        filename: file.name,
-        fileType: file.type,
-        fileSize: file.size,
-        uploadedAt: new Date().toISOString(),
-        extractedText: `Sample extracted text from ${file.name}. This is a placeholder for actual text extraction.`
-      };
-      
-      // Set the active context and document name
-      setActiveContext(mockDocument.extractedText);
-      setActiveDocumentName(file.name);
-      
-      // Clear any previous errors
-      setError(null);
-      
-      // Show a notification or feedback that the document was uploaded
-      console.log('Document uploaded to chat:', mockDocument.filename);
-      
-      // Always add a system message about the document to make behavior consistent regardless of upload method
-      setMessages(prev => [
-        ...prev,
-        {
-          id: `system-doc-${Date.now()}`,
-          role: 'system',
-          content: `Document "${file.name}" has been uploaded and is ready for analysis.`,
-          timestamp: new Date().toISOString(),
-        }
-      ]);
-    } catch (err) {
-      console.error('Error handling files:', err);
-      setError(`Failed to process document: ${err instanceof Error ? err.message : 'Unknown error'}`);
-    }
-  };
-  
-  const handleFileButtonClick = () => {
-    if (fileInputRef.current) {
-      fileInputRef.current.click();
-    }
-  };
-  
-  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const files = event.target.files;
-    if (files && files.length > 0) {
-      handleFiles(Array.from(files));
-    }
-  };
-
   return (
     <div 
       className={`flex flex-col h-full relative ${isDraggingFile ? 'bg-opacity-90' : ''}`}
@@ -449,16 +408,13 @@ const [activeDocumentName, setActiveDocumentName] = useState<string | null>(null
       {activeContext && activeDocumentName && (
         <div className="px-4 py-2 bg-gray-800 flex items-center space-x-2 text-sm border-b border-gray-700">
           <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-primary" viewBox="0 0 20 20" fill="currentColor">
-            <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1z" clipRule="evenodd" />
+            <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clipRule="evenodd" />
           </svg>
-          <span className="text-gray-400 truncate max-w-xs">Using document context: {activeDocumentName}</span>
+          <span>Context: {activeDocumentName}</span>
           <button 
-            onClick={() => {
-              setActiveContext(null);
-              setActiveDocumentName(null);
-            }} 
-            className="text-gray-500 hover:text-gray-300 ml-auto"
-            aria-label="Clear document context"
+            onClick={() => { setActiveContext(null); setActiveDocumentName(null); }}
+            className="ml-auto text-gray-400 hover:text-white"
+            aria-label="Remove document context"
           >
             <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
               <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
@@ -466,148 +422,129 @@ const [activeDocumentName, setActiveDocumentName] = useState<string | null>(null
           </button>
         </div>
       )}
-      
-      {/* Analysis context indicator */}
-      {activeAnalysis && (
-        <div className="px-4 py-2 bg-gray-800 flex items-center space-x-2 text-sm border-b border-gray-700">
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-primary" viewBox="0 0 20 20" fill="currentColor">
-            <path d="M9 9a2 2 0 114 0 2 2 0 01-4 0z" />
-            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-13a4 4 0 00-3.446 6.032l-2.261 2.26a1 1 0 101.414 1.415l2.261-2.261A4 4 0 1011 5z" clipRule="evenodd" />
-          </svg>
-          <span className="text-gray-400">Using {activeAnalysis.analysisType} analysis for enhanced responses</span>
-          <button 
-            onClick={() => setActiveAnalysis(null)} 
-            className="text-gray-500 hover:text-gray-300 ml-auto"
-            aria-label="Clear analysis context"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-              <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
-            </svg>
-          </button>
-        </div>
-      )}
-      
-      {/* Messages container with animations */}
-      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-5 relative">
-        {/* Drag overlay indicator */}
-        {isDraggingFile && (
-          <div className="absolute inset-0 bg-surface-darker bg-opacity-70 backdrop-blur-sm flex items-center justify-center z-50 border-2 border-dashed border-primary rounded-md">
-            <div className="text-center p-6 rounded-lg">
-              <svg className="mx-auto h-12 w-12 text-primary animate-bounce" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-              </svg>
-              <h3 className="mt-2 text-lg font-medium text-text-primary">Drop your files here</h3>
-              <p className="mt-1 text-sm text-text-secondary">Drop files to upload and analyze them</p>
-              <button 
-                onClick={handleFileButtonClick}
-                className="mt-4 inline-flex items-center px-4 py-2 bg-primary hover:bg-primary-dark text-white text-sm font-medium rounded-md shadow-sm transition-colors duration-200"
-              >
-                <svg className="mr-2 h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-                </svg>
-                Select File
-              </button>
+
+      {/* Main messages container */}
+      <div className="flex-grow overflow-y-auto p-4 space-y-4">
+        {/* Welcome screen for new chats */}
+        {showWelcome ? (
+          <div className="flex flex-col items-center justify-center h-full text-center py-8">
+            <div className="max-w-xl">
+              <h2 className="text-2xl font-semibold mb-4">Welcome to the Paralegal AI Assistant</h2>
+              <p className="mb-4 text-gray-300 text-lg">
+                I can help you analyze legal documents, draft responses, and answer legal questions.
+              </p>
+              
+              {/* Quick suggestion buttons in a 2x2 grid layout */}
+              <div className="grid grid-cols-2 gap-3 max-w-xl mx-auto mt-6">
+                {suggestionItems.map((suggestion, index) => (
+                  <button
+                    key={index}
+                    className="p-3 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg text-sm text-left transition-colors text-white focus:outline-none focus:ring-2 focus:ring-primary"
+                    onClick={() => handleSendMessage(suggestion)}
+                  >
+                    {suggestion}
+                  </button>
+                ))}
+              </div>
+              
+              <p className="text-sm text-gray-400 mt-4">
+                You can also upload a document or type your own question below.
+              </p>
+            </div>
+          </div>
+        ) : (
+          <div className="w-full h-full">
+            {/* Messages container with improved styling */}
+            <div className="px-4 pt-6 pb-20 h-full flex flex-col overflow-y-auto space-y-6">
+              {/* Map and render each message with a flatter design */}
+              {messages.map((message) => {
+                const isUser = message.role === 'user';
+                return (
+                  <motion.div
+                    key={message.id}
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.3 }}
+                    className={`w-full mb-6 ${isUser ? 'pr-12' : 'pl-12'}`}
+                  >
+                    {/* User display with avatar and message in semi-transparent bubble */}
+                    {isUser ? (
+                      <div className="flex items-start justify-end">
+                        <div className="max-w-[80%]">
+                          <div className="inline-block bg-gray-700 bg-opacity-50 px-4 py-3 rounded-lg text-white">
+                            {message.content}
+                          </div>
+                          <p className="text-xs text-gray-400 mt-1 text-right mr-1">
+                            {formatMessageTime(message)}
+                          </p>
+                        </div>
+                      </div>
+                    ) : (
+                      /* AI response directly on background */
+                      <div className="flex items-start">
+                        <div className="mr-3 mt-1">
+                          <div className="rounded-full w-7 h-7 bg-secondary text-white flex items-center justify-center text-xs font-semibold">
+                            AI
+                          </div>
+                        </div>
+                        <div className="flex-1 max-w-[90%]">
+                          <div className="text-white mb-2 whitespace-pre-wrap">
+                            {message.content}
+                          </div>
+                          {/* Action buttons for AI messages */}
+                          <div className="flex items-center space-x-3 mt-2">
+                            <button 
+                              className="text-gray-400 hover:text-white transition-colors p-1 rounded"
+                              onClick={() => navigator.clipboard.writeText(message.content)}
+                              title="Copy to clipboard"
+                            >
+                              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                                <path d="M8 3a1 1 0 011-1h2a1 1 0 110 2H9a1 1 0 01-1-1z" />
+                                <path d="M6 3a2 2 0 00-2 2v11a2 2 0 002 2h8a2 2 0 002-2V5a2 2 0 00-2-2 3 3 0 01-3 3H9a3 3 0 01-3-3z" />
+                              </svg>
+                            </button>
+                            <button 
+                              className="text-gray-400 hover:text-white transition-colors flex items-center p-1 rounded"
+                              onClick={() => {
+                                // Find the user message that preceded this AI message
+                                const messageIndex = messages.findIndex(m => m.id === message.id);
+                                if (messageIndex > 0) {
+                                  const userMessage = messages[messageIndex - 1];
+                                  if (userMessage.role === 'user') {
+                                    // Handle regeneration in a proper way without adding new messages
+                                    // First remove the AI message
+                                    setMessages(prevMessages => {
+                                      const newMessages = [...prevMessages];
+                                      newMessages.splice(messageIndex, 1);
+                                      return newMessages;
+                                    });
+                                    
+                                    // Then regenerate using the same user message
+                                    handleSendMessage(userMessage.content);
+                                  }
+                                }
+                              }}
+                              title="Regenerate response"
+                            >
+                              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" viewBox="0 0 20 20" fill="currentColor">
+                                <path fillRule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clipRule="evenodd" />
+                              </svg>
+                              <span className="text-xs">Regenerate</span>
+                            </button>
+                            <span className="text-xs text-gray-500 ml-2">{formatMessageTime(message)}</span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </motion.div>
+                );
+              })}
             </div>
           </div>
         )}
         
-        {/* Hidden file input */}
-        <input
-          type="file"
-          ref={fileInputRef}
-          onChange={handleFileChange}
-          className="hidden"
-          accept=".pdf,.docx,.doc,.txt"
-        />
-        <AnimatePresence>
-          {!showWelcome && messages.map((message) => (
-            <motion.div
-              key={message.id}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -20 }}
-              transition={{ duration: 0.3 }}
-            >
-              <ChatMessage 
-                key={message.id} 
-                message={message} 
-                isStreaming={message.isStreaming}
-                onEditMessage={handleEditMessage}
-                onRegenerateResponse={handleRegenerateResponse}
-                onCopyContent={handleCopyContent}
-                onSaveMessage={() => console.log('Save message functionality to be implemented')}
-              />
-            </motion.div>
-          ))}
-        </AnimatePresence>
-
-        {/* Welcome message with streamlined design */}
-        <AnimatePresence>
-          {showWelcome && (
-            <motion.div 
-              className="flex flex-col h-full justify-center items-center py-8"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.5 }}
-            >
-              <div className="text-center mb-8">
-                <h2 className="text-2xl font-semibold text-text-primary mb-2">Welcome to Paralegal AI Assistant</h2>
-                <p className="text-gray-400 max-w-lg mx-auto">Your AI-powered legal assistant designed to help with document analysis, case management, and legal research.</p>
-              </div>
-              
-              {/* Instructional text instead of buttons */}
-              <div className="text-center text-gray-400 mb-8 w-full max-w-2xl">
-                <p className="mb-2"><span className="text-primary">Drag and drop</span> documents onto the chat or use the <span className="text-primary">+</span> button in the chat box to upload.</p>
-                <p>You can also use the search icon in the top-right corner to find existing documents.</p>
-              </div>
-              
-              {/* Chat suggestion section with cleaner design */}
-              <div className="mb-4">
-                <h3 className="text-center text-sm text-gray-400 mb-4">I can help you with:</h3>
-                <div className="grid grid-cols-2 gap-3 w-full max-w-2xl mx-auto">
-                  <button 
-                    onClick={() => handleSendMessage("Summarize this document")} 
-                    className="flex items-center space-x-2 bg-gray-800 hover:bg-gray-700 text-text-primary px-4 py-3 rounded-md text-sm transition-colors duration-200"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-primary" viewBox="0 0 20 20" fill="currentColor">
-                      <path d="M9 2a1 1 0 000 2h2a1 1 0 100-2H9z" />
-                      <path fillRule="evenodd" d="M4 5a2 2 0 012-2 3 3 0 003 3h2a3 3 0 003-3 2 2 0 012 2v11a2 2 0 01-2 2H6a2 2 0 01-2-2V5zm3 4a1 1 0 000 2h.01a1 1 0 100-2H7zm3 0a1 1 0 000 2h3a1 1 0 100-2h-3zm-3 4a1 1 0 100 2h.01a1 1 0 100-2H7zm3 0a1 1 0 100 2h3a1 1 0 100-2h-3z" clipRule="evenodd" />
-                    </svg>
-                    <span>Summarize this document</span>
-                  </button>
-                  <button 
-                    onClick={() => handleSendMessage("Extract key legal provisions")} 
-                    className="flex items-center space-x-2 bg-gray-800 hover:bg-gray-700 text-text-primary px-4 py-3 rounded-md text-sm transition-colors duration-200"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-primary" viewBox="0 0 20 20" fill="currentColor">
-                      <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clipRule="evenodd" />
-                    </svg>
-                    <span>Extract key legal provisions</span>
-                  </button>
-                  <button 
-                    onClick={() => handleSendMessage("What are the potential risks?")} 
-                    className="flex items-center space-x-2 bg-gray-800 hover:bg-gray-700 text-text-primary px-4 py-3 rounded-md text-sm transition-colors duration-200"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-primary" viewBox="0 0 20 20" fill="currentColor">
-                      <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-                    </svg>
-                    <span>What are the potential risks?</span>
-                  </button>
-                  <button 
-                    onClick={() => handleSendMessage("Create a timeline of events")} 
-                    className="flex items-center space-x-2 bg-gray-800 hover:bg-gray-700 text-text-primary px-4 py-3 rounded-md text-sm transition-colors duration-200"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-primary" viewBox="0 0 20 20" fill="currentColor">
-                      <path fillRule="evenodd" d="M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zm0 5a1 1 0 000 2h8a1 1 0 100-2H6z" clipRule="evenodd" />
-                    </svg>
-                    <span>Create a timeline of events</span>
-                  </button>
-                </div>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
+        {/* Invisible element to scroll to */}
         <div ref={messagesEndRef} />
       </div>
 
@@ -627,14 +564,16 @@ const [activeDocumentName, setActiveDocumentName] = useState<string | null>(null
         </div>
       )}
 
-      {/* Input component with dynamic positioning */}
-      <ChatInput 
-        onSendMessage={handleSendMessage} 
-        disabled={isLoading} 
-        isNewChat={showWelcome}
-        messagesCount={messages.length}
-        onFileUpload={handleFiles} /* Pass the file handling function to ChatInput */
-      />
+      {/* Input area at the bottom with improved styling - truly no border/shading */}
+      <div className="px-4 py-2 bg-transparent sticky bottom-0">
+        <ChatInput 
+          onSendMessage={handleSendMessage} 
+          disabled={isUIDisabled} 
+          onFileUpload={handleFiles}
+          isNewChat={showWelcome}
+          messagesCount={messages.length}
+        />
+      </div>
     </div>
   );
 };

@@ -1,4 +1,4 @@
-import { supabase, refreshSession, checkSupabaseConnection } from './supabaseClient';
+import { supabase, isAuthenticated } from './supabaseClient';
 
 /**
  * SecureDataClient provides utilities for safely accessing data 
@@ -20,25 +20,21 @@ const getCurrentUserId = async () => {
     return user.user.id;
   }
   
-  // Otherwise, try to refresh the session
-  const refreshed = await refreshSession();
-  if (refreshed) {
-    const { data: refreshedUser } = await supabase.auth.getUser();
-    if (refreshedUser?.user?.id) {
-      return refreshedUser.user.id;
-    }
+  // Otherwise, try to get a new session
+  const { data: sessionData } = await supabase.auth.getSession();
+  if (sessionData?.session?.user?.id) {
+    return sessionData.session.user.id;
   }
   
-  // If we still don't have a user, check connection status for better error messages
-  const connectionStatus = await checkSupabaseConnection();
+  // If we still don't have a user, check authentication directly
+  const authenticated = await isAuthenticated();
   
-  if (!connectionStatus.connected) {
-    throw new Error(`Cannot connect to the database. ${connectionStatus.error || ''}`);
-  }
-  
-  if (!connectionStatus.authenticated) {
+  if (!authenticated) {
     throw new Error('Not authenticated. Please sign in again.');
   }
+  
+  // If authenticated but still no user ID, there's something wrong with the auth state
+  throw new Error('User authenticated but unable to retrieve user ID');
   
   throw new Error('User not authenticated despite successful connection');
 };
@@ -132,25 +128,45 @@ export const createConversationSafely = async (
       .single();
 
     if (error) {
-      // Check if this is a connection or auth issue
-      const connectionStatus = await checkSupabaseConnection();
-      
-      if (!connectionStatus.connected) {
-        return { 
-          data: null, 
-          error: new Error(`Database connection failed: ${connectionStatus.error || 'Unknown error'}`) 
-        };
-      }
-      
-      if (!connectionStatus.authenticated) {
-        return { 
-          data: null, 
-          error: new Error('Authentication error. Please sign in again.') 
-        };
-      }
-      
       console.error('Error creating conversation:', error);
-      return { data: null, error };
+      
+      // Check if this is a server error (500)
+      if (error.code === '500' || (error as any).status === 500) {
+        // For 500 Internal Server errors, this could be a database schema issue
+        // or a server-side error, not an authentication problem
+        
+        // Let's log the full error details to help debugging
+        console.error('Database server error details:', {
+          code: error.code,
+          status: (error as any).status,
+          message: error.message,
+          details: error.details,
+          hint: error.hint,
+          fullError: JSON.stringify(error)
+        });
+        
+        return { 
+          data: null, 
+          error: new Error(`Database server error: ${error.message || 'Internal Server Error'} - This may be a schema issue with the conversations table`) 
+        };
+      }
+      
+      // Check if this is an authentication error (401, 403)
+      if (error.code === '401' || error.code === '403') {
+        const authenticated = await isAuthenticated();
+        if (!authenticated) {
+          return { 
+            data: null, 
+            error: new Error('Authentication error. Please sign in again.') 
+          };
+        }
+      }
+      
+      // For any other errors, return a more detailed error message
+      return { 
+        data: null, 
+        error: new Error(`Database error: ${error.message || 'Unknown error'} (Code: ${error.code || 'unknown'})`) 
+      };
     }
 
     return {
@@ -172,8 +188,16 @@ export const createConversationSafely = async (
 /**
  * Get a conversation safely to avoid RLS recursion issues
  */
-export const getConversationSafely = async (conversationId: string) => {
+export const getConversationSafely = async (conversationId: string | null) => {
   try {
+    // If no conversationId is provided, return early
+    if (!conversationId) {
+      return { 
+        data: null, 
+        error: new Error('No conversation ID provided. Create a conversation first.') 
+      };
+    }
+    
     const userId = await getCurrentUserId();
     
     // Direct query approach to avoid RLS policy recursion
@@ -265,11 +289,19 @@ export const getConversationMessagesSafely = async (conversationId: string) => {
  * Add a message safely to avoid RLS recursion issues
  */
 export const addMessageSafely = async (
-  conversationId: string,
+  conversationId: string | null,
   role: 'system' | 'user' | 'assistant',
   content: string
 ) => {
   try {
+    // If no conversationId is provided, return early with helpful error
+    if (!conversationId) {
+      return { 
+        data: null, 
+        error: new Error('Cannot add message: No conversation ID provided. Create a conversation first.') 
+      };
+    }
+  
     // First verify user has access to the conversation
     const { data: conversation, error: convError } = await getConversationSafely(conversationId);
     
@@ -280,18 +312,28 @@ export const addMessageSafely = async (
     const userId = await getCurrentUserId();
 
     // Now add the message without depending on RLS policies
+    // Create a message object using only the owner_id field
+    // The user_id field caused a 400 error as it doesn't exist in the schema cache
     const messageData = {
       id: crypto.randomUUID(),
       conversation_id: conversationId,
       role,
       content,
-      timestamp: new Date().toISOString(),
-      user_id: userId
+      created_at: new Date().toISOString(),
+      owner_id: userId       // For owner-based RLS policies
     };
 
+    // Include detailed debug info in development mode
+    if (import.meta.env.DEV) {
+      console.log('Inserting message with data:', { ...messageData, content: messageData.content.substring(0, 50) + '...' });
+    }
+
+    // Insert with count option for debugging
     const { data, error } = await supabase
       .from('messages')
-      .insert([messageData])
+      .insert([messageData], { 
+        count: 'exact'  // Get count of inserted rows
+      })
       .select()
       .single();
 

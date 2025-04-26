@@ -37,8 +37,7 @@ const DraftEditor: React.FC<DraftEditorProps> = ({
           // If the variable placeholder isn't in the content, 
           // it might have been replaced already
           // Try to determine what it was replaced with
-          const placeholder = `{{${variable}}}`;
-          const possibleValue = extractVariableValue(draft.content, placeholder, variable);
+          const possibleValue = extractVariableValue(draft.content, template.content, variable);
           initialValues[variable] = possibleValue || '';
         } else {
           initialValues[variable] = '';
@@ -49,13 +48,89 @@ const DraftEditor: React.FC<DraftEditorProps> = ({
     }
   }, [template, draft]);
   
-  // Extract the value a variable was replaced with
-  const extractVariableValue = (_content: string, _placeholder: string, _variable: string): string | null => {
-    // This is a simplified approach - in a real application, you would use a more
-    // robust method to determine what a placeholder was replaced with
+  // Extract the value a variable was replaced with by comparing template and draft content
+  const extractVariableValue = (draftContent: string, templateContent: string, variableName: string): string | null => {
+    // Find where in the template this variable appears and what surrounding context it has
+    const placeholder = `{{${variableName}}}`;
+    const placeholderRegex = new RegExp(escapeRegExp(placeholder), 'g');
     
-    // Placeholder logic would go here
-    return null;
+    // Find all instances of this placeholder in the template
+    const placeholderMatches: RegExpExecArray[] = [];
+    let match;
+    while ((match = placeholderRegex.exec(templateContent)) !== null) {
+      placeholderMatches.push(match);
+    }
+    
+    if (placeholderMatches.length === 0) {
+      return null; // Placeholder not found in template
+    }
+    
+    // For each placeholder occurrence, try to find what it was replaced with
+    for (const placeholderMatch of placeholderMatches) {
+      const placeholderIndex = placeholderMatch.index;
+      
+      // Get context before and after the placeholder (up to 50 chars each side)
+      const contextBefore = getContext(templateContent, placeholderIndex - 50, placeholderIndex);
+      const contextAfter = getContext(templateContent, placeholderIndex + placeholder.length, placeholderIndex + placeholder.length + 50);
+      
+      // If we have context on both sides, use it to locate the replacement
+      if (contextBefore && contextAfter) {
+        // Create a regex that looks for anything between the contexts
+        const contextRegex = new RegExp(`${escapeRegExp(contextBefore)}(.*?)${escapeRegExp(contextAfter)}`, 's');
+        const draftMatch = contextRegex.exec(draftContent);
+        
+        if (draftMatch && draftMatch[1]) {
+          // We found what's between these contexts in the draft
+          return draftMatch[1];
+        }
+      }
+      // If we only have context on one side, try a simpler approach
+      else if (contextBefore) {
+        const afterIndex = draftContent.indexOf(contextBefore) + contextBefore.length;
+        if (afterIndex >= contextBefore.length) {
+          // Take up to 100 chars after this context as a guess
+          const possibleValue = draftContent.substring(afterIndex, afterIndex + 100);
+          // If there's contextAfter from the original, trim at that point
+          if (contextAfter && possibleValue.includes(contextAfter)) {
+            return possibleValue.substring(0, possibleValue.indexOf(contextAfter));
+          }
+          return possibleValue;
+        }
+      } 
+      else if (contextAfter) {
+        const beforeIndex = draftContent.indexOf(contextAfter);
+        if (beforeIndex > 0) {
+          // Take up to 100 chars before this context as a guess
+          const startIndex = Math.max(0, beforeIndex - 100);
+          return draftContent.substring(startIndex, beforeIndex);
+        }
+      }
+    }
+    
+    // Fallback: check for variable name hint
+    // Sometimes variables are replaced with values that contain hints like [firstName: John]
+    const hintRegex = new RegExp(`\\[${variableName}:\\s*([^\\]]+)\\]`, 'i');
+    const hintMatch = draftContent.match(hintRegex);
+    if (hintMatch && hintMatch[1]) {
+      return hintMatch[1].trim();
+    }
+    
+    return null; // Couldn't determine the replacement
+  };
+  
+  // Helper to escape special regex characters
+  const escapeRegExp = (string: string): string => {
+    return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  };
+  
+  // Helper to get context around a position, handling bounds
+  const getContext = (text: string, start: number, end: number): string => {
+    const safeStart = Math.max(0, start);
+    const safeEnd = Math.min(text.length, end);
+    
+    if (safeStart >= safeEnd) return '';
+    
+    return text.substring(safeStart, safeEnd);
   };
   
   // Apply variables to the content
@@ -64,9 +139,23 @@ const DraftEditor: React.FC<DraftEditorProps> = ({
     
     let updatedContent = template.content;
     
+    // Track which variables were applied
+    const appliedVariables = new Set<string>();
+    
     Object.entries(variableValues).forEach(([variable, value]) => {
-      const regex = new RegExp(`\\{\\{${variable}\\}\\}`, 'g');
-      updatedContent = updatedContent.replace(regex, value || `[${variable}]`);
+      if (value.trim()) {
+        const regex = new RegExp(`\\{\\{${variable}\\}\\}`, 'g');
+        updatedContent = updatedContent.replace(regex, value);
+        appliedVariables.add(variable);
+      }
+    });
+    
+    // For variables without values, add a placeholder with the variable name
+    template.variables.forEach(variable => {
+      if (!appliedVariables.has(variable)) {
+        const regex = new RegExp(`\\{\\{${variable}\\}\\}`, 'g');
+        updatedContent = updatedContent.replace(regex, `[${variable}]`);
+      }
     });
     
     setContent(updatedContent);

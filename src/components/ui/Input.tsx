@@ -1,4 +1,4 @@
-import React, { forwardRef, InputHTMLAttributes } from 'react';
+import React, { forwardRef, InputHTMLAttributes, useState } from 'react';
 
 export interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
   label?: string;
@@ -24,40 +24,65 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
       containerClassName = '',
       className = '',
       id,
+      onFocus,
+      onBlur,
       ...rest
     },
     ref
   ) => {
+    // Track hover and focus states
+    const [isHovered, setIsHovered] = useState(false);
+    const [isFocused, setIsFocused] = useState(false);
+    
     // Generate an ID for the input if not provided
     const inputId = id || `input-${Math.random().toString(36).substring(2, 9)}`;
     
-    // Base input classes
-    const baseInputClasses = 'bg-gray-700 border text-text-primary placeholder-gray-400 focus:ring-primary focus:border-primary transition-colors duration-200 appearance-none rounded-md';
+    // Handle hover events
+    const handleMouseEnter = () => {
+      if (!isDisabled) setIsHovered(true);
+    };
     
-    // Error state classes
-    const errorClasses = error ? 'border-red-500 focus:border-red-500 focus:ring-red-500' : 'border-gray-600';
+    const handleMouseLeave = () => {
+      setIsHovered(false);
+    };
     
-    // Padding classes based on presence of icons
-    const paddingClasses = leftIcon 
-      ? 'pl-10' 
-      : rightIcon 
-        ? 'pr-10' 
-        : 'px-4';
+    // Handle focus events
+    const handleFocus = (e: React.FocusEvent<HTMLInputElement>) => {
+      setIsFocused(true);
+      if (onFocus) onFocus(e);
+    };
     
-    // Width classes
-    const widthClasses = isFullWidth ? 'w-full' : '';
+    const handleBlur = (e: React.FocusEvent<HTMLInputElement>) => {
+      setIsFocused(false);
+      if (onBlur) onBlur(e);
+    };
     
-    // Disabled classes
-    const disabledClasses = isDisabled ? 'opacity-50 cursor-not-allowed bg-gray-800' : '';
+    // Determine border color based on state
+    let borderColor = 'border-gray-600'; // default
     
-    // Combine all classes
+    if (error) {
+      borderColor = 'border-red-500';
+    } else if (isFocused) {
+      borderColor = 'border-primary';
+    } else if (isHovered) {
+      borderColor = 'border-orange-500';
+    }
+    
+    // Create combined classes
     const inputClasses = `
-      ${baseInputClasses}
-      ${errorClasses}
-      ${paddingClasses}
+      bg-gray-700
+      border
+      rounded-md
       py-2
-      ${widthClasses}
-      ${disabledClasses}
+      text-text-primary
+      placeholder-gray-400
+      ${leftIcon ? 'pl-10' : rightIcon ? 'pr-10' : 'px-4'}
+      ${isFullWidth ? 'w-full' : ''}
+      ${isDisabled ? 'opacity-50 cursor-not-allowed bg-gray-800' : ''}
+      transition-all
+      duration-300
+      ${borderColor}
+      ${isFocused ? 'ring-1 ring-primary' : ''}
       ${className}
     `;
     
@@ -69,7 +94,11 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
           </label>
         )}
         
-        <div className="relative">
+        <div 
+          className="relative" 
+          onMouseEnter={handleMouseEnter}
+          onMouseLeave={handleMouseLeave}
+        >
           {leftIcon && (
             <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-400">
               {leftIcon}
@@ -81,6 +110,8 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
             id={inputId}
             disabled={isDisabled}
             className={inputClasses}
+            onFocus={handleFocus}
+            onBlur={handleBlur}
             aria-invalid={error ? 'true' : 'false'}
             aria-describedby={error ? `${inputId}-error` : hint ? `${inputId}-hint` : undefined}
             {...rest}

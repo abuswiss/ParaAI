@@ -139,36 +139,82 @@ export const addMessage = async (
  * Uses streaming for better user experience
  */
 export const sendMessageStream = async (
-  conversationId: string,
+  conversationId: string | null | undefined,
   message: string,
   onChunk: (chunk: string) => void,
   documentContext?: string,
   analysisContext?: string
-): Promise<{ success: boolean; error: Error | null }> => {
+): Promise<{ success: boolean; error: Error | null; newConversationId?: string }> => {
+  console.log(`Starting sendMessageStream with conversationId: ${conversationId || 'null'}`);
   try {
-    // Add user message to the database
-    const { error: userMsgError } = await addMessage(
-      conversationId,
+    // Check if we need to create a conversation 
+    let actualConversationId = conversationId;
+    let newConversationCreated = false;
+    
+    if (!actualConversationId || actualConversationId === 'new') {
+      // Create a new conversation
+      console.log('Creating new conversation for message');
+      const { data: newConversation, error: createError } = await createConversationSafely('New Conversation');
+      
+      if (createError) {
+        console.error('Failed to create conversation for message:', createError);
+        return { 
+          success: false, 
+          error: new Error(`Failed to create conversation: ${createError.message}`) 
+        };
+      }
+      
+      if (!newConversation) {
+        console.error('Failed to create conversation: No data returned');
+        return { 
+          success: false, 
+          error: new Error('Failed to create conversation: No data returned') 
+        };
+      }
+      
+      actualConversationId = newConversation.id;
+      newConversationCreated = true;
+      console.log('Created new conversation with ID:', actualConversationId);
+    }
+    
+    // Verify we have a valid conversation ID before continuing
+    if (!actualConversationId) {
+      console.error('No valid conversation ID for message');
+      return { 
+        success: false, 
+        error: new Error('No valid conversation ID for message') 
+      };
+    }
+
+    console.log(`Adding user message to conversation: ${actualConversationId}`);
+    // Add user message to the database with the valid conversation ID
+    const { error: userMsgError } = await addMessageSafely(
+      actualConversationId,
       'user',
       message
     );
 
     if (userMsgError) {
-      throw userMsgError;
+      console.error('Error adding user message:', userMsgError);
+      return { 
+        success: false, 
+        error: userMsgError 
+      };
     }
 
     // Get conversation history
-    // Default to empty history if no conversationId (for new chats) or if there's an error
+    // Default to empty history if there's an error
     let history: ChatMessage[] = [];
     
-    if (conversationId && conversationId !== 'new') {
-      const { data, error } = await getConversationMessages(conversationId);
-      if (error) {
-        console.warn('Could not fetch conversation history:', error);
-        // Continue without history rather than throwing
-      } else if (data) {
-        history = data;
-      }
+    // Now that we have a valid conversation ID, try to get its history
+    console.log(`Fetching conversation history for: ${actualConversationId}`);
+    const { data, error } = await getConversationMessages(actualConversationId);
+    if (error) {
+      console.warn('Could not fetch conversation history:', error);
+      // Continue without history rather than throwing
+    } else if (data) {
+      history = data;
+      console.log(`Found ${data.length} messages in history`);
     }
 
     // Format messages for OpenAI
@@ -250,7 +296,7 @@ export const sendMessageStream = async (
       .from('messages')
       .insert({
         id: assistantMessageId,
-        conversation_id: conversationId,
+        conversation_id: actualConversationId,
         role: 'assistant',
         content: '', // Will be updated as we get chunks
       });
@@ -292,12 +338,17 @@ export const sendMessageStream = async (
     await supabase
       .from('conversations')
       .update({ updated_at: new Date().toISOString() })
-      .eq('id', conversationId);
+      .eq('id', actualConversationId);
 
-    return { success: true, error: null };
-  } catch (error) {
+    // Return success with the new conversation ID if one was created
+    return { 
+      success: true, 
+      error: null,
+      newConversationId: newConversationCreated ? actualConversationId : undefined 
+    };
+  } catch (error: any) {
     console.error('Error sending message:', error);
-    return { success: false, error: error as Error };
+    return { success: false, error };
   }
 };
 

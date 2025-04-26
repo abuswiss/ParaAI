@@ -7,6 +7,7 @@ import Cases from './pages/Cases';
 import CaseDetail from './pages/CaseDetail';
 import Chat from './pages/Chat';
 import MainLayout from './components/layout/MainLayout';
+import DatabaseDiagnostic from './utils/DatabaseDiagnostic';
 
 const router = createBrowserRouter([
   {
@@ -40,6 +41,10 @@ const router = createBrowserRouter([
       {
         path: 'chat/:id',
         element: <Chat />,
+      },
+      {
+        path: 'diagnostic',
+        element: <DatabaseDiagnostic />,
       },
       // Add more routes for other features here as they are implemented
     ],
