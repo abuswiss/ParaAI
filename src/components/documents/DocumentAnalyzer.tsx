@@ -14,11 +14,11 @@ interface AnalysisTab {
 }
 
 interface DocumentAnalyzerProps {
-  document: Document | null;
+  documentData: Document | null;
   onClose: () => void;
 }
 
-const DocumentAnalyzer: React.FC<DocumentAnalyzerProps> = ({ document, onClose }) => {
+const DocumentAnalyzer: React.FC<DocumentAnalyzerProps> = ({ documentData, onClose }) => {
   const [activeTab, setActiveTab] = useState<AnalysisTab['id']>('summary');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -109,7 +109,7 @@ const DocumentAnalyzer: React.FC<DocumentAnalyzerProps> = ({ document, onClose }
   ];
 
   const runAnalysis = useCallback(async (type: AnalysisTab['id']) => {
-    if (!document) return;
+    if (!documentData) return;
 
     setLoading(true);
     setError(null);
@@ -119,7 +119,7 @@ const DocumentAnalyzer: React.FC<DocumentAnalyzerProps> = ({ document, onClose }
       const prompt = type === 'custom' ? customPrompt : undefined;
       
       const { data, error } = await analyzeDocument(
-        document.id, 
+        documentData.id, 
         type,
         prompt
       );
@@ -138,7 +138,7 @@ const DocumentAnalyzer: React.FC<DocumentAnalyzerProps> = ({ document, onClose }
     } finally {
       setLoading(false);
     }
-  }, [document, customPrompt]);
+  }, [documentData, customPrompt]);
 
   useEffect(() => {
     // Reset state when document changes
@@ -153,19 +153,18 @@ const DocumentAnalyzer: React.FC<DocumentAnalyzerProps> = ({ document, onClose }
     setActiveTab('summary');
     setCustomPrompt('');
     setError(null);
-  }, [document]);
+  }, [documentData]);
 
   useEffect(() => {
     // Automatically run the selected analysis when tab changes (except for custom)
-    if (document && activeTab !== 'custom' && !analysisResults[activeTab]) {
+    if (documentData && activeTab !== 'custom' && !analysisResults[activeTab]) {
       runAnalysis(activeTab);
     }
-  }, [activeTab, document, analysisResults, runAnalysis]);
+  }, [activeTab, documentData, analysisResults, runAnalysis]);
 
   useEffect(() => {
-    const globalDoc = document as globalThis.Document | null;
-    if (globalDoc) {
-      const styleEl = globalDoc.createElement('style');
+    if (typeof window !== 'undefined' && window.document) {
+      const styleEl = window.document.createElement('style');
       styleEl.innerHTML = `
         .markdown-content {
           font-size: 0.875rem;
@@ -260,12 +259,10 @@ const DocumentAnalyzer: React.FC<DocumentAnalyzerProps> = ({ document, onClose }
           margin: 1.5em 0;
         }
       `;
-      if (globalDoc.head) {
-        globalDoc.head.appendChild(styleEl);
-      }
-      return () => { if (globalDoc.head) globalDoc.head.removeChild(styleEl); };
+      window.document.head.appendChild(styleEl);
+      return () => { window.document.head.removeChild(styleEl); };
     }
-  }, [document]);
+  }, [documentData]);
 
   const handleCustomAnalysis = () => {
     if (customPrompt.trim()) {
@@ -296,7 +293,7 @@ const DocumentAnalyzer: React.FC<DocumentAnalyzerProps> = ({ document, onClose }
     setHoveredTerm(null);
   };
 
-  if (!document) {
+  if (!documentData) {
     return null;
   }
 
@@ -655,7 +652,7 @@ const DocumentAnalyzer: React.FC<DocumentAnalyzerProps> = ({ document, onClose }
     <div className="flex flex-col h-full">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-gray-700 p-4">
-        <h2 className="text-lg font-medium text-text-primary">Document Analysis: {document.filename}</h2>
+        <h2 className="text-lg font-medium text-text-primary">Document Analysis: {documentData.filename}</h2>
         <button 
           onClick={onClose} 
           className="text-text-secondary hover:text-text-primary p-1"
