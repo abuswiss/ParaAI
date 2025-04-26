@@ -6,6 +6,7 @@ import TimelineView, { TimelineEvent } from '../timeline/TimelineView';
 import { RiskAssessment } from './RiskAssessment';
 import { DocumentMinimap } from './DocumentMinimap';
 import ReactMarkdown from 'react-markdown';
+import { saveAs } from 'file-saver';
 
 interface AnalysisTab {
   id: 'summary' | 'entities' | 'clauses' | 'risks' | 'timeline' | 'custom';
@@ -293,6 +294,42 @@ const DocumentAnalyzer: React.FC<DocumentAnalyzerProps> = ({ documentData, onClo
     setHoveredTerm(null);
   };
 
+  // Utility: Copy to clipboard
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text);
+  };
+
+  // Utility: Export as .txt
+  const exportAsTxt = (text: string, filename: string) => {
+    const blob = new Blob([text], { type: 'text/plain' });
+    saveAs(blob, filename + '.txt');
+  };
+
+  // Utility: Export as .docx
+  const exportAsDocx = async (text: string, filename: string) => {
+    const { Document, Packer, Paragraph } = await import('docx');
+    const doc = new Document({
+      sections: [
+        {
+          properties: {},
+          children: [new Paragraph(text)],
+        },
+      ],
+    });
+    const blob = await Packer.toBlob(doc);
+    saveAs(blob, filename + '.docx');
+  };
+
+  // Utility: Export as .pdf
+  const exportAsPdf = async (text: string, filename: string) => {
+    const jsPDF = (await import('jspdf')).default;
+    const doc = new jsPDF();
+    doc.setFont('courier');
+    doc.setFontSize(12);
+    doc.text(text, 10, 10);
+    doc.save(filename + '.pdf');
+  };
+
   if (!documentData) {
     return null;
   }
@@ -374,6 +411,33 @@ const DocumentAnalyzer: React.FC<DocumentAnalyzerProps> = ({ documentData, onClo
         {activeTab === 'summary' && (
           <div className="prose prose-invert max-w-none">
             <h3 className="text-xl font-medium mb-4">Document Summary</h3>
+            {/* Action Buttons */}
+            <div className="flex gap-2 mb-3">
+              <button
+                className="px-4 py-2 bg-primary text-white rounded hover:bg-primary-hover transition-all duration-200"
+                onClick={() => copyToClipboard(result.result)}
+              >
+                Copy
+              </button>
+              <button
+                className="px-4 py-2 bg-primary text-white rounded hover:bg-primary-hover transition-all duration-200"
+                onClick={() => exportAsTxt(result.result, documentData?.filename || 'analysis_summary')}
+              >
+                Export .txt
+              </button>
+              <button
+                className="px-4 py-2 bg-primary text-white rounded hover:bg-primary-hover transition-all duration-200"
+                onClick={() => exportAsDocx(result.result, documentData?.filename || 'analysis_summary')}
+              >
+                Export .docx
+              </button>
+              <button
+                className="px-4 py-2 bg-primary text-white rounded hover:bg-primary-hover transition-all duration-200"
+                onClick={() => exportAsPdf(result.result, documentData?.filename || 'analysis_summary')}
+              >
+                Export .pdf
+              </button>
+            </div>
             <div className="bg-gray-700 rounded-lg p-5">
               <div className="markdown-content">
                 <ReactMarkdown>{result.result}</ReactMarkdown>
@@ -385,6 +449,33 @@ const DocumentAnalyzer: React.FC<DocumentAnalyzerProps> = ({ documentData, onClo
         {activeTab === 'entities' && (
           <div className="prose prose-invert max-w-none">
             <h3 className="text-xl font-medium mb-4">Entity Analysis</h3>
+            {/* Action Buttons */}
+            <div className="flex gap-2 mb-3">
+              <button
+                className="px-4 py-2 bg-primary text-white rounded hover:bg-primary-hover transition-all duration-200"
+                onClick={() => copyToClipboard(result.result)}
+              >
+                Copy
+              </button>
+              <button
+                className="px-4 py-2 bg-primary text-white rounded hover:bg-primary-hover transition-all duration-200"
+                onClick={() => exportAsTxt(result.result, documentData?.filename || 'analysis_entities')}
+              >
+                Export .txt
+              </button>
+              <button
+                className="px-4 py-2 bg-primary text-white rounded hover:bg-primary-hover transition-all duration-200"
+                onClick={() => exportAsDocx(result.result, documentData?.filename || 'analysis_entities')}
+              >
+                Export .docx
+              </button>
+              <button
+                className="px-4 py-2 bg-primary text-white rounded hover:bg-primary-hover transition-all duration-200"
+                onClick={() => exportAsPdf(result.result, documentData?.filename || 'analysis_entities')}
+              >
+                Export .pdf
+              </button>
+            </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {(() => {
                 // Try to parse entities by category
@@ -453,7 +544,7 @@ const DocumentAnalyzer: React.FC<DocumentAnalyzerProps> = ({ documentData, onClo
                 return (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     {nonEmptyCategories.map(([category, entities]) => (
-                      <div key={category} className="bg-gray-800/50 p-4 rounded-lg">
+                      <div key={category} className="bg-surface-lighter border border-primary/20 rounded-lg p-4 mb-4">
                         <h4 className="text-lg font-medium mb-2 text-primary">{category}</h4>
                         <ul className="space-y-1">
                           {entities.map((entity, index) => (
@@ -463,7 +554,7 @@ const DocumentAnalyzer: React.FC<DocumentAnalyzerProps> = ({ documentData, onClo
                               onMouseOver={category === 'Legal Terms' ? (e) => handleTermMouseOver(entity, e) : undefined}
                               onMouseOut={category === 'Legal Terms' ? handleTermMouseOut : undefined}
                             >
-                              {entity}
+                              <ReactMarkdown>{entity}</ReactMarkdown>
                             </li>
                           ))}
                         </ul>
@@ -493,6 +584,33 @@ const DocumentAnalyzer: React.FC<DocumentAnalyzerProps> = ({ documentData, onClo
         {activeTab === 'clauses' && (
           <div className="prose prose-invert max-w-none">
             <h3 className="text-xl font-medium mb-4">Key Clauses</h3>
+            {/* Action Buttons */}
+            <div className="flex gap-2 mb-3">
+              <button
+                className="px-4 py-2 bg-primary text-white rounded hover:bg-primary-hover transition-all duration-200"
+                onClick={() => copyToClipboard(result.result)}
+              >
+                Copy
+              </button>
+              <button
+                className="px-4 py-2 bg-primary text-white rounded hover:bg-primary-hover transition-all duration-200"
+                onClick={() => exportAsTxt(result.result, documentData?.filename || 'analysis_clauses')}
+              >
+                Export .txt
+              </button>
+              <button
+                className="px-4 py-2 bg-primary text-white rounded hover:bg-primary-hover transition-all duration-200"
+                onClick={() => exportAsDocx(result.result, documentData?.filename || 'analysis_clauses')}
+              >
+                Export .docx
+              </button>
+              <button
+                className="px-4 py-2 bg-primary text-white rounded hover:bg-primary-hover transition-all duration-200"
+                onClick={() => exportAsPdf(result.result, documentData?.filename || 'analysis_clauses')}
+              >
+                Export .pdf
+              </button>
+            </div>
             <div className="space-y-4">
               {(() => {
                 try {
@@ -513,20 +631,24 @@ const DocumentAnalyzer: React.FC<DocumentAnalyzerProps> = ({ documentData, onClo
                       <div key={index} className="bg-gray-800 rounded-lg border border-primary/30 p-5 space-y-3">
                         {/* Title */}
                         <div className="text-lg font-semibold text-primary mb-1">
-                          {clause.titleBlock.replace(/^#+\s*/, '')}
+                          <ReactMarkdown>{clause.titleBlock.replace(/^#+\s*/, '')}</ReactMarkdown>
                         </div>
                         {/* Key Text */}
                         {clause.keyTextBlock && (
                           <div className="bg-gray-900 rounded p-3 border-l-4 border-primary/50">
                             <div className="text-xs text-gray-400 font-bold mb-1">Key Text:</div>
-                            <div className="text-text-primary text-sm whitespace-pre-line">{clause.keyTextBlock.replace(/^Key Text:?/i, '').trim()}</div>
+                            <div className="text-text-primary text-sm whitespace-pre-line">
+                              <ReactMarkdown>{clause.keyTextBlock.replace(/^Key Text:?/i, '').trim()}</ReactMarkdown>
+                            </div>
                           </div>
                         )}
                         {/* Analysis */}
                         {clause.analysisBlock && (
                           <div className="bg-gray-900 rounded p-3 border-l-4 border-accent-500">
                             <div className="text-xs text-gray-400 font-bold mb-1">Analysis:</div>
-                            <div className="text-text-secondary text-sm whitespace-pre-line">{clause.analysisBlock.replace(/^Analysis:?/i, '').trim()}</div>
+                            <div className="text-text-secondary text-sm whitespace-pre-line">
+                              <ReactMarkdown>{clause.analysisBlock.replace(/^Analysis:?/i, '').trim()}</ReactMarkdown>
+                            </div>
                           </div>
                         )}
                       </div>
@@ -556,50 +678,68 @@ const DocumentAnalyzer: React.FC<DocumentAnalyzerProps> = ({ documentData, onClo
         {activeTab === 'timeline' && (
           <div className="prose prose-invert max-w-none">
             <h3 className="text-xl font-medium mb-4">Timeline</h3>
+            {/* Action Buttons */}
+            <div className="flex gap-2 mb-3">
+              <button
+                className="px-4 py-2 bg-primary text-white rounded hover:bg-primary-hover transition-all duration-200"
+                onClick={() => copyToClipboard(result.result)}
+              >
+                Copy
+              </button>
+              <button
+                className="px-4 py-2 bg-primary text-white rounded hover:bg-primary-hover transition-all duration-200"
+                onClick={() => exportAsTxt(result.result, documentData?.filename || 'analysis_timeline')}
+              >
+                Export .txt
+              </button>
+              <button
+                className="px-4 py-2 bg-primary text-white rounded hover:bg-primary-hover transition-all duration-200"
+                onClick={() => exportAsDocx(result.result, documentData?.filename || 'analysis_timeline')}
+              >
+                Export .docx
+              </button>
+              <button
+                className="px-4 py-2 bg-primary text-white rounded hover:bg-primary-hover transition-all duration-200"
+                onClick={() => exportAsPdf(result.result, documentData?.filename || 'analysis_timeline')}
+              >
+                Export .pdf
+              </button>
+            </div>
             {(() => {
               try {
                 // Try to parse the timeline as JSON
                 let timelineData: TimelineEvent[] = [];
-                
+                const parseEventsFromText = (text: string): TimelineEvent[] => {
+                  return text.split('\n\n')
+                    .filter((line: string) => line.trim())
+                    .map((line: string) => {
+                      const [datePart, ...restParts] = line.split(':');
+                      const description = restParts.join(':').trim();
+                      // Robust date parsing
+                      const dateObj = new Date(datePart.trim());
+                      let date: string = datePart.trim();
+                      if (!isNaN(dateObj.getTime())) {
+                        date = dateObj.toISOString();
+                      }
+                      return {
+                        date,
+                        title: description.split('\n')[0] || 'Event',
+                        description: description.split('\n').slice(1).join('\n') || description
+                      };
+                    });
+                };
                 try {
                   // First try parsing as direct JSON
                   timelineData = JSON.parse(result.result);
-                } catch (parseError) {
+                } catch {
                   // If that fails, look for a JSON structure within the text
                   const jsonMatch = result.result.match(/```json\s*([\s\S]+?)\s*```/);
                   if (jsonMatch && jsonMatch[1]) {
                     timelineData = JSON.parse(jsonMatch[1]);
                   } else {
-                    // Try to parse from a text format
-                    // Assume format like: "Date: Event description"
-                    const events = result.result.split('\n\n')
-                      .filter((line: string) => line.trim())
-                      .map((line: string) => {
-                        const [datePart, ...restParts] = line.split(':');
-                        const description = restParts.join(':').trim();
-                        
-                        // Basic date parsing - this is a simple approach
-                        const dateObj = new Date(datePart.trim());
-                        let date: string | Date = dateObj;
-                        if (isNaN(dateObj.getTime())) {
-                          // If date parsing fails, use the raw string
-                          date = datePart.trim();
-                        } else {
-                          date = dateObj.toISOString();
-                        }
-                        return {
-                          date,
-                          title: description.split('\n')[0] || 'Event',
-                          description: description.split('\n').slice(1).join('\n') || description
-                        };
-                      });
-                    
-                    if (events.length > 0) {
-                      timelineData = events;
-                    }
+                    timelineData = parseEventsFromText(result.result);
                   }
                 }
-                
                 if (timelineData.length > 0) {
                   return <TimelineView events={timelineData} />;
                 } else {
@@ -617,31 +757,76 @@ const DocumentAnalyzer: React.FC<DocumentAnalyzerProps> = ({ documentData, onClo
         {activeTab === 'custom' && (
           <div className="prose prose-invert max-w-none">
             <h3 className="text-xl font-medium mb-4">Custom Analysis</h3>
-            <div className="bg-gray-700 rounded-lg p-5">
-              <div className="text-sm text-gray-400 mb-2">Prompt: {customPrompt}</div>
-              <div className="markdown-content">
-                <ReactMarkdown>{result.result}</ReactMarkdown>
-              </div>
-            </div>
-            
-            <div className="mt-4">
-              <label className="block text-text-primary mb-2">
-                Try another custom analysis:
-              </label>
-              <textarea
-                value={customPrompt}
-                onChange={(e) => setCustomPrompt(e.target.value)}
-                placeholder="E.g., What are the tax implications of this document?"
-                className="w-full bg-gray-700 border border-gray-600 rounded-md p-3 text-text-primary mb-4 min-h-[120px]"
-              />
+            {/* Action Buttons */}
+            <div className="flex gap-2 mb-3">
               <button
-                onClick={handleCustomAnalysis}
-                disabled={!customPrompt.trim()}
-                className="bg-primary text-white px-4 py-2 rounded-md disabled:opacity-50"
+                className="px-4 py-2 bg-primary text-white rounded hover:bg-primary-hover transition-all duration-200"
+                onClick={() => copyToClipboard(result.result)}
               >
-                Run New Analysis
+                Copy
+              </button>
+              <button
+                className="px-4 py-2 bg-primary text-white rounded hover:bg-primary-hover transition-all duration-200"
+                onClick={() => exportAsTxt(result.result, documentData?.filename || 'analysis_custom')}
+              >
+                Export .txt
+              </button>
+              <button
+                className="px-4 py-2 bg-primary text-white rounded hover:bg-primary-hover transition-all duration-200"
+                onClick={() => exportAsDocx(result.result, documentData?.filename || 'analysis_custom')}
+              >
+                Export .docx
+              </button>
+              <button
+                className="px-4 py-2 bg-primary text-white rounded hover:bg-primary-hover transition-all duration-200"
+                onClick={() => exportAsPdf(result.result, documentData?.filename || 'analysis_custom')}
+              >
+                Export .pdf
               </button>
             </div>
+            {/* Try to parse timeline-like events in custom analysis too */}
+            {(() => {
+              try {
+                let timelineData: TimelineEvent[] = [];
+                const parseEventsFromText = (text: string): TimelineEvent[] => {
+                  return text.split('\n\n')
+                    .filter((line: string) => line.trim())
+                    .map((line: string) => {
+                      const [datePart, ...restParts] = line.split(':');
+                      const description = restParts.join(':').trim();
+                      // Robust date parsing
+                      const dateObj = new Date(datePart.trim());
+                      let date: string = datePart.trim();
+                      if (!isNaN(dateObj.getTime())) {
+                        date = dateObj.toISOString();
+                      }
+                      return {
+                        date,
+                        title: description.split('\n')[0] || 'Event',
+                        description: description.split('\n').slice(1).join('\n') || description
+                      };
+                    });
+                };
+                try {
+                  timelineData = JSON.parse(result.result);
+                } catch {
+                  const jsonMatch = result.result.match(/```json\s*([\s\S]+?)\s*```/);
+                  if (jsonMatch && jsonMatch[1]) {
+                    timelineData = JSON.parse(jsonMatch[1]);
+                  } else {
+                    timelineData = parseEventsFromText(result.result);
+                  }
+                }
+                if (timelineData.length > 0 && timelineData.every(ev => ev.date && ev.description)) {
+                  return <TimelineView events={timelineData} />;
+                } else {
+                  return <div className="bg-gray-700 rounded-lg p-5"><div className="text-sm text-gray-400 mb-2">Prompt: {customPrompt}</div><div className="markdown-content"><ReactMarkdown>{result.result}</ReactMarkdown></div></div>;
+                }
+              } catch (e: unknown) {
+                console.error('Error parsing custom analysis timeline', e);
+                return <div className="bg-gray-700 rounded-lg p-5"><div className="text-sm text-gray-400 mb-2">Prompt: {customPrompt}</div><div className="markdown-content"><ReactMarkdown>{result.result}</ReactMarkdown></div></div>;
+              }
+            })()}
           </div>
         )}
       </div>
