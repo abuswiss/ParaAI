@@ -8,6 +8,7 @@ import {
 } from '../../../services/templateService';
 import TemplateSelector from './TemplateSelector';
 import DraftEditor from './DraftEditor';
+import { v4 as uuidv4 } from 'uuid';
 
 // Helper function to extract variables from template content
 const extractVariables = (content: string): string[] => {
@@ -107,7 +108,7 @@ const DraftManagement: React.FC<DraftManagementProps> = ({
         // For now, we'll just create a mock draft
         const mockDraft: DocumentDraft = {
           ...newDraft,
-          id: `draft-${Date.now()}`,
+          id: uuidv4(),
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString()
         };
@@ -324,7 +325,7 @@ const DraftManagement: React.FC<DraftManagementProps> = ({
                 onClick={() => {
                   // Create a draft with the template and case information
                   const mockDraft: DocumentDraft = {
-                    id: `draft-${Date.now()}`,
+                    id: uuidv4(),
                     name: `Draft from ${selectedTemplate.name}`,
                     templateId: selectedTemplate.id,
                     content: selectedTemplate.content,
