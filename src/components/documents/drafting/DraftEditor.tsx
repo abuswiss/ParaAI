@@ -1,5 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { DocumentDraft, DocumentTemplate, updateDraft } from '../../../services/templateService';
+import { 
+  DocumentDraft, 
+  DocumentTemplate, 
+  updateDraft, 
+  getCaseFields 
+} from '../../../services/templateService';
 
 interface DraftEditorProps {
   draft: DocumentDraft;
@@ -7,6 +12,7 @@ interface DraftEditorProps {
   onSave?: (draft: DocumentDraft) => void;
   onCancel?: () => void;
   readOnly?: boolean;
+  caseId?: string;
 }
 
 const DraftEditor: React.FC<DraftEditorProps> = ({
@@ -14,7 +20,8 @@ const DraftEditor: React.FC<DraftEditorProps> = ({
   template,
   onSave,
   onCancel,
-  readOnly = false
+  readOnly = false,
+  caseId
 }) => {
   const [content, setContent] = useState(draft.content);
   const [name, setName] = useState(draft.name);
@@ -22,6 +29,8 @@ const DraftEditor: React.FC<DraftEditorProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [showVariablePanel, setShowVariablePanel] = useState(false);
   const [variableValues, setVariableValues] = useState<Record<string, string>>({});
+  const [caseVariables, setCaseVariables] = useState<Record<string, string>>({});
+  const [isLoadingCaseVariables, setIsLoadingCaseVariables] = useState(false);
   
   // Initialize variable values from the template if available
   useEffect(() => {
@@ -47,6 +56,56 @@ const DraftEditor: React.FC<DraftEditorProps> = ({
       setVariableValues(initialValues);
     }
   }, [template, draft]);
+  
+  // Handle variable change
+  const handleVariableChange = (variable: string, value: string) => {
+    setVariableValues(prev => ({
+      ...prev,
+      [variable]: value
+    }));
+  };
+
+  // Load case variables if a case ID is provided
+  useEffect(() => {
+    const loadCaseVariables = async () => {
+      if (!caseId) return;
+      
+      setIsLoadingCaseVariables(true);
+      try {
+        const { data, error } = await getCaseFields(caseId);
+        
+        if (error) throw error;
+        if (data) {
+          setCaseVariables(data);
+          
+          // If we have a template, auto-fill any matching variables
+          if (template && template.variables.length > 0) {
+            setVariableValues(prev => {
+              const updated = { ...prev };
+              
+              // For each template variable, check if we have a matching case field
+              template.variables.forEach(variable => {
+                // Try direct match or with case_ prefix
+                if (data[variable]) {
+                  updated[variable] = data[variable];
+                } else if (data[`case_${variable}`]) {
+                  updated[variable] = data[`case_${variable}`];
+                }
+              });
+              
+              return updated;
+            });
+          }
+        }
+      } catch (err) {
+        console.error('Error loading case variables:', err);
+      } finally {
+        setIsLoadingCaseVariables(false);
+      }
+    };
+    
+    loadCaseVariables();
+  }, [caseId, template]);
   
   // Extract the value a variable was replaced with by comparing template and draft content
   const extractVariableValue = (draftContent: string, templateContent: string, variableName: string): string | null => {
@@ -133,32 +192,38 @@ const DraftEditor: React.FC<DraftEditorProps> = ({
     return text.substring(safeStart, safeEnd);
   };
   
-  // Apply variables to the content
-  const applyVariables = () => {
-    if (!template) return;
+  // Apply variable replacements to the content
+  const applyVariableReplacements = () => {
+    if (!template) return content;
     
-    let updatedContent = template.content;
+    let newContent = template.content;
     
-    // Track which variables were applied
-    const appliedVariables = new Set<string>();
-    
-    Object.entries(variableValues).forEach(([variable, value]) => {
-      if (value.trim()) {
+    for (const [variable, value] of Object.entries(variableValues)) {
+      if (value) {
         const regex = new RegExp(`\\{\\{${variable}\\}\\}`, 'g');
-        updatedContent = updatedContent.replace(regex, value);
-        appliedVariables.add(variable);
+        newContent = newContent.replace(regex, value);
       }
-    });
+    }
     
-    // For variables without values, add a placeholder with the variable name
-    template.variables.forEach(variable => {
-      if (!appliedVariables.has(variable)) {
-        const regex = new RegExp(`\\{\\{${variable}\\}\\}`, 'g');
-        updatedContent = updatedContent.replace(regex, `[${variable}]`);
-      }
-    });
+    return newContent;
+  };
+  
+  // Handle adding a case variable to the editor
+  const handleAddCaseVariable = (variableName: string) => {
+    // Find which template variable this should be assigned to
+    const matchingTemplateVar = template?.variables.find(v => 
+      v === variableName || `case_${v}` === variableName
+    );
     
-    setContent(updatedContent);
+    if (matchingTemplateVar) {
+      // If we found a matching template variable, set its value
+      handleVariableChange(matchingTemplateVar, caseVariables[variableName]);
+    } else {
+      // Otherwise, insert this variable directly at the cursor position
+      // This is for direct insertion into the text editor (for future enhancement)
+      // For now, we'll just show an alert
+      alert(`Variable ${variableName} = ${caseVariables[variableName]}\n\nTo use this variable, update your template to include {{${variableName}}}.`);
+    }
   };
   
   // Handle save
@@ -169,7 +234,7 @@ const DraftEditor: React.FC<DraftEditorProps> = ({
       
       const { success, error } = await updateDraft(draft.id, {
         name,
-        content
+        content: applyVariableReplacements()
       });
       
       if (!success) throw error || new Error('Failed to save draft');
@@ -177,7 +242,7 @@ const DraftEditor: React.FC<DraftEditorProps> = ({
       const updatedDraft: DocumentDraft = {
         ...draft,
         name,
-        content,
+        content: applyVariableReplacements(),
         updatedAt: new Date().toISOString()
       };
       
@@ -209,12 +274,17 @@ const DraftEditor: React.FC<DraftEditorProps> = ({
               {template && (
                 <button
                   onClick={() => setShowVariablePanel(!showVariablePanel)}
-                  className="px-4 py-2 bg-gray-800 text-text-primary rounded hover:bg-gray-700 flex items-center"
+                  className="px-3 py-1 rounded-md bg-gray-700 text-gray-300 hover:bg-gray-600 flex items-center space-x-1"
                 >
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" viewBox="0 0 20 20" fill="currentColor">
-                    <path fillRule="evenodd" d="M12.316 3.051a1 1 0 01.633 1.265l-4 12a1 1 0 11-1.898-.632l4-12a1 1 0 011.265-.633zM5.707 6.293a1 1 0 010 1.414L3.414 10l2.293 2.293a1 1 0 11-1.414 1.414l-3-3a1 1 0 010-1.414l3-3a1 1 0 011.414 0zm8.586 0a1 1 0 011.414 0l3 3a1 1 0 010 1.414l-3 3a1 1 0 11-1.414-1.414L16.586 10l-2.293-2.293a1 1 0 010-1.414z" clipRule="evenodd" />
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
                   </svg>
-                  Variables
+                  <span>{showVariablePanel ? 'Hide' : 'Show'} Variables</span>
+                  {caseId && (
+                    <span className="ml-1 text-xs px-2 py-0.5 bg-blue-900 text-blue-300 rounded-full">
+                      Case Context Available
+                    </span>
+                  )}
                 </button>
               )}
               
@@ -253,32 +323,64 @@ const DraftEditor: React.FC<DraftEditorProps> = ({
       
       {/* Variable panel */}
       {showVariablePanel && template && (
-        <div className="p-4 bg-gray-800 border-b border-gray-700">
-          <h3 className="text-sm font-medium text-text-primary mb-3">Template Variables</h3>
-          
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-            {template.variables.map(variable => (
-              <div key={variable} className="flex flex-col">
-                <label className="text-xs text-text-secondary mb-1">{variable}</label>
-                <input
-                  type="text"
-                  value={variableValues[variable] || ''}
-                  onChange={e => setVariableValues({...variableValues, [variable]: e.target.value})}
-                  className="bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-primary"
-                  placeholder={`Enter ${variable}...`}
-                />
-              </div>
-            ))}
-          </div>
-          
-          <div className="mt-3 flex justify-end">
-            <button
-              onClick={applyVariables}
-              className="px-3 py-1 bg-primary text-white text-sm rounded hover:bg-primary-hover"
-            >
-              Apply Variables
-            </button>
-          </div>
+        <div className="p-4 bg-gray-800 rounded-lg overflow-y-auto" style={{ maxHeight: '300px' }}>
+          {isLoadingCaseVariables ? (
+            <div className="flex justify-center py-4">
+              <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-accent-500"></div>
+            </div>
+          ) : template && template.variables.length > 0 ? (
+            <div className="space-y-4">
+              {template.variables.map(variable => {
+                // Check if this variable has a matching case variable
+                const hasCaseMatch = 
+                  caseVariables[variable] !== undefined || 
+                  caseVariables[`case_${variable}`] !== undefined;
+                
+                return (
+                  <div key={variable} className="space-y-1">
+                    <div className="flex justify-between items-center">
+                      <label className="block text-sm font-medium text-gray-300">
+                        {variable}
+                      </label>
+                      {hasCaseMatch && (
+                        <span className="text-xs px-2 py-1 bg-blue-900 text-blue-300 rounded-full">
+                          Auto-filled from case
+                        </span>
+                      )}
+                    </div>
+                    <input
+                      type="text"
+                      value={variableValues[variable] || ''}
+                      onChange={(e) => handleVariableChange(variable, e.target.value)}
+                      className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white"
+                      placeholder={`Enter value for ${variable}`}
+                    />
+                  </div>
+                );
+              })}
+              
+              {/* Case variables section */}
+              {caseId && Object.keys(caseVariables).length > 0 && (
+                <div className="mt-8 border-t border-gray-700 pt-4">
+                  <h4 className="font-medium text-gray-300 mb-2">Available Case Variables</h4>
+                  <p className="text-sm text-gray-400 mb-4">These case variables are available for use in your template:</p>
+                  
+                  <div className="grid grid-cols-1 gap-2 max-h-40 overflow-y-auto">
+                    {Object.entries(caseVariables).map(([key, value]) => (
+                      <div key={key} className="flex justify-between items-center py-1 px-2 rounded bg-gray-700 hover:bg-gray-600 cursor-pointer"
+                           onClick={() => handleAddCaseVariable(key)}
+                      >
+                        <span className="text-sm font-mono text-gray-300">{key}</span>
+                        <span className="text-xs text-gray-400 truncate max-w-[150px]">{value}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (
+            <p className="text-gray-400">No variables found in this template.</p>
+          )}
         </div>
       )}
       

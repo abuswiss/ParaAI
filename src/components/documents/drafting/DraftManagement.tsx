@@ -9,6 +9,23 @@ import {
 import TemplateSelector from './TemplateSelector';
 import DraftEditor from './DraftEditor';
 
+// Helper function to extract variables from template content
+const extractVariables = (content: string): string[] => {
+  const variableRegex = /\{\{([^}]+)\}\}/g;
+  const matches = content.match(variableRegex) || [];
+  
+  // Remove duplicates and clean up the variable names
+  return [...new Set(matches.map(match => {
+    // Extract the variable name from {{variable}}
+    return match.replace(/\{\{|\}\}/g, '').trim();
+  }))];
+};
+
+// Helper function to count variables in template content
+const countVariables = (content: string): number => {
+  return extractVariables(content).length;
+};
+
 interface DraftManagementProps {
   caseId?: string;
   documentContext?: string;
@@ -281,30 +298,31 @@ const DraftManagement: React.FC<DraftManagementProps> = ({
         
         {/* New draft from template view */}
         {view === 'create' && selectedTemplate && (
-          <div className="bg-gray-900 rounded-lg p-4">
-            <h2 className="text-lg font-medium text-text-primary mb-1">Create New Draft</h2>
-            <p className="text-sm text-text-secondary mb-4">Using template: {selectedTemplate.name}</p>
+          <div className="bg-gray-900 rounded-lg p-6">
+            <h2 className="text-lg font-medium text-text-primary mb-2">{selectedTemplate.name}</h2>
+            <p className="text-sm text-text-secondary mb-4">
+              This template has {countVariables(selectedTemplate.content)} customizable variables.
+              {caseId && <span className="text-primary ml-1">Variables will be auto-filled from case data when available.</span>}
+            </p>
             
-            <div className="bg-gray-800 p-4 rounded-lg border border-gray-700 mb-4">
-              <h3 className="text-sm font-medium text-text-primary mb-3">Template Variables</h3>
+            <div className="mb-6">
+              <h3 className="text-md font-medium text-text-primary mb-3">Template Variables</h3>
               
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
-                {selectedTemplate.variables.map(variable => (
-                  <div key={variable} className="flex flex-col">
-                    <label className="text-xs text-text-secondary mb-1">{variable}</label>
-                    <input
-                      type="text"
-                      className="bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-primary"
-                      placeholder={`Enter ${variable}...`}
-                    />
-                  </div>
-                ))}
-              </div>
+              {extractVariables(selectedTemplate.content).map((variable: string, index: number) => (
+                <div key={index} className="mb-3">
+                  <label className="block text-sm text-text-secondary mb-1">{variable}</label>
+                  <input
+                    type="text"
+                    className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-text-primary focus:outline-none focus:border-primary"
+                    placeholder={caseId ? `Auto-filled from case data if available` : `Enter ${variable}`}
+                  />
+                </div>
+              ))}
+            </div>
               
               <button
                 onClick={() => {
-                  // In a real implementation, we would collect variable values
-                  // and pass them to handleCreateDraft
+                  // Create a draft with the template and case information
                   const mockDraft: DocumentDraft = {
                     id: `draft-${Date.now()}`,
                     name: `Draft from ${selectedTemplate.name}`,
@@ -312,7 +330,7 @@ const DraftManagement: React.FC<DraftManagementProps> = ({
                     content: selectedTemplate.content,
                     createdAt: new Date().toISOString(),
                     updatedAt: new Date().toISOString(),
-                    caseId
+                    caseId: caseId // Associate with the case if available
                   };
                   
                   setDrafts(prev => [mockDraft, ...prev]);
@@ -323,14 +341,14 @@ const DraftManagement: React.FC<DraftManagementProps> = ({
               >
                 Create Draft
               </button>
-            </div>
           </div>
         )}
         
         {/* Edit draft view */}
         {view === 'edit' && selectedDraft && (
           <DraftEditor 
-            draft={selectedDraft} 
+            draft={selectedDraft}
+            caseId={selectedDraft.caseId || caseId} 
             onSave={(updatedDraft) => {
               setDrafts(prev => prev.map(d => d.id === updatedDraft.id ? updatedDraft : d));
               setView('list');
