@@ -147,7 +147,7 @@ function ChatInterface({ conversationId }: ChatInterfaceProps) {
   ];
 
   // Function to handle sending a new message
-  const handleSendMessage = async (content: string) => {
+  const handleSendMessage = async (content: string, documentContext?: string, analysisContext?: DocumentAnalysisResult) => {
     if (!content.trim() || isSendingMessage) return;
     
     console.log('Sending message:', content);
@@ -204,6 +204,13 @@ function ChatInterface({ conversationId }: ChatInterfaceProps) {
       
       console.log('Active conversation ID:', activeConversationId);
       
+      // If documentContext is provided, set it as the active context
+      if (documentContext) {
+        setActiveContext(documentContext);
+      }
+      if (analysisContext) {
+        setActiveAnalysis(analysisContext);
+      }
       // Send message and handle streaming response
       const response = await sendMessageStream(
         activeConversationId,
@@ -230,8 +237,8 @@ function ChatInterface({ conversationId }: ChatInterfaceProps) {
             return newMessages;
           });
         },
-        activeContext || undefined, // Pass document context to the API
-        activeAnalysis ? JSON.stringify(activeAnalysis) : undefined // Pass analysis context to the API
+        documentContext || activeContext || undefined, // Prefer explicit documentContext, fallback to activeContext
+        analysisContext ? JSON.stringify(analysisContext) : (activeAnalysis ? JSON.stringify(activeAnalysis) : undefined)
       );
       
       // Clear the loading interval if it's somehow still running

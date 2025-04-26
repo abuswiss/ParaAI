@@ -134,28 +134,14 @@ const ChatInput: React.FC<ChatInputProps> = ({
     try {
       setLoadingDocuments(true);
       const { data, error } = await getUserDocuments();
-      
       if (error) throw error;
-      
-      // Make sure we get complete documents with extracted text
-      const documentsWithText = data?.map(doc => {
-        // If document doesn't have extracted text, add a placeholder
-        if (!doc.extractedText) {
-          return {
-            ...doc,
-            extractedText: ''
-          };
-        }
-        return doc;
-      }) || [];
-      
-      setUserDocuments(documentsWithText);
+      setUserDocuments(data || []);
     } catch (err) {
       console.error('Error fetching documents:', err);
     } finally {
       setLoadingDocuments(false);
     }
-  }
+  };
 
   const toggleAnalysisPicker = () => {
     if (!activeDocument) return;
@@ -196,23 +182,29 @@ const ChatInput: React.FC<ChatInputProps> = ({
   }, []);
 
   // Select a document from the user's existing documents to use as context
-  const selectDocumentForContext = (doc: Document) => {
+  const selectDocumentForContext = async (doc: Document) => {
     try {
-      // Set loading state
       setLoadingDocuments(true);
-      
-      // Set the document as active
-      setActiveDocument(doc);
-      
-      // Check if document has extracted text
-      if (doc.extractedText) {
+      // Always fetch the full document with extractedText
+      let fullDoc = doc;
+      if (!doc.extractedText) {
+        try {
+          const { getDocumentById } = await import('../../services/documentService');
+          const { data: fetchedDoc, error } = await getDocumentById(doc.id);
+          if (!error && fetchedDoc && fetchedDoc.extractedText) {
+            fullDoc = { ...doc, ...fetchedDoc };
+          }
+        } catch (fetchErr) {
+          console.error('Error fetching full document:', fetchErr);
+        }
+      }
+      setActiveDocument(fullDoc);
+      if (fullDoc.extractedText) {
         setDocumentContextWarning(null);
-        // If document has extracted text, load available analyses
-        if (doc.id) {
-          loadDocumentAnalyses(doc.id);
+        if (fullDoc.id) {
+          loadDocumentAnalyses(fullDoc.id);
         }
       } else {
-        console.warn('Document has no extracted text content');
         setDocumentContextWarning('This document has no extracted text content. The AI may not be able to reference it properly.');
       }
     } catch (err) {
