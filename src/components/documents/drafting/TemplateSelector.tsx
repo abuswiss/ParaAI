@@ -7,6 +7,9 @@ import {
   importTemplate,
   exportTemplate
 } from '../../../services/templateService';
+import mammoth from 'mammoth';
+import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf';
+pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
 
 interface TemplateSelectorProps {
   onSelectTemplate: (template: DocumentTemplate) => void;
@@ -34,6 +37,10 @@ const TemplateSelector: React.FC<TemplateSelectorProps> = ({
   const [importError, setImportError] = useState<string | null>(null);
   const [isImporting, setIsImporting] = useState(false);
   const importFileRef = useRef<HTMLInputElement>(null);
+  const [importName, setImportName] = useState('');
+  const [importDescription, setImportDescription] = useState('');
+  const [importCategory, setImportCategory] = useState('');
+  const [importTags, setImportTags] = useState('');
 
   // Load all templates when the active category changes
   useEffect(() => {
@@ -168,16 +175,114 @@ const TemplateSelector: React.FC<TemplateSelectorProps> = ({
   const handleFileImport = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
-    
+
+    const extension = file.name.split('.').pop()?.toLowerCase();
+    const mimeType = file.type;
+
+    if (extension === 'json' || mimeType === 'application/json') {
+      // JSON import (existing logic)
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        try {
+          const content = e.target?.result as string;
+          setImportContent(content);
+          setShowImportModal(true);
+        } catch (err) {
+          console.error('Error reading file:', err);
+          setImportError('Failed to read the template file. Please try again.');
+        }
+      };
+      reader.readAsText(file);
+    } else if (extension === 'docx' || mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+      extractDocxTemplate(file);
+    } else if (extension === 'pdf' || mimeType === 'application/pdf') {
+      extractPdfTemplate(file);
+    } else if (extension === 'rtf' || mimeType === 'application/rtf') {
+      extractRtfTemplate(file);
+    } else if (extension === 'txt' || mimeType === 'text/plain') {
+      extractTxtTemplate(file);
+    } else {
+      setImportError('Unsupported file type. Please select a JSON, DOCX, PDF, TXT, or RTF file.');
+    }
+  };
+
+  // Extraction stubs (to be implemented in next steps)
+  const extractDocxTemplate = (file: File) => {
+    setImportError(null);
     const reader = new FileReader();
     reader.onload = async (e) => {
       try {
-        const content = e.target?.result as string;
-        setImportContent(content);
+        const arrayBuffer = e.target?.result;
+        if (!arrayBuffer) throw new Error('Could not read DOCX file.');
+        const { value: text } = await mammoth.extractRawText({ arrayBuffer });
+        setImportContent(text);
         setShowImportModal(true);
       } catch (err) {
-        console.error('Error reading file:', err);
-        setImportError('Failed to read the template file. Please try again.');
+        console.error('Error extracting DOCX:', err);
+        setImportError('Failed to extract text from DOCX file.');
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  };
+  const extractPdfTemplate = (file: File) => {
+    setImportError(null);
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      try {
+        const arrayBuffer = e.target?.result;
+        if (!arrayBuffer) throw new Error('Could not read PDF file.');
+        const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+        let text = '';
+        for (let i = 1; i <= pdf.numPages; i++) {
+          const page = await pdf.getPage(i);
+          const content = await page.getTextContent();
+          text += content.items.map((item: any) => item.str).join(' ') + '\n';
+        }
+        setImportContent(text);
+        setShowImportModal(true);
+      } catch (err) {
+        console.error('Error extracting PDF:', err);
+        setImportError('Failed to extract text from PDF file.');
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  };
+  const extractRtfTemplate = (file: File) => {
+    setImportError(null);
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const rtf = e.target?.result as string;
+        if (!rtf) throw new Error('Could not read RTF file.');
+        // Simple RTF to text: remove RTF tags and control words
+        const text = rtf
+          .replace(/\\par[d]?/g, '\n')
+          .replace(/\\[a-z]+[0-9]? ?/g, '')
+          .replace(/[{}]/g, '')
+          .replace(/\n{2,}/g, '\n')
+          .replace(/\s+/g, ' ')
+          .trim();
+        setImportContent(text);
+        setShowImportModal(true);
+      } catch (err) {
+        console.error('Error extracting RTF:', err);
+        setImportError('Failed to extract text from RTF file.');
+      }
+    };
+    reader.readAsText(file);
+  };
+  const extractTxtTemplate = (file: File) => {
+    setImportError(null);
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const text = e.target?.result as string;
+        if (!text) throw new Error('Could not read TXT file.');
+        setImportContent(text);
+        setShowImportModal(true);
+      } catch (err) {
+        console.error('Error extracting TXT:', err);
+        setImportError('Failed to extract text from TXT file.');
       }
     };
     reader.readAsText(file);
@@ -246,6 +351,15 @@ const TemplateSelector: React.FC<TemplateSelectorProps> = ({
     }
   };
 
+  // When importContent changes, prefill name and category if possible
+  useEffect(() => {
+    if (showImportModal && importContent) {
+      if (!importName) setImportName('Imported Template');
+      if (!importCategory) setImportCategory('other');
+    }
+    // eslint-disable-next-line
+  }, [showImportModal, importContent]);
+
   return (
     <div className="bg-gray-900 rounded-lg p-4">
       <div className="mb-4">
@@ -306,7 +420,7 @@ const TemplateSelector: React.FC<TemplateSelectorProps> = ({
             </button>
             <input 
               type="file" 
-              accept=".json,application/json" 
+              accept=".json,application/json,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.pdf,application/pdf,.txt,text/plain,.rtf,application/rtf" 
               className="hidden" 
               ref={importFileRef}
               onChange={handleFileImport}
@@ -559,21 +673,159 @@ const TemplateSelector: React.FC<TemplateSelectorProps> = ({
       {/* Import template modal */}
       {showImportModal && (
         <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50">
-          <div className="bg-gray-800 rounded-lg p-6 max-w-md w-full">
+          <div className="bg-gray-800 rounded-lg p-6 max-w-md w-full relative">
+            {/* Close (X) button */}
+            <button
+              type="button"
+              className="absolute top-3 right-3 text-gray-400 hover:text-white focus:outline-none"
+              aria-label="Close import dialog"
+              onClick={() => {
+                setShowImportModal(false);
+                setImportContent('');
+                setImportError(null);
+                setImportName('');
+                setImportDescription('');
+                setImportCategory('');
+                setImportTags('');
+              }}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
             <h3 className="text-white text-lg font-medium mb-4">Import Template</h3>
-            
             {importContent ? (
-              <>
-                <p className="text-gray-300 mb-4">Review the template data before importing:</p>
-                <div className="bg-gray-900 p-3 rounded-md mb-4 max-h-40 overflow-y-auto">
-                  <pre className="text-xs text-gray-300 whitespace-pre-wrap">
-                    {importContent.length > 500 ? importContent.substring(0, 500) + '...' : importContent}
-                  </pre>
+              <form
+                onSubmit={async (e) => {
+                  e.preventDefault();
+                  setIsImporting(true);
+                  setImportError(null);
+                  // Validate required fields
+                  if (!importName.trim() || !importCategory.trim() || !importContent.trim()) {
+                    setImportError('Name, category, and content are required.');
+                    setIsImporting(false);
+                    return;
+                  }
+                  // Build template JSON
+                  const templateJson = JSON.stringify({
+                    name: importName,
+                    description: importDescription,
+                    category: importCategory,
+                    content: importContent,
+                    tags: importTags.split(',').map(t => t.trim()).filter(Boolean),
+                  });
+                  const { error } = await importTemplate(templateJson);
+                  if (error) {
+                    setImportError(error.message || 'Failed to import template.');
+                  } else {
+                    setShowImportModal(false);
+                    setImportContent('');
+                    setImportError(null);
+                    setImportName('');
+                    setImportDescription('');
+                    setImportCategory('');
+                    setImportTags('');
+                  }
+                  setIsImporting(false);
+                }}
+              >
+                <div className="mb-3">
+                  <label className="block text-gray-300 text-sm mb-1">Name <span className="text-red-500">*</span></label>
+                  <input
+                    className="w-full px-3 py-2 rounded bg-gray-900 text-white border border-gray-700 focus:outline-none focus:ring-2 focus:ring-primary"
+                    value={importName}
+                    onChange={e => setImportName(e.target.value)}
+                    placeholder="Template Name"
+                    required
+                  />
                 </div>
-              </>
+                <div className="mb-3">
+                  <label className="block text-gray-300 text-sm mb-1">Description</label>
+                  <input
+                    className="w-full px-3 py-2 rounded bg-gray-900 text-white border border-gray-700 focus:outline-none focus:ring-2 focus:ring-primary"
+                    value={importDescription}
+                    onChange={e => setImportDescription(e.target.value)}
+                    placeholder="Short description (optional)"
+                  />
+                </div>
+                <div className="mb-3">
+                  <label className="block text-gray-300 text-sm mb-1">Category <span className="text-red-500">*</span></label>
+                  <select
+                    className="w-full px-3 py-2 rounded bg-gray-900 text-white border border-gray-700 focus:outline-none focus:ring-2 focus:ring-primary"
+                    value={importCategory}
+                    onChange={e => setImportCategory(e.target.value)}
+                    required
+                  >
+                    <option value="">Select category</option>
+                    <option value="contract">Contract</option>
+                    <option value="letter">Letter</option>
+                    <option value="pleading">Pleading</option>
+                    <option value="agreement">Agreement</option>
+                    <option value="memorandum">Memorandum</option>
+                    <option value="other">Other</option>
+                  </select>
+                </div>
+                <div className="mb-3">
+                  <label className="block text-gray-300 text-sm mb-1">Tags (comma separated)</label>
+                  <input
+                    className="w-full px-3 py-2 rounded bg-gray-900 text-white border border-gray-700 focus:outline-none focus:ring-2 focus:ring-primary"
+                    value={importTags}
+                    onChange={e => setImportTags(e.target.value)}
+                    placeholder="e.g. NDA, employment, litigation"
+                  />
+                </div>
+                <div className="mb-3">
+                  <label className="block text-gray-300 text-sm mb-1">Content <span className="text-red-500">*</span></label>
+                  <textarea
+                    className="w-full px-3 py-2 rounded bg-gray-900 text-white border border-gray-700 focus:outline-none focus:ring-2 focus:ring-primary"
+                    value={importContent}
+                    onChange={e => setImportContent(e.target.value)}
+                    rows={8}
+                    required
+                  />
+                </div>
+                {importError && (
+                  <div className="bg-red-900 bg-opacity-50 text-red-200 p-2 rounded mb-2 text-sm">{importError}</div>
+                )}
+                <div className="flex justify-end gap-3 mt-4">
+                  <button
+                    type="button"
+                    className="px-4 py-2 bg-gray-700 text-white rounded-md hover:bg-gray-600"
+                    onClick={() => {
+                      setShowImportModal(false);
+                      setImportContent('');
+                      setImportError(null);
+                      setImportName('');
+                      setImportDescription('');
+                      setImportCategory('');
+                      setImportTags('');
+                    }}
+                    disabled={isImporting}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-4 py-2 bg-accent-500 text-white rounded-md hover:bg-accent-600 flex items-center gap-2"
+                    disabled={isImporting}
+                  >
+                    {isImporting ? (
+                      <>
+                        <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        Importing...
+                      </>
+                    ) : (
+                      'Import Template'
+                    )}
+                  </button>
+                </div>
+              </form>
             ) : (
               <>
-                <p className="text-gray-300 mb-4">Select a JSON file containing the template data</p>
+                <p className="text-gray-300 mb-4">Select a JSON, DOCX, PDF, TXT, or RTF file containing the template data</p>
                 <button
                   className="w-full py-2 px-4 bg-gray-700 text-white rounded-md hover:bg-gray-600 mb-4 flex items-center justify-center gap-2"
                   onClick={() => importFileRef.current?.click()}
@@ -585,45 +837,6 @@ const TemplateSelector: React.FC<TemplateSelectorProps> = ({
                 </button>
               </>
             )}
-            
-            {importError && (
-              <div className="bg-red-900 bg-opacity-50 text-red-200 p-3 rounded-md mb-4">
-                {importError}
-              </div>
-            )}
-            
-            <div className="flex justify-end gap-3 mt-4">
-              <button
-                className="px-4 py-2 bg-gray-700 text-white rounded-md hover:bg-gray-600"
-                onClick={() => {
-                  setShowImportModal(false);
-                  setImportContent('');
-                  setImportError(null);
-                }}
-              >
-                Cancel
-              </button>
-              
-              {importContent && (
-                <button
-                  className="px-4 py-2 bg-accent-500 text-white rounded-md hover:bg-accent-600 flex items-center gap-2"
-                  onClick={handleImportTemplate}
-                  disabled={isImporting}
-                >
-                  {isImporting ? (
-                    <>
-                      <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                      </svg>
-                      Importing...
-                    </>
-                  ) : (
-                    'Import Template'
-                  )}
-                </button>
-              )}
-            </div>
           </div>
         </div>
       )}

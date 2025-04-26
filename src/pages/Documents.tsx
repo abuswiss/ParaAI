@@ -16,6 +16,7 @@ const Documents: React.FC = () => {
   const [selectedTemplate, setSelectedTemplate] = useState<DocumentTemplate | null>(null);
   const [showDraftEditor, setShowDraftEditor] = useState(false);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
+  const [selectedCategory, setSelectedCategory] = useState<string | undefined>(undefined);
 
   const handleUploadComplete = (success: boolean) => {
     if (success) {
@@ -60,17 +61,7 @@ const Documents: React.FC = () => {
             </svg>
             <span>Upload Documents</span>
           </button>
-        ) : (
-          <button
-            onClick={() => setActiveTab('documents')}
-            className="btn-secondary flex items-center space-x-2"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-              <path d="M9 4.804A7.968 7.968 0 005.5 4c-1.255 0-2.443.29-3.5.804v10A7.969 7.969 0 015.5 14c1.669 0 3.218.51 4.5 1.385A7.962 7.962 0 0114.5 14c1.255 0 2.443.29 3.5.804v-10A7.968 7.968 0 0014.5 4c-1.255 0-2.443.29-3.5.804V12a1 1 0 11-2 0V4.804z" />
-            </svg>
-            <span>Back to Documents</span>
-          </button>
-        )}
+        ) : null}
       </div>
 
       {/* Tab Navigation */}
@@ -221,24 +212,23 @@ const Documents: React.FC = () => {
                     </p>
                   </div>
                   <div className="flex-1 overflow-auto p-4">
-                    {/* This will be replaced with the category filter component */}
                     <div className="space-y-2">
-                      <button className="w-full text-left p-2 bg-gray-800 hover:bg-gray-700 rounded-md">
+                      <button className={`w-full text-left p-2 rounded-md ${!selectedCategory ? 'bg-gray-800' : 'hover:bg-gray-800'}`} onClick={() => setSelectedCategory(undefined)}>
                         All Templates
                       </button>
-                      <button className="w-full text-left p-2 hover:bg-gray-800 rounded-md">
+                      <button className={`w-full text-left p-2 rounded-md ${selectedCategory === 'Contracts' ? 'bg-gray-800' : 'hover:bg-gray-800'}`} onClick={() => setSelectedCategory('Contracts')}>
                         Contracts
                       </button>
-                      <button className="w-full text-left p-2 hover:bg-gray-800 rounded-md">
+                      <button className={`w-full text-left p-2 rounded-md ${selectedCategory === 'Letters' ? 'bg-gray-800' : 'hover:bg-gray-800'}`} onClick={() => setSelectedCategory('Letters')}>
                         Letters
                       </button>
-                      <button className="w-full text-left p-2 hover:bg-gray-800 rounded-md">
+                      <button className={`w-full text-left p-2 rounded-md ${selectedCategory === 'Pleadings' ? 'bg-gray-800' : 'hover:bg-gray-800'}`} onClick={() => setSelectedCategory('Pleadings')}>
                         Pleadings
                       </button>
-                      <button className="w-full text-left p-2 hover:bg-gray-800 rounded-md">
+                      <button className={`w-full text-left p-2 rounded-md ${selectedCategory === 'Agreements' ? 'bg-gray-800' : 'hover:bg-gray-800'}`} onClick={() => setSelectedCategory('Agreements')}>
                         Agreements
                       </button>
-                      <button className="w-full text-left p-2 hover:bg-gray-800 rounded-md">
+                      <button className={`w-full text-left p-2 rounded-md ${selectedCategory === 'Memorandums' ? 'bg-gray-800' : 'hover:bg-gray-800'}`} onClick={() => setSelectedCategory('Memorandums')}>
                         Memorandums
                       </button>
                     </div>
@@ -256,7 +246,7 @@ const Documents: React.FC = () => {
                     </p>
                   </div>
                   <div className="flex-1 overflow-auto">
-                    <TemplateSelector onSelectTemplate={handleSelectTemplate} />
+                    <TemplateSelector onSelectTemplate={handleSelectTemplate} selectedCategory={selectedCategory} />
                   </div>
                 </div>
               </div>
