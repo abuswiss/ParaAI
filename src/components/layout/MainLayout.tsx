@@ -41,11 +41,11 @@ const MainLayout: React.FC = () => {
           ${sidebarOpen ? 'md:ml-64' : 'ml-0'}
           w-full
           bg-background
-          absolute md:relative inset-0
+          relative
         `}
       >
+        {/* Header only covers main content area */}
         <Header toggleSidebar={toggleSidebar} isSidebarOpen={sidebarOpen} />
-        
         {/* Main content with refined padding and scrolling */}
         <main className="
           flex-1 overflow-auto

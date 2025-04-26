@@ -46,7 +46,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, toggleSidebar }) => {
   return (
     <aside 
       className={`
-        fixed inset-y-0 left-0 z-50
+        fixed inset-y-0 left-0 z-[60]
         bg-surface border-r border-gray-800
         transition-all duration-300 ease-in-out
         ${isOpen ? 'translate-x-0 w-64' : '-translate-x-full w-0'}
@@ -56,29 +56,8 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, toggleSidebar }) => {
       `}
     >
       <div className="h-full flex flex-col overflow-hidden">
-        {/* App logo and sidebar close button */}
-        <div className="
-          p-4 border-b border-gray-800
-          flex items-center justify-between
-          bg-surface-darker
-          shadow-inner-light
-        ">
-          <div className="flex items-center space-x-3">
-            <svg className="h-8 w-8 text-primary" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M12 2L1 21h22L12 2zm0 4.5l7.5 13h-15L12 6.5z" />
-            </svg>
-            <span className="text-primary font-medium text-lg">Paralegal AI</span>
-          </div>
-          <button
-            onClick={toggleSidebar}
-            className="text-gray-400 hover:text-white focus:outline-none focus:text-white transition-colors duration-200"
-            aria-label="Close sidebar"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
+        {/* Seamless top background area */}
+        <div className="border-b border-gray-800 bg-surface shadow-inner-light h-12 w-full" />
 
         {/* New chat button */}
         <div className="p-4">
