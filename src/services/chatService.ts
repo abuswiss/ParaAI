@@ -375,3 +375,144 @@ export const addDocumentToConversation = async (
     return { success: false, error: error as Error };
   }
 };
+
+/**
+ * Handle a /research query using RAG (Retrieval-Augmented Generation)
+ * 1. Fetch relevant legal documents/snippets from CourtListener
+ * 2. Build a RAG prompt with those snippets and the user query
+ * 3. Call OpenAI with the prompt
+ * 4. Return the grounded answer
+ */
+export const handleResearchQueryStream = async (
+  researchQuery: string,
+  onChunk: (chunk: string) => void
+): Promise<{ success: boolean; error: Error | null; answer?: string; snippets?: Array<any> }> => {
+  try {
+    // Call the backend API instead of CourtListener directly
+    const response = await fetch('/api/research', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query: researchQuery })
+    });
+    if (!response.ok) {
+      throw new Error(`Backend /api/research error: ${response.status} ${response.statusText}`);
+    }
+    const data = await response.json();
+    // If OpenAI answer is present, stream it; otherwise, stream snippets as fallback
+    if (data.answer) {
+      onChunk(data.answer);
+      return { success: true, error: null, answer: data.answer, snippets: data.snippets };
+    } else if (data.snippets) {
+      // Fallback: stream snippets as a single chunk
+      const snippetText = data.snippets.map((s: any) => s.text || '').join('\n---\n');
+      onChunk(snippetText);
+      return { success: true, error: null, snippets: data.snippets };
+    } else {
+      throw new Error('No answer or snippets returned from backend');
+    }
+  } catch (error) {
+    console.error('Error in handleResearchQueryStream:', error);
+    return { success: false, error: error as Error };
+  }
+};
+
+/**
+ * Handle a /agent draft query using OpenAI
+ * 1. Build a system prompt using the user's instructions and any document/analysis context
+ * 2. Call OpenAI with the prompt
+ * 3. Stream the response
+ */
+export const handleAgentDraftStream = async (
+  instructions: string,
+  onChunk: (chunk: string) => void,
+  documentContext?: string,
+  analysisContext?: string
+): Promise<{ success: boolean; error: Error | null; answer?: string }> => {
+  try {
+    // Build the system prompt for legal drafting
+    let contextPrompt = '';
+    if (documentContext) {
+      contextPrompt += `Relevant document context:\n${documentContext}\n`;
+    }
+    if (analysisContext) {
+      contextPrompt += `Relevant analysis context:\n${analysisContext}\n`;
+    }
+    const systemPrompt =
+      'You are a paralegal AI assistant. Draft legal documents, emails, or letters as instructed. Use any provided context. Be clear, professional, and legally accurate.';
+    const userPrompt = `${contextPrompt}\nDrafting instructions: ${instructions}`;
+
+    const stream = await openai.chat.completions.create({
+      model: 'gpt-4',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ],
+      stream: true,
+      temperature: 0.2,
+    });
+
+    let answer = '';
+    for await (const chunk of stream) {
+      const content = chunk.choices[0]?.delta?.content || '';
+      if (content) {
+        answer += content;
+        onChunk(content);
+      }
+    }
+    return { success: true, error: null, answer };
+  } catch (error) {
+    console.error('Error in handleAgentDraftStream:', error);
+    return { success: false, error: error as Error };
+  }
+};
+
+/**
+ * Handle a /find-clause query using OpenAI
+ * 1. Fetch the document by ID
+ * 2. Extract the text
+ * 3. Build a prompt for OpenAI to find the clause
+ * 4. Stream the response
+ */
+export const handleFindClauseStream = async (
+  clause: string,
+  docId: string,
+  onChunk: (chunk: string) => void
+): Promise<{ success: boolean; error: Error | null; answer?: string }> => {
+  try {
+    // Import here to avoid circular dependency
+    const { getDocumentById } = await import('./documentService');
+    const { data: document, error: docError } = await getDocumentById(docId);
+    if (docError || !document) {
+      throw docError || new Error('Document not found');
+    }
+    if (!document.extractedText) {
+      throw new Error('Document text not available. Please wait for processing to complete.');
+    }
+    const systemPrompt =
+      'You are a paralegal AI assistant. Given a legal document and a clause description, find and return the most relevant clause or section from the document. If no exact match is found, return the closest relevant text.';
+    const userPrompt = `Document text:\n${document.extractedText}\n\nFind the clause: ${clause}`;
+
+    const stream = await openai.chat.completions.create({
+      model: 'gpt-4',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ],
+      stream: true,
+      temperature: 0.1,
+    });
+
+    let answer = '';
+    for await (const chunk of stream) {
+      const content = chunk.choices[0]?.delta?.content || '';
+      if (content) {
+        answer += content;
+        onChunk(content);
+      }
+    }
+    return { success: true, error: null, answer };
+  } catch (error) {
+    console.error('Error in handleFindClauseStream:', error);
+    return { success: false, error: error as Error };
+  }
+};
