@@ -3,6 +3,7 @@ import { Document } from '../../types/document';
 import { getUserDocuments } from '../../services/documentService';
 import { DocumentAnalysisResult, getDocumentAnalyses } from '../../services/documentAnalysisService';
 import { AnimatePresence, motion } from 'framer-motion';
+import { Search, Send, BarChart2, Globe, Video, PlaneTakeoff, AudioLines, FileText, HelpCircle } from 'lucide-react';
 
 interface ChatInputProps {
   onSendMessage: (message: string, documentContext?: string, analysisContext?: DocumentAnalysisResult) => void;
@@ -37,6 +38,56 @@ const ChatInput: React.FC<ChatInputProps> = ({
   const documentPickerRef = useRef<HTMLDivElement>(null);
   const analysisPickerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const commandDropdownRef = useRef<HTMLDivElement>(null);
+
+  const commandActions = [
+    {
+      id: 'research',
+      label: '/research [query]',
+      icon: <Search className="h-4 w-4 text-blue-500" />,
+      description: 'Legal research using CourtListener',
+      example: '/research Miranda rights',
+    },
+    {
+      id: 'agent-draft',
+      label: '/agent draft [instructions]',
+      icon: <FileText className="h-4 w-4 text-orange-500" />,
+      description: 'Draft a legal document or email',
+      example: '/agent draft draft a cease and desist letter',
+    },
+    {
+      id: 'agent-generate-timeline',
+      label: '/agent generate_timeline from [doc_id]',
+      icon: <BarChart2 className="h-4 w-4 text-purple-500" />,
+      description: 'Generate a timeline of key dates and events from a document',
+      example: '/agent generate_timeline from 1234abcd',
+    },
+    {
+      id: 'agent-explain-term',
+      label: '/agent explain_term "[legal term or acronym]"',
+      icon: <Globe className="h-4 w-4 text-yellow-500" />,
+      description: 'Explain a legal term or acronym',
+      example: '/agent explain_term "estoppel"',
+    },
+    {
+      id: 'agent-find-clause',
+      label: '/agent find_clause "[clause description]" in [doc_id]',
+      icon: <FileText className="h-4 w-4 text-pink-500" />,
+      description: 'Find a clause in a document',
+      example: '/agent find_clause "termination clause" in 1234abcd',
+    },
+    {
+      id: 'agent-help',
+      label: '/agent help',
+      icon: <HelpCircle className="h-4 w-4 text-green-500" />,
+      description: 'Show available agent commands',
+      example: '/agent help',
+    },
+  ];
+
+  const [showCommandHint, setShowCommandHint] = useState(false);
+  const [commandQuery, setCommandQuery] = useState('');
+  const [filteredCommands, setFilteredCommands] = useState(commandActions);
 
   const handleSubmit = () => {
     const trimmedMessage = message.trim();
@@ -56,8 +107,6 @@ const ChatInput: React.FC<ChatInputProps> = ({
       handleSubmit();
     }
   };
-
-
 
   // File upload handling functions
   const handleFileButtonClick = () => {
@@ -311,8 +360,47 @@ const ChatInput: React.FC<ChatInputProps> = ({
     }
   };
 
+  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const val = e.target.value;
+    setMessage(val);
+    // Command hinting logic
+    if (val.startsWith('/')) {
+      setShowCommandHint(true);
+      setCommandQuery(val.slice(1));
+      const q = val.slice(1).toLowerCase();
+      setFilteredCommands(
+        commandActions.filter(cmd =>
+          cmd.label.toLowerCase().includes(q) ||
+          cmd.description.toLowerCase().includes(q) ||
+          cmd.example.toLowerCase().includes(q)
+        )
+      );
+    } else {
+      setShowCommandHint(false);
+      setCommandQuery('');
+      setFilteredCommands(commandActions);
+    }
+  };
+
+  // Click outside to close command dropdown
+  useEffect(() => {
+    if (!showCommandHint) return;
+    function handleClickOutside(event: MouseEvent) {
+      if (
+        commandDropdownRef.current &&
+        !commandDropdownRef.current.contains(event.target as Node) &&
+        textareaRef.current &&
+        !textareaRef.current.contains(event.target as Node)
+      ) {
+        setShowCommandHint(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showCommandHint]);
+
   return (
-    <div>
+    <div className="relative w-full">
       <motion.div 
         className={`border-t border-gray-800 p-4 relative w-full ${isCentered ? 'flex flex-col items-center justify-center min-h-[240px]' : ''}`}
         initial={isCentered ? 'centered' : 'bottom'}
@@ -320,6 +408,39 @@ const ChatInput: React.FC<ChatInputProps> = ({
         variants={containerVariants}
         transition={{ duration: 0.5, ease: [0.19, 1.0, 0.22, 1.0] }}
       >
+        {/* Command dropdown absolutely above input, matching input width */}
+        {showCommandHint && (
+          <div
+            ref={commandDropdownRef}
+            className="absolute left-0 right-0 z-50 bg-gray-900 border border-gray-700 rounded-lg shadow-lg w-full"
+            style={{
+              maxHeight: '260px',
+              overflowY: 'auto',
+              bottom: 'calc(100% + 8px)', // Place above the input box with a gap
+            }}
+          >
+            <div className="divide-y divide-gray-800">
+              {filteredCommands.map((cmd) => (
+                <div
+                  key={cmd.id}
+                  className="flex items-center px-4 py-3 cursor-pointer hover:bg-gray-800"
+                  onClick={() => {
+                    setMessage(cmd.label.replace('[query]', '').replace('[instructions]', ''));
+                    setShowCommandHint(false);
+                    textareaRef.current?.focus();
+                  }}
+                >
+                  <span className="mr-3">{cmd.icon}</span>
+                  <div className="flex flex-col">
+                    <span className="text-white font-medium">{cmd.label}</span>
+                    <span className="text-gray-400 text-xs">{cmd.description}</span>
+                    <span className="text-gray-500 text-xs italic">e.g. {cmd.example}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
         {/* Context pills with animations */}
         <AnimatePresence>
           {activeDocument && (
@@ -351,6 +472,16 @@ const ChatInput: React.FC<ChatInputProps> = ({
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
                   <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
                 </svg>
+              </button>
+              <button
+                className="ml-2 px-2 py-1 text-xs bg-primary text-white rounded"
+                onClick={() => {
+                  setMessage(`/agent find_clause \"\" in ${activeDocument.id}`);
+                  setTimeout(() => textareaRef.current?.focus(), 0);
+                }}
+                title="Find a clause in this document"
+              >
+                Find Clause
               </button>
             </motion.div>
           )}
@@ -432,6 +563,18 @@ const ChatInput: React.FC<ChatInputProps> = ({
                           <div className="text-xs text-gray-400">{new Date(doc.uploadedAt).toLocaleDateString()}</div>
                         </div>
                       </div>
+                      <button
+                        className="ml-2 px-2 py-1 text-xs bg-primary text-white rounded"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setMessage(`/agent find_clause \"\" in ${doc.id}`);
+                          setShowDocumentPicker(false);
+                          setTimeout(() => textareaRef.current?.focus(), 0);
+                        }}
+                        title="Find a clause in this document"
+                      >
+                        Find Clause
+                      </button>
                     </div>
                   ))
                 )}
@@ -455,11 +598,17 @@ const ChatInput: React.FC<ChatInputProps> = ({
           <textarea
             ref={textareaRef}
             value={message}
-            onChange={(e) => setMessage(e.target.value)}
+            onChange={handleInputChange}
             onKeyDown={handleKeyDown}
-            placeholder={isCentered ? "Ask me anything about legal documents..." : "Type your message..."}
+            placeholder={
+              showCommandHint
+                ? 'Type a command, e.g. /research Miranda rights'
+                : isCentered
+                  ? 'Ask me anything about legal documents...'
+                  : 'Type your message...'
+            }
             rows={1}
-            className="w-full bg-transparent text-text-primary px-3 py-3 pr-12 pb-14 resize-none focus:outline-none rounded-lg transition-all duration-200"
+            className={`w-full bg-transparent text-text-primary px-3 py-3 pr-12 pb-14 resize-none focus:outline-none rounded-lg transition-all duration-200 ${showCommandHint ? 'ring-2 ring-primary' : ''}`}
             disabled={disabled}
             style={{ minHeight: '50px' }}
           />

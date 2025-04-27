@@ -1,5 +1,6 @@
 import React from 'react';
 import { DocumentAnalysisResult } from '../../services/documentAnalysisService';
+import ReactMarkdown from 'react-markdown';
 
 interface RiskAssessmentProps {
   analysis: DocumentAnalysisResult;
@@ -68,8 +69,8 @@ export const RiskAssessment: React.FC<RiskAssessmentProps> = ({ analysis }) => {
                   {riskLevel} Risk
                 </span>
               </div>
-              <div className="font-semibold text-text-primary mb-1">{title}</div>
-              <div className="text-sm text-text-secondary whitespace-pre-wrap">{description}</div>
+              <div className="font-semibold text-text-primary mb-1"><ReactMarkdown>{title}</ReactMarkdown></div>
+              <div className="text-sm text-text-secondary whitespace-pre-wrap"><ReactMarkdown>{description}</ReactMarkdown></div>
             </div>
           );
         })}

@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
-import { generateDraftWithAI, createTemplate, createDraftFromTemplate } from '../../services/templateService';
+import React, { useState, useEffect } from 'react';
+import { generateDraftWithAI, createTemplate, createDraftFromTemplate, createAIDraft } from '../../services/templateService';
+import { saveAs } from 'file-saver';
 
 const US_STATES = [
   'Alabama', 'Alaska', 'Arizona', 'Arkansas', 'California', 'Colorado', 'Connecticut', 'Delaware', 'Florida', 'Georgia',
@@ -15,23 +16,32 @@ interface AIDraftModalProps {
   onClose: () => void;
   context: 'template' | 'document';
   onExport?: (content: string) => void;
+  initialContent?: string;
 }
 
 type DocumentType = 'contract' | 'letter' | 'pleading' | 'memorandum' | 'agreement' | 'other';
 
-const AIDraftModal: React.FC<AIDraftModalProps> = ({ isOpen, onClose, context, onExport }) => {
+const AIDraftModal: React.FC<AIDraftModalProps> = ({ isOpen, onClose, context, onExport, initialContent }) => {
   const [step, setStep] = useState<'input' | 'draft' | 'refine'>('input');
   const [requirements, setRequirements] = useState('');
   const [docType, setDocType] = useState<DocumentType>('contract');
   const [jurisdiction, setJurisdiction] = useState('US Federal');
   const [audience, setAudience] = useState('');
   const [specialInstructions, setSpecialInstructions] = useState('');
-  const [draftContent, setDraftContent] = useState('');
+  const [draftContent, setDraftContent] = useState(initialContent || '');
   const [draftName, setDraftName] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [refinePrompt, setRefinePrompt] = useState('');
   const [notification, setNotification] = useState<string | null>(null);
+  const [saveMode, setSaveMode] = useState<'none' | 'document' | 'template'>('none');
+
+  // When initialContent changes (e.g., when opening modal), update draftContent
+  useEffect(() => {
+    if (isOpen && initialContent !== undefined) {
+      setDraftContent(initialContent);
+    }
+  }, [isOpen, initialContent]);
 
   // Compose a detailed prompt for the AI
   const buildAIPrompt = () => {
@@ -90,7 +100,7 @@ const AIDraftModal: React.FC<AIDraftModalProps> = ({ isOpen, onClose, context, o
     setError(null);
     setNotification(null);
     try {
-      if (context === 'template') {
+      if (saveMode === 'template') {
         const { data, error } = await createTemplate({
           name: draftName || 'Untitled Template',
           description: requirements,
@@ -102,11 +112,10 @@ const AIDraftModal: React.FC<AIDraftModalProps> = ({ isOpen, onClose, context, o
         });
         if (error || !data) throw error || new Error('Failed to save template');
         setNotification('Template saved successfully!');
-      } else {
-        const { data, error } = await createDraftFromTemplate(
-          '', // No templateId for AI-generated
+      } else if (saveMode === 'document') {
+        const { data, error } = await createAIDraft(
           draftName || 'Untitled Document',
-          {}, // No variables
+          draftContent
         );
         if (error || !data) throw error || new Error('Failed to save document draft');
         setNotification('Document draft saved successfully!');
@@ -138,6 +147,43 @@ const AIDraftModal: React.FC<AIDraftModalProps> = ({ isOpen, onClose, context, o
     setNotification('Draft exported as .txt!');
     setTimeout(() => setNotification(null), 1200);
     if (onExport) onExport(draftContent);
+  };
+
+  // Utility: Export as .txt
+  const exportAsTxt = (text: string, filename: string) => {
+    const blob = new Blob([text], { type: 'text/plain' });
+    saveAs(blob, filename + '.txt');
+  };
+
+  // Utility: Export as .docx
+  const exportAsDocx = async (text: string, filename: string) => {
+    const { Document, Packer, Paragraph } = await import('docx');
+    const doc = new Document({
+      sections: [
+        {
+          properties: {},
+          children: [new Paragraph(text)],
+        },
+      ],
+    });
+    const blob = await Packer.toBlob(doc);
+    saveAs(blob, filename + '.docx');
+  };
+
+  // Utility: Export as .pdf
+  const exportAsPdf = async (text: string, filename: string) => {
+    const jsPDF = (await import('jspdf')).default;
+    const doc = new jsPDF();
+    doc.setFont('courier');
+    doc.setFontSize(12);
+    doc.text(text, 10, 10);
+    doc.save(filename + '.pdf');
+  };
+
+  // Utility: Export as .json (for templates)
+  const exportAsJson = (templateObj: object, filename: string) => {
+    const blob = new Blob([JSON.stringify(templateObj, null, 2)], { type: 'application/json' });
+    saveAs(blob, filename + '.json');
   };
 
   if (!isOpen) return null;
@@ -232,13 +278,95 @@ const AIDraftModal: React.FC<AIDraftModalProps> = ({ isOpen, onClose, context, o
         )}
         {step === 'draft' && (
           <>
-            <label className="block text-text-secondary mb-2">Draft Name</label>
-            <input
-              className="w-full bg-gray-800 border border-gray-700 rounded px-4 py-3 text-text-primary mb-6"
-              value={draftName}
-              onChange={e => setDraftName(e.target.value)}
-              placeholder={`Untitled ${context === 'template' ? 'Template' : 'Document'}`}
-            />
+            <div className="mt-6">
+              {saveMode === 'none' && (
+                <div className="flex flex-col items-center space-y-4">
+                  <div className="text-text-secondary mb-2">How would you like to save this draft?</div>
+                  <div className="flex gap-4">
+                    <button
+                      className="px-4 py-2 bg-primary text-white rounded hover:bg-primary-hover"
+                      onClick={() => setSaveMode('document')}
+                    >
+                      Save as Document
+                    </button>
+                    <button
+                      className="px-4 py-2 bg-gray-800 text-text-primary rounded hover:bg-gray-700"
+                      onClick={() => setSaveMode('template')}
+                    >
+                      Save as Template
+                    </button>
+                  </div>
+                </div>
+              )}
+              {saveMode !== 'none' && (
+                <form
+                  onSubmit={e => {
+                    e.preventDefault();
+                    handleSave();
+                  }}
+                  className="mt-4 flex flex-col gap-4"
+                >
+                  <div>
+                    <label className="block text-sm text-text-secondary mb-1">{saveMode === 'template' ? 'Template Name' : 'Document Name'}</label>
+                    <input
+                      type="text"
+                      value={draftName}
+                      onChange={e => setDraftName(e.target.value)}
+                      className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-text-primary focus:outline-none focus:border-primary"
+                      placeholder={saveMode === 'template' ? 'Enter template name...' : 'Enter document name...'}
+                      required
+                    />
+                  </div>
+                  {saveMode === 'template' && (
+                    <>
+                      <div>
+                        <label className="block text-sm text-text-secondary mb-1">Description</label>
+                        <input
+                          type="text"
+                          value={requirements}
+                          onChange={e => setRequirements(e.target.value)}
+                          className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-text-primary focus:outline-none focus:border-primary"
+                          placeholder="Describe this template (optional)"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm text-text-secondary mb-1">Category</label>
+                        <select
+                          value={docType}
+                          onChange={e => setDocType(e.target.value as DocumentType)}
+                          className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-text-primary focus:outline-none focus:border-primary"
+                        >
+                          <option value="contract">Contract</option>
+                          <option value="letter">Legal Letter</option>
+                          <option value="pleading">Pleading</option>
+                          <option value="memorandum">Legal Memorandum</option>
+                          <option value="agreement">Agreement</option>
+                          <option value="other">Other</option>
+                        </select>
+                      </div>
+                    </>
+                  )}
+                  <div className="flex gap-4 mt-2">
+                    <button
+                      type="submit"
+                      className="px-4 py-2 bg-primary text-white rounded hover:bg-primary-hover disabled:opacity-60"
+                      disabled={isLoading}
+                    >
+                      Save
+                    </button>
+                    <button
+                      type="button"
+                      className="px-4 py-2 bg-gray-800 text-text-primary rounded hover:bg-gray-700"
+                      onClick={() => setSaveMode('none')}
+                      disabled={isLoading}
+                    >
+                      Back
+                    </button>
+                  </div>
+                  {error && <div className="text-red-400 text-sm mt-2">{error}</div>}
+                </form>
+              )}
+            </div>
             <label className="block text-text-secondary mb-2">AI Draft</label>
             <textarea
               className="w-full bg-gray-800 border border-gray-700 rounded px-4 py-3 text-text-primary mb-6 min-h-[300px]"
@@ -263,13 +391,6 @@ const AIDraftModal: React.FC<AIDraftModalProps> = ({ isOpen, onClose, context, o
             <div className="flex gap-4 justify-end">
               <button
                 className="px-6 py-3 bg-gradient-to-r from-purple-600 to-blue-500 text-white rounded-lg hover:from-purple-700 hover:to-blue-600 disabled:opacity-50 transition-all duration-200 shadow-lg"
-                onClick={handleSave}
-                disabled={!draftContent.trim() || isLoading}
-              >
-                Save
-              </button>
-              <button
-                className="px-6 py-3 bg-gray-700 text-white rounded-lg hover:bg-gray-600 transition-all duration-200"
                 onClick={handleExport}
                 disabled={!draftContent.trim()}
               >

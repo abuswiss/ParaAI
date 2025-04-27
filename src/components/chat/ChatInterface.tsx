@@ -9,6 +9,7 @@ import { parseCommand } from '../../lib/commandParser';
 import { handleUserTurn } from '../../lib/taskDispatcher';
 import { exportAsTxt, exportAsDocx, exportAsPdf } from '../../utils/exportUtils';
 import HowToUsePanel from './HowToUsePanel';
+import AIDraftModal from '../ai/AIDraftModal';
 
 // Import the separate components - only using ChatInput now since we're rendering messages directly
 import ChatInput from './ChatInput';
@@ -46,6 +47,8 @@ function ChatInterface({ conversationId }: ChatInterfaceProps) {
   const [isSendingMessage, setIsSendingMessage] = useState(false);
   const [isUIDisabled, setIsUIDisabled] = useState(false);
   const [howToUseCollapsed, setHowToUseCollapsed] = useState(true);
+  const [showAIDraftModal, setShowAIDraftModal] = useState(false);
+  const [aiDraftContent, setAIDraftContent] = useState<string | null>(null);
 
   // Refs
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -609,6 +612,49 @@ function ChatInterface({ conversationId }: ChatInterfaceProps) {
               Hide this section
             </button>
           </div>
+          {/* Pinned example action buttons below the panel, only visible when expanded */}
+          <div className="flex justify-center gap-4 mt-2 pb-2">
+            <button
+              className="p-3 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg text-base text-left transition-colors text-white focus:outline-none focus:ring-2 focus:ring-primary min-w-[260px]"
+              onClick={() => handleSendMessage('What are the key elements of a valid contract?')}
+            >
+              What are the key elements of a valid contract?
+            </button>
+            <button
+              className="p-3 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg text-base text-left transition-colors text-white focus:outline-none focus:ring-2 focus:ring-primary min-w-[200px]"
+              onClick={() => {
+                // Focus the input and type a slash
+                const textarea = document.querySelector('textarea');
+                if (textarea) {
+                  textarea.focus();
+                  setTimeout(() => {
+                    const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
+                    nativeInputValueSetter?.call(textarea, '/');
+                    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+                  }, 0);
+                }
+              }}
+            >
+              <span className="font-mono text-primary">/</span> Use AI Legal Tools
+            </button>
+            <button
+              className="p-3 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg text-base text-left transition-colors text-white focus:outline-none focus:ring-2 focus:ring-primary min-w-[220px]"
+              onClick={() => {
+                // Fill the input bar with /research prompt but do not submit
+                const textarea = document.querySelector('textarea');
+                if (textarea) {
+                  textarea.focus();
+                  setTimeout(() => {
+                    const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
+                    nativeInputValueSetter?.call(textarea, '/research Miranda rights');
+                    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+                  }, 0);
+                }
+              }}
+            >
+              <span className="font-mono text-primary">/research</span> Miranda rights
+            </button>
+          </div>
         </div>
       )}
       {showWelcome && howToUseCollapsed && (
@@ -687,49 +733,7 @@ function ChatInterface({ conversationId }: ChatInterfaceProps) {
         {/* Welcome screen for new chats */}
         {showWelcome ? (
           <div className="flex flex-col items-center justify-center h-full text-center py-8">
-            {/* HowToUsePanel and upload message are now sticky above, so only show the 3 buttons here */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 max-w-2xl mx-auto mt-2">
-              <button
-                className="p-3 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg text-sm text-left transition-colors text-white focus:outline-none focus:ring-2 focus:ring-primary"
-                onClick={() => handleSendMessage('What are the key elements of a valid contract?')}
-              >
-                What are the key elements of a valid contract?
-              </button>
-              <button
-                className="p-3 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg text-sm text-left transition-colors text-white focus:outline-none focus:ring-2 focus:ring-primary"
-                onClick={() => {
-                  // Focus the input and type a slash
-                  const textarea = document.querySelector('textarea');
-                  if (textarea) {
-                    textarea.focus();
-                    setTimeout(() => {
-                      const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
-                      nativeInputValueSetter?.call(textarea, '/');
-                      textarea.dispatchEvent(new Event('input', { bubbles: true }));
-                    }, 0);
-                  }
-                }}
-              >
-                <span className="font-mono text-primary">/</span> Use AI Legal Tools
-              </button>
-              <button
-                className="p-3 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg text-sm text-left transition-colors text-white focus:outline-none focus:ring-2 focus:ring-primary"
-                onClick={() => {
-                  // Fill the input bar with /research prompt but do not submit
-                  const textarea = document.querySelector('textarea');
-                  if (textarea) {
-                    textarea.focus();
-                    setTimeout(() => {
-                      const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
-                      nativeInputValueSetter?.call(textarea, '/research Miranda rights');
-                      textarea.dispatchEvent(new Event('input', { bubbles: true }));
-                    }, 0);
-                  }
-                }}
-              >
-                <span className="font-mono text-primary">/research</span> Miranda rights
-              </button>
-            </div>
+            {/* HowToUsePanel and upload message and buttons are now sticky above, so nothing here */}
           </div>
         ) : (
           <div className="w-full h-full">
@@ -851,10 +855,9 @@ function ChatInterface({ conversationId }: ChatInterfaceProps) {
                               <>
                                 <button
                                   className="px-3 py-1 bg-primary text-white rounded hover:bg-primary-hover text-xs font-medium transition-colors"
-                                  onClick={async () => {
-                                    const filename = prompt('Enter filename for draft:', 'ai_draft') || 'ai_draft';
-                                    // Here you would call your backend save endpoint
-                                    alert(`Draft saved as '${filename}' (mock)`);
+                                  onClick={() => {
+                                    setAIDraftContent(message.content);
+                                    setShowAIDraftModal(true);
                                   }}
                                   title="Save to App"
                                 >
@@ -933,16 +936,18 @@ function ChatInterface({ conversationId }: ChatInterfaceProps) {
           isNewChat={showWelcome}
           messagesCount={messages.length}
         />
-        <div className="flex flex-wrap justify-center items-center gap-2 text-xs text-gray-500 mt-2 border-t border-gray-800 pt-2">
-          <span>Shift+Enter = new line</span>
-          <span>•</span>
-          <span>/ = Commands</span>
-          <span>•</span>
-          <span>Attach files with document button</span>
-          <span>•</span>
-          <span className="text-red-400">AI can make mistakes. This is not legal advice.</span>
-        </div>
       </div>
+
+      {/* AIDraftModal */}
+      <AIDraftModal
+        isOpen={showAIDraftModal}
+        onClose={() => {
+          setShowAIDraftModal(false);
+          setAIDraftContent(null);
+        }}
+        context="document"
+        initialContent={aiDraftContent || ''}
+      />
     </div>
   );
 };

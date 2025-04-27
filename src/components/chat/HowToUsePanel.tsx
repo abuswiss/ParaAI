@@ -1,5 +1,5 @@
 import React from 'react';
-import { BarChart2, Globe, Search, MessageCircle, MagicWand } from 'lucide-react';
+import { BarChart2, Globe, Search, MessageCircle, Wand2 } from 'lucide-react';
 
 const howToUse = [
   {
@@ -9,7 +9,7 @@ const howToUse = [
     example: 'What are the key elements of a valid contract?'
   },
   {
-    icon: <MagicWand className="h-6 w-6 text-purple-400" />,
+    icon: <Wand2 className="h-6 w-6 text-purple-400" />,
     title: 'Use AI Legal Tools',
     desc: 'Type /agent to access powerful document and legal tools.',
     example: '/agent generate_timeline from [doc_id]'
@@ -24,7 +24,6 @@ const howToUse = [
 
 const HowToUsePanel: React.FC = () => (
   <div className="w-full max-w-2xl mx-auto bg-gray-900 border border-gray-800 rounded-xl shadow-lg p-6 mb-6 flex flex-col gap-4">
-    <h2 className="text-lg font-semibold text-text-primary mb-2 text-center">How to use the Paralegal AI Assistant</h2>
     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
       {howToUse.map((item, idx) => (
         <div key={idx} className="flex flex-col items-center text-center p-3 bg-gray-800 rounded-lg h-full">

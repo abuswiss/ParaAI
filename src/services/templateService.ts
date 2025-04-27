@@ -709,3 +709,53 @@ export const deleteDraft = async (
     return { success: false, error: error as Error };
   }
 };
+
+/**
+ * Create a new AI-generated draft (not from a template)
+ */
+export const createAIDraft = async (
+  name: string,
+  content: string,
+  caseId?: string,
+  metadata?: Record<string, any>
+): Promise<{ data: DocumentDraft | null; error: Error | null }> => {
+  try {
+    const user = (await supabase.auth.getUser()).data.user;
+    if (!user) {
+      throw new Error('User not authenticated');
+    }
+    const draftId = uuidv4();
+    const now = new Date().toISOString();
+    const { data, error } = await supabase
+      .from('document_drafts')
+      .insert({
+        id: draftId,
+        name,
+        content,
+        case_id: caseId,
+        created_at: now,
+        updated_at: now,
+        user_id: user.id,
+        metadata: metadata || null
+      })
+      .select()
+      .single();
+    if (error) {
+      throw error;
+    }
+    const draft: DocumentDraft = {
+      id: data.id,
+      name: data.name,
+      content: data.content,
+      caseId: data.case_id,
+      createdAt: data.created_at,
+      updatedAt: data.updated_at,
+      templateId: data.template_id,
+      metadata: data.metadata
+    };
+    return { data: draft, error: null };
+  } catch (error) {
+    console.error('Error creating AI draft:', error);
+    return { data: null, error: error as Error };
+  }
+};

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Document } from '../../types/document';
+import ReactMarkdown from 'react-markdown';
 
 export interface TimelineEvent {
   id?: string;
@@ -227,7 +228,7 @@ const TimelineView: React.FC<TimelineViewProps> = ({
                 className={`bg-gray-800 rounded-lg p-4 ${onEventClick ? 'cursor-pointer hover:bg-gray-700' : ''} ${hoveredEventId === (event.id || String(index)) ? 'border border-primary shadow-md' : 'border border-transparent'} transition-all duration-200`}
                 onClick={() => onEventClick && onEventClick(event)}
               >
-                <p className="text-text-primary">{event.description}</p>
+                <p className="text-text-primary"><ReactMarkdown>{event.description}</ReactMarkdown></p>
                 
                 {/* Display parties if available */}
                 {event.parties && event.parties.length > 0 && (
