@@ -566,3 +566,43 @@ export const handleGenerateTimelineStream = async (
     return { success: false, error: error as Error };
   }
 };
+
+/**
+ * Handle a /agent explain_term query using OpenAI
+ * 1. Build a prompt to define/explain the legal term or acronym
+ * 2. Stream the response
+ */
+export const handleExplainTermStream = async (
+  term: string,
+  onChunk: (chunk: string) => void,
+  jurisdiction?: string
+): Promise<{ success: boolean; error: Error | null; answer?: string }> => {
+  try {
+    const systemPrompt =
+      'You are a legal dictionary AI assistant. Given a legal term or acronym, provide a clear, concise definition or explanation in the context of US law unless another jurisdiction is specified.';
+    const userPrompt = `Define or explain the following legal term${jurisdiction ? ` in the context of ${jurisdiction} law` : ' in the context of US law'}: ${term}`;
+
+    const stream = await openai.chat.completions.create({
+      model: 'gpt-4',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ],
+      stream: true,
+      temperature: 0.1,
+    });
+
+    let answer = '';
+    for await (const chunk of stream) {
+      const content = chunk.choices[0]?.delta?.content || '';
+      if (content) {
+        answer += content;
+        onChunk(content);
+      }
+    }
+    return { success: true, error: null, answer };
+  } catch (error) {
+    console.error('Error in handleExplainTermStream:', error);
+    return { success: false, error: error as Error };
+  }
+};
