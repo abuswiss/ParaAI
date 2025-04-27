@@ -45,6 +45,7 @@ function ChatInterface({ conversationId }: ChatInterfaceProps) {
   const [isDraggingFile, setIsDraggingFile] = useState(false);
   const [isSendingMessage, setIsSendingMessage] = useState(false);
   const [isUIDisabled, setIsUIDisabled] = useState(false);
+  const [howToUseCollapsed, setHowToUseCollapsed] = useState(true);
 
   // Refs
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -590,6 +591,38 @@ function ChatInterface({ conversationId }: ChatInterfaceProps) {
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
+      {/* HowToUsePanel fixed at the top, collapsible, not scrolling with chat */}
+      {showWelcome && !howToUseCollapsed && (
+        <div className="sticky top-0 z-20 bg-gray-900 pt-4 pb-2">
+          <HowToUsePanel />
+          <div className="w-full flex justify-center mb-4">
+            <div className="text-gray-400 text-sm bg-gray-800 rounded-lg px-4 py-2 max-w-lg">
+              <span>You can also upload a document to analyze, extract timelines, or use as context for your questions and agent tools.</span>
+            </div>
+          </div>
+          <div className="flex justify-center mb-2">
+            <button
+              className="text-xs text-gray-400 hover:text-primary bg-gray-800 rounded px-2 py-1 transition-colors"
+              onClick={() => setHowToUseCollapsed(true)}
+              aria-label="Collapse how to use section"
+            >
+              Hide this section
+            </button>
+          </div>
+        </div>
+      )}
+      {showWelcome && howToUseCollapsed && (
+        <div className="sticky top-0 z-20 bg-gray-900 pt-2 pb-2 flex justify-center">
+          <button
+            className="text-xs text-gray-400 hover:text-primary bg-gray-800 rounded px-2 py-1 transition-colors"
+            onClick={() => setHowToUseCollapsed(false)}
+            aria-label="Expand how to use section"
+          >
+            Show how to use
+          </button>
+        </div>
+      )}
+      
       {/* Document processing indicator */}
       {isProcessingDocument && (
         <div className="px-4 py-2 bg-gray-800 flex items-center space-x-3 text-sm border-b border-gray-700 text-text-secondary">
@@ -654,7 +687,7 @@ function ChatInterface({ conversationId }: ChatInterfaceProps) {
         {/* Welcome screen for new chats */}
         {showWelcome ? (
           <div className="flex flex-col items-center justify-center h-full text-center py-8">
-            <HowToUsePanel />
+            {/* HowToUsePanel and upload message are now sticky above, so only show the 3 buttons here */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3 max-w-2xl mx-auto mt-2">
               <button
                 className="p-3 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg text-sm text-left transition-colors text-white focus:outline-none focus:ring-2 focus:ring-primary"
@@ -681,7 +714,18 @@ function ChatInterface({ conversationId }: ChatInterfaceProps) {
               </button>
               <button
                 className="p-3 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg text-sm text-left transition-colors text-white focus:outline-none focus:ring-2 focus:ring-primary"
-                onClick={() => handleSendMessage('/research Miranda rights')}
+                onClick={() => {
+                  // Fill the input bar with /research prompt but do not submit
+                  const textarea = document.querySelector('textarea');
+                  if (textarea) {
+                    textarea.focus();
+                    setTimeout(() => {
+                      const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
+                      nativeInputValueSetter?.call(textarea, '/research Miranda rights');
+                      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+                    }, 0);
+                  }
+                }}
               >
                 <span className="font-mono text-primary">/research</span> Miranda rights
               </button>
@@ -889,6 +933,15 @@ function ChatInterface({ conversationId }: ChatInterfaceProps) {
           isNewChat={showWelcome}
           messagesCount={messages.length}
         />
+        <div className="flex flex-wrap justify-center items-center gap-2 text-xs text-gray-500 mt-2 border-t border-gray-800 pt-2">
+          <span>Shift+Enter = new line</span>
+          <span>•</span>
+          <span>/ = Commands</span>
+          <span>•</span>
+          <span>Attach files with document button</span>
+          <span>•</span>
+          <span className="text-red-400">AI can make mistakes. This is not legal advice.</span>
+        </div>
       </div>
     </div>
   );
