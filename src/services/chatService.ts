@@ -7,7 +7,6 @@ import {
   getConversationMessagesSafely 
 } from '../lib/secureDataClient';
 import { v4 as uuidv4 } from 'uuid';
-import fetch from 'node-fetch';
 
 /**
  * Interface for a chat message
@@ -789,7 +788,7 @@ export const handlePerplexityAgent = async (
     if (!response.ok || !response.body) {
       throw new Error(`Perplexity API error: ${response.status}`);
     }
-    const reader = response.body.getReader();
+    const reader = (response.body as unknown as ReadableStream<Uint8Array>).getReader();
     let fullText = '';
     let sources: any[] = [];
     let done = false;
@@ -809,14 +808,14 @@ export const handlePerplexityAgent = async (
             }
             try {
               const data = JSON.parse(dataStr) as any;
-              const contentDelta = (data as any).choices?.[0]?.delta?.content;
+              const contentDelta = data.choices?.[0]?.delta?.content;
               if (contentDelta) {
                 onChunk(contentDelta);
                 fullText += contentDelta;
               }
               // e. Extract sources if present
-              if ((data as any).choices && Array.isArray((data as any).choices) && (data as any).choices[0]?.delta?.sources) {
-                sources = (data as any).choices[0].delta.sources;
+              if (data.choices && Array.isArray(data.choices) && data.choices[0]?.delta?.sources) {
+                sources = data.choices[0].delta.sources;
               }
             } catch (err) {
               // Ignore JSON parse errors for non-data lines

@@ -72,7 +72,7 @@ const MagicalInfoButton: React.FC = () => {
         </div>
       )}
       {/* Animated gradient CSS */}
-      <style jsx>{`
+      <style>{`
         .magical-gradient-animated {
           background: linear-gradient(270deg, #F472B6, #A78BFA, #FDE68A, #F472B6);
           background-size: 600% 600%;

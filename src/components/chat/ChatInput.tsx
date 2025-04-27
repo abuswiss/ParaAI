@@ -43,6 +43,14 @@ const ChatInput: React.FC<ChatInputProps> = ({
 
   const commandActions = [
     {
+      id: 'agent-live-search',
+      label: '/agent live_search [query]',
+      icon: <Globe className="h-4 w-4 text-cyan-400" />,
+      description: 'Ask AI Live Search any question for powerful, up-to-date answers with sources.',
+      example: '/agent live_search What are the latest SEC regulations on crypto?',
+      highlight: true,
+    },
+    {
       id: 'research',
       label: '/research [query]',
       icon: <Search className="h-4 w-4 text-blue-500" />,
@@ -118,13 +126,6 @@ const ChatInput: React.FC<ChatInputProps> = ({
       icon: <FileText className="h-4 w-4 text-green-400" />,
       description: 'Summarizes a legal document thoroughly from a legal perspective in a well-structured, easy-to-read format.',
       example: '/agent summarize in 1234abcd',
-    },
-    {
-      id: 'agent-perplexity',
-      label: '/agent perplexity [query]',
-      icon: <Globe className="h-4 w-4 text-cyan-400" />,
-      description: 'Ask Perplexity AI any question for powerful, up-to-date answers with sources.',
-      example: '/agent perplexity What are the latest SEC regulations on crypto?',
     },
   ];
 
@@ -581,7 +582,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
               {filteredCommands.map((cmd) => (
                 <div
                   key={cmd.id}
-                  className="flex items-center px-4 py-3 cursor-pointer hover:bg-gray-800"
+                  className={`flex items-center px-4 py-3 cursor-pointer hover:bg-gray-800 ${cmd.highlight ? 'bg-gradient-to-r from-cyan-500 via-blue-500 to-purple-500 text-white shadow-lg' : ''}`}
                   onClick={() => {
                     setMessage(cmd.label.replace('[query]', '').replace('[instructions]', ''));
                     setShowCommandHint(false);
@@ -750,8 +751,8 @@ const ChatInput: React.FC<ChatInputProps> = ({
               showCommandHint
                 ? 'Type a command, e.g. /research Miranda rights'
                 : isCentered
-                  ? 'Ask me anything about legal documents, or try /agent perplexity [query]...'
-                  : 'Type your message or try /agent perplexity [query]...'
+                  ? 'Ask me anything about legal documents, or try /agent live_search [query]...'
+                  : 'Type your message or try /agent live_search [query]...'
             }
             rows={1}
             className={`w-full bg-transparent text-text-primary px-3 py-3 pr-12 pb-14 resize-none focus:outline-none rounded-lg transition-all duration-200 ${showCommandHint ? 'ring-2 ring-primary' : ''}`}
