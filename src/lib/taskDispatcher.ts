@@ -48,6 +48,40 @@ export async function handleUserTurn({
       // Scan a document for privileged terms
       return await handleFlagPrivilegedTermsStream(task.docId, onChunk);
     }
+    if (task.agent === 'risk_analysis') {
+      // Route to the risks analysis type using the document ID
+      // Reuse the generate timeline handler pattern, but for risks
+      const { analyzeDocument } = await import('../services/documentAnalysisService');
+      const { data, error } = await analyzeDocument(task.docId, 'risks');
+      if (error || !data) {
+        onChunk('Error: Unable to perform risk analysis.');
+        return { success: false, error };
+      }
+      onChunk(data.result);
+      return { success: true, error: null };
+    }
+    if (task.agent === 'key_clauses') {
+      // Route to the clauses analysis type using the document ID
+      const { analyzeDocument } = await import('../services/documentAnalysisService');
+      const { data, error } = await analyzeDocument(task.docId, 'clauses');
+      if (error || !data) {
+        onChunk('Error: Unable to extract key clauses.');
+        return { success: false, error };
+      }
+      onChunk(data.result);
+      return { success: true, error: null };
+    }
+    if (task.agent === 'summarize') {
+      // Route to the summary analysis type using the document ID
+      const { analyzeDocument } = await import('../services/documentAnalysisService');
+      const { data, error } = await analyzeDocument(task.docId, 'summary');
+      if (error || !data) {
+        onChunk('Error: Unable to summarize the document.');
+        return { success: false, error };
+      }
+      onChunk(data.result);
+      return { success: true, error: null };
+    }
     // TODO: Implement other agent tasks
     return { success: false, error: new Error('Agent tasks not yet implemented') };
   }

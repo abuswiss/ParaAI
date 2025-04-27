@@ -3,6 +3,8 @@ import { DocumentAnalysisResult } from '../../services/documentAnalysisService';
 import { formatDistanceToNow } from 'date-fns';
 import { motion } from 'framer-motion';
 import { Badge, Button, IconButton, Tooltip, Icons } from '../ui';
+import { RiskAssessment } from '../documents/RiskAssessment';
+import ReactMarkdown from 'react-markdown';
 
 export interface Message {
   id: string;
@@ -57,6 +59,15 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
   // Determine if this is an analysis result message
   const isAnalysisResult = !isUser && message.analysisContext && 
     message.analysisContext.analysisType !== 'summary';
+
+  // Determine if this is a risk analysis agent reply
+  const isRiskAnalysis = !isUser && message.analysisContext?.analysisType === 'risks';
+
+  // Determine if this is a key clauses agent reply
+  const isKeyClauses = !isUser && message.analysisContext?.analysisType === 'clauses';
+
+  // Determine if this is a summarize agent reply
+  const isSummarize = !isUser && message.analysisContext?.analysisType === 'summary';
 
   const handleCopy = () => {
     if (onCopyContent) {
@@ -193,31 +204,71 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                 </div>
               </div>
             ) : (
-              <div className={`${isDocumentSummary ? 'p-2 border border-primary/20 rounded-md bg-primary/5' : 
-                                isAnalysisResult ? 'p-2 border border-blue-500/20 rounded-md bg-blue-900/5' : 
-                                ''} text-text-primary ${isDocumentSummary || isAnalysisResult ? 'max-h-60 overflow-y-auto' : ''} ${!isExpanded && (isDocumentSummary || isAnalysisResult) && message.content.length > 500 ? 'whitespace-pre-line line-clamp-8' : 'whitespace-pre-wrap'}`}>
-                {message.content}
-                
-                {/* Show expand/collapse button for long content */}
-                {(isDocumentSummary || isAnalysisResult) && message.content.length > 500 && (
-                  <button
-                    onClick={() => setIsExpanded(!isExpanded)}
-                    className="mt-2 text-xs text-primary hover:text-primary-light focus:outline-none transition-colors flex items-center"
-                  >
-                    {isExpanded ? (
-                      <>
-                        <Icons.ChevronUp className="h-3 w-3 mr-1" />
-                        Show Less
-                      </>
-                    ) : (
-                      <>
-                        <Icons.ChevronDown className="h-3 w-3 mr-1" />
-                        Show More
-                      </>
-                    )}
-                  </button>
-                )}
-              </div>
+              isRiskAnalysis && message.analysisContext ? (
+                <RiskAssessment analysis={message.analysisContext} />
+              ) : isKeyClauses && message.analysisContext ? (
+                <div className="space-y-4">
+                  {(() => {
+                    try {
+                      // Split by double newlines to get clause blocks
+                      const clauseBlocks = message.analysisContext.result.split('\n\n').filter((block: string) => block.trim());
+                      if (clauseBlocks.length > 0) {
+                        // Group every 3 blocks (title, key text, analysis) into one card
+                        const groupedClauses = [];
+                        for (let i = 0; i < clauseBlocks.length; i += 3) {
+                          const titleBlock = clauseBlocks[i] || '';
+                          const keyTextBlock = clauseBlocks[i + 1] || '';
+                          const analysisBlock = clauseBlocks[i + 2] || '';
+                          groupedClauses.push({ titleBlock, keyTextBlock, analysisBlock });
+                        }
+                        return groupedClauses.map((clause, index) => (
+                          <div key={index} className="bg-gray-800 rounded-lg border border-primary/30 p-5 space-y-3">
+                            {/* Title */}
+                            <div className="text-lg font-semibold text-primary mb-1">
+                              <ReactMarkdown>{clause.titleBlock.replace(/^#+\s*/, '')}</ReactMarkdown>
+                            </div>
+                            {/* Key Text */}
+                            {clause.keyTextBlock && (
+                              <div className="bg-gray-900 rounded p-3 border-l-4 border-primary/50">
+                                <div className="text-xs text-gray-400 font-bold mb-1">Key Text:</div>
+                                <div className="text-text-primary text-sm whitespace-pre-line">
+                                  <ReactMarkdown>{clause.keyTextBlock.replace(/^Key Text:?/i, '').trim()}</ReactMarkdown>
+                                </div>
+                              </div>
+                            )}
+                            {/* Analysis */}
+                            {clause.analysisBlock && (
+                              <div className="bg-gray-900 rounded p-3 border-l-4 border-accent-500">
+                                <div className="text-xs text-gray-400 font-bold mb-1">Analysis:</div>
+                                <div className="text-text-secondary text-sm whitespace-pre-line">
+                                  <ReactMarkdown>{clause.analysisBlock.replace(/^Analysis:?/i, '').trim()}</ReactMarkdown>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        ));
+                      }
+                    } catch (e) {
+                      console.error('Error parsing clauses', e);
+                    }
+                    // Fallback to raw text
+                    return <div className="markdown-content"><ReactMarkdown>{message.analysisContext.result}</ReactMarkdown></div>;
+                  })()}
+                </div>
+              ) : isSummarize && message.analysisContext ? (
+                <div className="bg-green-900/10 border-l-4 border-green-500 rounded-lg p-5 mb-2">
+                  <div className="text-lg font-bold text-green-400 mb-2">Legal Document Summary</div>
+                  <div className="prose prose-invert max-w-none">
+                    <ReactMarkdown>{message.analysisContext.result}</ReactMarkdown>
+                  </div>
+                </div>
+              ) : (
+                <div className={`${isDocumentSummary ? 'p-2 border border-primary/20 rounded-md bg-primary/5' : 
+                                  isAnalysisResult ? 'p-2 border border-blue-500/20 rounded-md bg-blue-900/5' : 
+                                  ''} text-text-primary ${isDocumentSummary || isAnalysisResult ? 'max-h-60 overflow-y-auto' : ''} ${!isExpanded && (isDocumentSummary || isAnalysisResult) && message.content.length > 500 ? 'whitespace-pre-line line-clamp-8' : 'whitespace-pre-wrap'}`}>
+                  {message.content}
+                </div>
+              )
             )}
             
             {/* Message actions */}

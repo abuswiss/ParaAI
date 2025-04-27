@@ -98,6 +98,27 @@ const ChatInput: React.FC<ChatInputProps> = ({
       description: 'Scan a document for keywords/phrases associated with attorney-client privilege or work product.',
       example: '/agent flag_privileged_terms in 1234abcd',
     },
+    {
+      id: 'agent-risk-analysis',
+      label: '/agent risk_analysis in [doc_id]',
+      icon: <BarChart2 className="h-4 w-4 text-red-500" />,
+      description: 'Analyze a document for legal risks and categorize them as High, Medium, or Low.',
+      example: '/agent risk_analysis in 1234abcd',
+    },
+    {
+      id: 'agent-key-clauses',
+      label: '/agent key_clauses in [doc_id]',
+      icon: <FileText className="h-4 w-4 text-blue-400" />,
+      description: 'Extracts and analyzes key clauses from a legal document, highlighting important text and providing analysis.',
+      example: '/agent key_clauses in 1234abcd',
+    },
+    {
+      id: 'agent-summarize',
+      label: '/agent summarize in [doc_id]',
+      icon: <FileText className="h-4 w-4 text-green-400" />,
+      description: 'Summarizes a legal document thoroughly from a legal perspective in a well-structured, easy-to-read format.',
+      example: '/agent summarize in 1234abcd',
+    },
   ];
 
   const [showCommandHint, setShowCommandHint] = useState(false);
@@ -124,7 +145,16 @@ const ChatInput: React.FC<ChatInputProps> = ({
     const requiredDocs = getRequiredDocsForAgent(task);
 
     // Enforce document requirement for all document-dependent agents
-    if (requiredDocs > 0 && activeDocuments.length < requiredDocs) {
+    if (task && task.type === 'agent' && task.agent === 'compare') {
+      if (activeDocuments.length < 2) {
+        setDocumentContextWarning('This agent requires 2 documents. Please select or upload 2 documents to compare.');
+        setShowDocumentPicker(true);
+        return;
+      }
+    } else if (
+      (task && task.type === 'agent' && (task.agent === 'risk_analysis' || task.agent === 'key_clauses') && activeDocuments.length < 1) ||
+      (requiredDocs > 0 && activeDocuments.length < requiredDocs)
+    ) {
       setDocumentContextWarning(`This agent requires ${requiredDocs} document${requiredDocs > 1 ? 's' : ''}. Please select or upload ${requiredDocs - activeDocuments.length} more.`);
       setShowDocumentPicker(true);
       return;
@@ -136,11 +166,18 @@ const ChatInput: React.FC<ChatInputProps> = ({
       if (task.agent === 'compare' && activeDocuments.length >= 2) {
         finalMessage = `/agent compare ${activeDocuments[0].id} ${activeDocuments[1].id}`;
       } else if (task.agent === 'find_clause' && activeDocuments.length >= 1) {
-        // Extract the clause from the original message
         const clause = task.clause || '';
-        finalMessage = `/agent find_clause "${clause}" in ${activeDocuments[0].id}`;
+        if (/from\s+/.test(message)) {
+          finalMessage = `/agent find_clause "${clause}" from ${activeDocuments[0].id}`;
+        } else {
+          finalMessage = `/agent find_clause "${clause}" in ${activeDocuments[0].id}`;
+        }
       } else if ((task.agent === 'flag_privileged_terms' || task.agent === 'generate_timeline') && activeDocuments.length >= 1) {
-        finalMessage = `/agent ${task.agent} in ${activeDocuments[0].id}`;
+        if (/from\s+/.test(message)) {
+          finalMessage = `/agent ${task.agent} from ${activeDocuments[0].id}`;
+        } else {
+          finalMessage = `/agent ${task.agent} in ${activeDocuments[0].id}`;
+        }
       }
     }
 
@@ -484,14 +521,26 @@ const ChatInput: React.FC<ChatInputProps> = ({
         const clause = task.clause || '';
         if (activeDocuments.length >= 1) {
           newMessage = `/agent find_clause "${clause}" in ${activeDocuments[0].id}`;
+          if (/from\s+/.test(message)) {
+            newMessage = `/agent find_clause "${clause}" from ${activeDocuments[0].id}`;
+          }
         } else {
           newMessage = `/agent find_clause "${clause}" in [doc_id]`;
+          if (/from\s+/.test(message)) {
+            newMessage = `/agent find_clause "${clause}" from [doc_id]`;
+          }
         }
       } else if (task.agent === 'flag_privileged_terms' || task.agent === 'generate_timeline') {
         if (activeDocuments.length >= 1) {
           newMessage = `/agent ${task.agent} in ${activeDocuments[0].id}`;
+          if (/from\s+/.test(message)) {
+            newMessage = `/agent ${task.agent} from ${activeDocuments[0].id}`;
+          }
         } else {
           newMessage = `/agent ${task.agent} in [doc_id]`;
+          if (/from\s+/.test(message)) {
+            newMessage = `/agent ${task.agent} from [doc_id]`;
+          }
         }
       }
     }
