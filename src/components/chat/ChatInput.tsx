@@ -119,6 +119,13 @@ const ChatInput: React.FC<ChatInputProps> = ({
       description: 'Summarizes a legal document thoroughly from a legal perspective in a well-structured, easy-to-read format.',
       example: '/agent summarize in 1234abcd',
     },
+    {
+      id: 'agent-perplexity',
+      label: '/agent perplexity [query]',
+      icon: <Globe className="h-4 w-4 text-cyan-400" />,
+      description: 'Ask Perplexity AI any question for powerful, up-to-date answers with sources.',
+      example: '/agent perplexity What are the latest SEC regulations on crypto?',
+    },
   ];
 
   const [showCommandHint, setShowCommandHint] = useState(false);
@@ -743,8 +750,8 @@ const ChatInput: React.FC<ChatInputProps> = ({
               showCommandHint
                 ? 'Type a command, e.g. /research Miranda rights'
                 : isCentered
-                  ? 'Ask me anything about legal documents...'
-                  : 'Type your message...'
+                  ? 'Ask me anything about legal documents, or try /agent perplexity [query]...'
+                  : 'Type your message or try /agent perplexity [query]...'
             }
             rows={1}
             className={`w-full bg-transparent text-text-primary px-3 py-3 pr-12 pb-14 resize-none focus:outline-none rounded-lg transition-all duration-200 ${showCommandHint ? 'ring-2 ring-primary' : ''}`}

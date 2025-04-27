@@ -11,6 +11,7 @@ export type Task =
   | { type: 'agent'; agent: 'key_clauses'; docId: string }
   | { type: 'agent'; agent: 'summarize'; docId: string }
   | { type: 'help' }
+  | { type: 'agent'; agent: 'perplexity'; query: string }
   | null;
 
 export function parseCommand(inputText: string): Task {
@@ -73,6 +74,14 @@ export function parseCommand(inputText: string): Task {
     const docId = summarizeMatch[2].trim();
     if (docId) {
       return { type: 'agent', agent: 'summarize', docId };
+    }
+  }
+  // /agent perplexity [query]
+  const perplexityMatch = trimmed.match(/^\/agent perplexity\s+(.+)$/i);
+  if (perplexityMatch) {
+    const query = perplexityMatch[1].trim();
+    if (query) {
+      return { type: 'agent', agent: 'perplexity', query };
     }
   }
   // Add more /agent commands as needed

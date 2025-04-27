@@ -56,6 +56,10 @@ function ChatInterface({ conversationId }: ChatInterfaceProps) {
   // State to store the active conversation ID (possibly created on demand)
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
 
+  // Add state for Perplexity sources
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [perplexitySources, setPerplexitySources] = useState<{ [messageId: string]: any[] }>({});
+
   // Function to fetch messages for a specific conversation
   const fetchMessages = useCallback(async (conversationId: string) => {
     if (!conversationId || conversationId === 'new') return;
@@ -253,7 +257,8 @@ function ChatInterface({ conversationId }: ChatInterfaceProps) {
         },
         conversationId: activeConversationId ?? undefined,
         documentContext: documentContexts && documentContexts.length > 0 ? documentContexts : undefined,
-        analysisContext: analysisContext ? JSON.stringify(analysisContext) : (activeAnalysis ? JSON.stringify(activeAnalysis) : undefined)
+        analysisContext: analysisContext ? JSON.stringify(analysisContext) : (activeAnalysis ? JSON.stringify(activeAnalysis) : undefined),
+        params: {}
       });
       
       // Clear the loading interval if it's somehow still running
@@ -279,6 +284,11 @@ function ChatInterface({ conversationId }: ChatInterfaceProps) {
         }
         return newMessages;
       });
+      
+      // After streaming, if Perplexity and sources exist, store them
+      if (task?.type === 'agent' && task.agent === 'perplexity' && 'sources' in response && Array.isArray(response.sources) && response.sources.length > 0) {
+        setPerplexitySources(prev => ({ ...prev, [placeholderId]: response.sources ?? [] }));
+      }
       
       console.log('Message sending complete');
     } catch (error: unknown) {
@@ -420,7 +430,7 @@ function ChatInterface({ conversationId }: ChatInterfaceProps) {
       setDocumentProcessingProgress(10);
       setError(null);
       // Import the document services
-      const { uploadDocument, processDocument, getDocumentById } = await import('../../services/documentService');
+      const { uploadDocument, processDocument } = await import('../../services/documentService');
       // Get current user ID from Supabase
       const { data: userData } = await supabase.auth.getUser();
       const userId = userData?.user?.id;
@@ -831,6 +841,22 @@ function ChatInterface({ conversationId }: ChatInterfaceProps) {
                             <span className="text-xs text-gray-500 ml-2">{formatMessageTime(message)}</span>
                           </div>
                         </div>
+                      </div>
+                    )}
+                    {message.role === 'assistant' && perplexitySources[message.id] && (
+                      <div className="mt-2 text-xs text-gray-400">
+                        <div className="font-semibold text-gray-300 mb-1">Sources:</div>
+                        <ol className="list-decimal ml-5 space-y-1">
+                          {perplexitySources[message.id].map((src, i) => (
+                            <li key={i}>
+                              {src.url ? (
+                                <a href={src.url} target="_blank" rel="noopener noreferrer" className="underline text-cyan-400 hover:text-cyan-200">{src.title || src.url}</a>
+                              ) : (
+                                <span>{src.title || 'Source'}</span>
+                              )}
+                            </li>
+                          ))}
+                        </ol>
                       </div>
                     )}
                   </motion.div>

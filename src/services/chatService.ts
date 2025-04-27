@@ -7,6 +7,7 @@ import {
   getConversationMessagesSafely 
 } from '../lib/secureDataClient';
 import { v4 as uuidv4 } from 'uuid';
+import fetch from 'node-fetch';
 
 /**
  * Interface for a chat message
@@ -752,6 +753,83 @@ export const handleFlagPrivilegedTermsStream = async (
     return { success: true, error: null, answer };
   } catch (error) {
     console.error('Error in handleFlagPrivilegedTermsStream:', error);
+    return { success: false, error: error as Error };
+  }
+};
+
+export const handlePerplexityAgent = async (
+  conversationId: string,
+  params: { query: string },
+  onChunk: (chunk: string) => void
+): Promise<{ success: boolean; error: Error | null; sources?: any[] }> => {
+  try {
+    // a. Save User Request
+    await addMessageSafely(conversationId, 'user', `/agent perplexity ${params.query}`);
+
+    // c. Prepare Perplexity API Request
+    const apiKey = process.env.PERPLEXITY_API_TOKEN;
+    if (!apiKey) throw new Error('Perplexity API token not set');
+    const url = 'https://api.perplexity.ai/chat/completions';
+    const body = JSON.stringify({
+      model: 'sonar-pro',
+      messages: [
+        { role: 'system', content: 'Be precise and concise.' },
+        { role: 'user', content: params.query }
+      ],
+      stream: true
+    });
+    const headers = {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+      'Accept': 'text/event-stream'
+    };
+
+    // d. Call Perplexity API & Handle Stream
+    const response = await fetch(url, { method: 'POST', headers, body });
+    if (!response.ok || !response.body) {
+      throw new Error(`Perplexity API error: ${response.status}`);
+    }
+    const reader = response.body.getReader();
+    let fullText = '';
+    let sources: any[] = [];
+    let done = false;
+    let buffer = '';
+    while (!done) {
+      const { value, done: streamDone } = await reader.read();
+      if (value) {
+        buffer += Buffer.from(value).toString('utf8');
+        let lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        for (const line of lines) {
+          if (line.startsWith('data:')) {
+            const dataStr = line.replace('data:', '').trim();
+            if (dataStr === '[DONE]') {
+              done = true;
+              break;
+            }
+            try {
+              const data = JSON.parse(dataStr) as any;
+              const contentDelta = (data as any).choices?.[0]?.delta?.content;
+              if (contentDelta) {
+                onChunk(contentDelta);
+                fullText += contentDelta;
+              }
+              // e. Extract sources if present
+              if ((data as any).choices && Array.isArray((data as any).choices) && (data as any).choices[0]?.delta?.sources) {
+                sources = (data as any).choices[0].delta.sources;
+              }
+            } catch (err) {
+              // Ignore JSON parse errors for non-data lines
+            }
+          }
+        }
+      }
+      if (streamDone) break;
+    }
+    // g. Save Final Response
+    await addMessageSafely(conversationId, 'assistant', fullText);
+    return { success: true, error: null, sources };
+  } catch (error) {
     return { success: false, error: error as Error };
   }
 };

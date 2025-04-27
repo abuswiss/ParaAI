@@ -8,7 +8,8 @@ export async function handleUserTurn({
   onChunk,
   conversationId,
   documentContext,
-  analysisContext
+  analysisContext,
+  params
 }: {
   task: Task;
   message: string;
@@ -16,6 +17,7 @@ export async function handleUserTurn({
   conversationId?: string;
   documentContext?: string | string[];
   analysisContext?: string;
+  params: any;
 }) {
   if (task?.type === 'research') {
     // Route to RAG handler
@@ -32,25 +34,24 @@ export async function handleUserTurn({
       // Route to agent draft handler
       return await handleAgentDraftStream(task.instructions || '', onChunk, docCtx, analysisContext);
     }
-    if (task.agent === 'find_clause') {
+    if (task.agent === 'find_clause' && 'clause' in task && 'docId' in task) {
       // Find a clause in a document
       return await handleFindClauseStream(task.clause, task.docId, onChunk);
     }
-    if (task.agent === 'generate_timeline') {
+    if (task.agent === 'generate_timeline' && 'docId' in task) {
       // Generate a timeline from a document
       return await handleGenerateTimelineStream(task.docId, onChunk);
     }
-    if (task.agent === 'explain_term') {
+    if (task.agent === 'explain_term' && 'term' in task) {
       // Explain a legal term or acronym
-      return await handleExplainTermStream(task.term, onChunk, task.jurisdiction);
+      return await handleExplainTermStream(task.term, onChunk, (task as any).jurisdiction);
     }
-    if (task.agent === 'flag_privileged_terms') {
+    if (task.agent === 'flag_privileged_terms' && 'docId' in task) {
       // Scan a document for privileged terms
       return await handleFlagPrivilegedTermsStream(task.docId, onChunk);
     }
-    if (task.agent === 'risk_analysis') {
+    if (task.agent === 'risk_analysis' && 'docId' in task) {
       // Route to the risks analysis type using the document ID
-      // Reuse the generate timeline handler pattern, but for risks
       const { analyzeDocument } = await import('../services/documentAnalysisService');
       const { data, error } = await analyzeDocument(task.docId, 'risks');
       if (error || !data) {
@@ -60,7 +61,7 @@ export async function handleUserTurn({
       onChunk(data.result);
       return { success: true, error: null };
     }
-    if (task.agent === 'key_clauses') {
+    if (task.agent === 'key_clauses' && 'docId' in task) {
       // Route to the clauses analysis type using the document ID
       const { analyzeDocument } = await import('../services/documentAnalysisService');
       const { data, error } = await analyzeDocument(task.docId, 'clauses');
@@ -71,7 +72,7 @@ export async function handleUserTurn({
       onChunk(data.result);
       return { success: true, error: null };
     }
-    if (task.agent === 'summarize') {
+    if (task.agent === 'summarize' && 'docId' in task) {
       // Route to the summary analysis type using the document ID
       const { analyzeDocument } = await import('../services/documentAnalysisService');
       const { data, error } = await analyzeDocument(task.docId, 'summary');
@@ -81,6 +82,11 @@ export async function handleUserTurn({
       }
       onChunk(data.result);
       return { success: true, error: null };
+    }
+    if (task.agent === 'perplexity' && 'query' in task && typeof conversationId === 'string') {
+      // Route to the Perplexity agent handler
+      const { handlePerplexityAgent } = await import('../services/chatService');
+      return await handlePerplexityAgent(conversationId, { query: task.query }, params.wsContext);
     }
     // TODO: Implement other agent tasks
     return { success: false, error: new Error('Agent tasks not yet implemented') };
