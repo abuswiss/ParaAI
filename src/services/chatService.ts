@@ -516,3 +516,53 @@ export const handleFindClauseStream = async (
     return { success: false, error: error as Error };
   }
 };
+
+/**
+ * Handle a /agent generate_timeline query using OpenAI
+ * 1. Fetch the document by ID
+ * 2. Extract the text
+ * 3. Build a prompt for OpenAI to generate a timeline
+ * 4. Stream the response as a Markdown list
+ */
+export const handleGenerateTimelineStream = async (
+  docId: string,
+  onChunk: (chunk: string) => void
+): Promise<{ success: boolean; error: Error | null; answer?: string }> => {
+  try {
+    // Import here to avoid circular dependency
+    const { getDocumentById } = await import('./documentService');
+    const { data: document, error: docError } = await getDocumentById(docId);
+    if (docError || !document) {
+      throw docError || new Error('Document not found');
+    }
+    if (!document.extractedText) {
+      throw new Error('Document text not available. Please wait for processing to complete.');
+    }
+    const systemPrompt =
+      'You are a paralegal AI assistant. Given a legal document, extract a chronological timeline of key events. For each event, identify the date (if available) and provide a concise description. Format the output as a Markdown list, with each item starting with the date.';
+    const userPrompt = `Document text:\n${document.extractedText}\n\nGenerate a timeline of key dates and events as a Markdown list.`;
+
+    const stream = await openai.chat.completions.create({
+      model: 'gpt-4',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ],
+      stream: true,
+      temperature: 0.1,
+    });
+
+    let answer = '';
+    for await (const chunk of stream) {
+      const content = chunk.choices[0]?.delta?.content || '';
+      if (content) {
+        answer += content;
+        onChunk(content);
+      }
+    }
+    return { success: true, error: null, answer };
+  } catch (error) {
+    console.error('Error in handleGenerateTimelineStream:', error);
+    return { success: false, error: error as Error };
+  }
+};

@@ -1,5 +1,5 @@
 import { Task } from './commandParser';
-import { handleResearchQueryStream, sendMessageStream, handleAgentDraftStream, handleFindClauseStream } from '../services/chatService';
+import { handleResearchQueryStream, sendMessageStream, handleAgentDraftStream, handleFindClauseStream, handleGenerateTimelineStream } from '../services/chatService';
 
 // Main dispatcher for user input
 export async function handleUserTurn({
@@ -29,6 +29,10 @@ export async function handleUserTurn({
     if (task.agent === 'find_clause') {
       // Find a clause in a document
       return await handleFindClauseStream(task.clause, task.docId, onChunk);
+    }
+    if (task.agent === 'generate_timeline') {
+      // Generate a timeline from a document
+      return await handleGenerateTimelineStream(task.docId, onChunk);
     }
     // TODO: Implement other agent tasks
     return { success: false, error: new Error('Agent tasks not yet implemented') };
