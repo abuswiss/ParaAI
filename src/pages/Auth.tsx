@@ -6,6 +6,7 @@ import SignInForm from '../components/auth/SignInForm';
 import SignUpForm from '../components/auth/SignUpForm';
 import LegalDisclaimer from '../components/auth/LegalDisclaimer';
 import { useAuth } from '../context/AuthContext';
+import MagicalInfoButton from '../components/ui/MagicalInfoButton';
 
 const Auth: React.FC = () => {
   const { user, loading } = useAuth();
@@ -31,17 +32,23 @@ const Auth: React.FC = () => {
   }
 
   return (
-    <AuthCard 
-      title="Sign in to your account" 
-    >
-      <div className="p-5">
-        <LegalDisclaimer />
-        <AuthTabs tabNames={['Sign In', 'Sign Up']}>
-          <SignInForm onSuccess={handleAuthSuccess} />
-          <SignUpForm onSuccess={handleAuthSuccess} />
-        </AuthTabs>
+    <div className="relative min-h-screen bg-background">
+      {/* Magical Info Button in upper right */}
+      <div className="absolute top-4 right-4 z-40">
+        <MagicalInfoButton />
       </div>
-    </AuthCard>
+      <AuthCard 
+        title="Sign in to your account" 
+      >
+        <div className="p-5">
+          <LegalDisclaimer />
+          <AuthTabs tabNames={['Sign In', 'Sign Up']}>
+            <SignInForm onSuccess={handleAuthSuccess} />
+            <SignUpForm onSuccess={handleAuthSuccess} />
+          </AuthTabs>
+        </div>
+      </AuthCard>
+    </div>
   );
 };
 

@@ -4,9 +4,10 @@ import { getUserDocuments } from '../../services/documentService';
 import { DocumentAnalysisResult, getDocumentAnalyses } from '../../services/documentAnalysisService';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Search, Send, BarChart2, Globe, Video, PlaneTakeoff, AudioLines, FileText, HelpCircle } from 'lucide-react';
+import { parseCommand } from '../../lib/commandParser';
 
 interface ChatInputProps {
-  onSendMessage: (message: string, documentContext?: string, analysisContext?: DocumentAnalysisResult) => void;
+  onSendMessage: (message: string, documentContexts?: string[], analysisContext?: DocumentAnalysisResult) => void;
   onFileUpload?: (files: File[]) => void; // Add prop for parent component to handle file uploads
   disabled?: boolean;
   isNewChat?: boolean;
@@ -24,7 +25,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
 }) => {
   const [message, setMessage] = useState('');
 
-  const [activeDocument, setActiveDocument] = useState<Document | null>(null);
+  const [activeDocuments, setActiveDocuments] = useState<Document[]>([]);
   const [showDocumentPicker, setShowDocumentPicker] = useState(false);
   const [showAnalysisPicker, setShowAnalysisPicker] = useState(false);
   const [availableAnalyses, setAvailableAnalyses] = useState<DocumentAnalysisResult[]>([]);
@@ -47,6 +48,13 @@ const ChatInput: React.FC<ChatInputProps> = ({
       icon: <Search className="h-4 w-4 text-blue-500" />,
       description: 'Legal research using CourtListener',
       example: '/research Miranda rights',
+    },
+    {
+      id: 'agent-compare',
+      label: '/agent compare [docA_id] [docB_id]',
+      icon: <BarChart2 className="h-4 w-4 text-pink-400" />,
+      description: 'Compare two documents by ID and highlight differences, additions, and deletions.',
+      example: '/agent compare 1234abcd 5678efgh',
     },
     {
       id: 'agent-draft',
@@ -83,22 +91,65 @@ const ChatInput: React.FC<ChatInputProps> = ({
       description: 'Show available agent commands',
       example: '/agent help',
     },
+    {
+      id: 'agent-flag-privileged-terms',
+      label: '/agent flag_privileged_terms in [doc_id]',
+      icon: <FileText className="h-4 w-4 text-red-400" />,
+      description: 'Scan a document for keywords/phrases associated with attorney-client privilege or work product.',
+      example: '/agent flag_privileged_terms in 1234abcd',
+    },
   ];
 
   const [showCommandHint, setShowCommandHint] = useState(false);
   const [commandQuery, setCommandQuery] = useState('');
   const [filteredCommands, setFilteredCommands] = useState(commandActions);
 
+  const getRequiredDocsForAgent = (task: any) => {
+    if (!task || task.type !== 'agent') return 0;
+    if (task.agent === 'compare') return 2;
+    if (task.agent === 'find_clause' || task.agent === 'flag_privileged_terms' || task.agent === 'generate_timeline') return 1;
+    return 0;
+  };
+
+  const isDocumentAgent = (task: any) => {
+    return getRequiredDocsForAgent(task) > 0;
+  };
+
   const handleSubmit = () => {
     const trimmedMessage = message.trim();
-    if (trimmedMessage && !disabled) {
-      onSendMessage(
-        trimmedMessage, 
-        activeDocument?.extractedText,
-        selectedAnalysis || undefined
-      );
-      setMessage('');
+    if (!trimmedMessage || disabled) return;
+
+    // Parse the command to determine agent and requirements
+    const task = parseCommand(trimmedMessage);
+    const requiredDocs = getRequiredDocsForAgent(task);
+
+    // Enforce document requirement for all document-dependent agents
+    if (requiredDocs > 0 && activeDocuments.length < requiredDocs) {
+      setDocumentContextWarning(`This agent requires ${requiredDocs} document${requiredDocs > 1 ? 's' : ''}. Please select or upload ${requiredDocs - activeDocuments.length} more.`);
+      setShowDocumentPicker(true);
+      return;
     }
+
+    // For document-dependent agents, always use the selected documents, ignore typed IDs
+    let finalMessage = trimmedMessage;
+    if (task && task.type === 'agent') {
+      if (task.agent === 'compare' && activeDocuments.length >= 2) {
+        finalMessage = `/agent compare ${activeDocuments[0].id} ${activeDocuments[1].id}`;
+      } else if (task.agent === 'find_clause' && activeDocuments.length >= 1) {
+        // Extract the clause from the original message
+        const clause = task.clause || '';
+        finalMessage = `/agent find_clause "${clause}" in ${activeDocuments[0].id}`;
+      } else if ((task.agent === 'flag_privileged_terms' || task.agent === 'generate_timeline') && activeDocuments.length >= 1) {
+        finalMessage = `/agent ${task.agent} in ${activeDocuments[0].id}`;
+      }
+    }
+
+    onSendMessage(
+      finalMessage,
+      activeDocuments.map(doc => doc.extractedText || doc.id),
+      selectedAnalysis || undefined
+    );
+    setMessage('');
   };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -151,19 +202,29 @@ const ChatInput: React.FC<ChatInputProps> = ({
   };
   
   const handleFiles = (files: File[]) => {
-    // Pass files to parent component for proper processing
-    if (files.length > 0) {
-      console.log('Sending files to be processed:', files[0].name);
-      
-      // Clear any previously active document in this component
-      setActiveDocument(null);
-      setSelectedAnalysis(null);
-      setAvailableAnalyses([]);
-      
-      // If parent component provided onFileUpload callback, call it
-      if (onFileUpload) {
-        onFileUpload(files);
-      }
+    // Enforce max 3 files at once
+    if (files.length > 3) {
+      setDocumentContextWarning('You can upload up to 3 documents at once. Only the first 3 will be uploaded.');
+      files = files.slice(0, 3);
+    }
+    // Prevent upload if already 3 documents selected
+    if (activeDocuments.length >= 3) {
+      setDocumentContextWarning('You already have 3 documents selected. Remove one to upload another.');
+      return;
+    }
+    // If uploading would exceed 3, only allow up to 3 total
+    if (activeDocuments.length + files.length > 3) {
+      setDocumentContextWarning('You can have up to 3 documents at once. Only the first files to reach the limit will be uploaded.');
+      files = files.slice(0, 3 - activeDocuments.length);
+    }
+    if (files.length === 0) return;
+    // Clear any previously active document in this component
+    setActiveDocuments([]);
+    setSelectedAnalysis(null);
+    setAvailableAnalyses([]);
+    // If parent component provided onFileUpload callback, call it
+    if (onFileUpload) {
+      onFileUpload(files);
     }
   };
   
@@ -193,18 +254,18 @@ const ChatInput: React.FC<ChatInputProps> = ({
   };
 
   const toggleAnalysisPicker = () => {
-    if (!activeDocument) return;
+    if (!activeDocuments.length) return;
     
     setShowAnalysisPicker(!showAnalysisPicker);
     if (showDocumentPicker) setShowDocumentPicker(false);
     
-    if (!showAnalysisPicker && activeDocument) {
-      loadDocumentAnalyses(activeDocument.id);
+    if (!showAnalysisPicker && activeDocuments.length) {
+      loadDocumentAnalyses(activeDocuments[0].id);
     }
   };
 
   const clearDocument = () => {
-    setActiveDocument(null);
+    setActiveDocuments([]);
     setSelectedAnalysis(null);
     setAvailableAnalyses([]);
   };
@@ -234,7 +295,6 @@ const ChatInput: React.FC<ChatInputProps> = ({
   const selectDocumentForContext = async (doc: Document) => {
     try {
       setLoadingDocuments(true);
-      // Always fetch the full document with extractedText
       let fullDoc = doc;
       if (!doc.extractedText) {
         try {
@@ -247,21 +307,25 @@ const ChatInput: React.FC<ChatInputProps> = ({
           console.error('Error fetching full document:', fetchErr);
         }
       }
-      setActiveDocument(fullDoc);
-      if (fullDoc.extractedText) {
-        setDocumentContextWarning(null);
-        if (fullDoc.id) {
-          loadDocumentAnalyses(fullDoc.id);
-        }
-      } else {
-        setDocumentContextWarning('This document has no extracted text content. The AI may not be able to reference it properly.');
+      // Prevent duplicates
+      if (activeDocuments.some(d => d.id === fullDoc.id)) {
+        setShowDocumentPicker(false);
+        return;
       }
+      // Enforce max 3
+      if (activeDocuments.length >= 3) {
+        setDocumentContextWarning('You can select up to 3 documents at once.');
+        setShowDocumentPicker(false);
+        return;
+      }
+      setActiveDocuments(prev => [...prev, fullDoc]);
+      setDocumentContextWarning(null);
+      setShowDocumentPicker(false);
     } catch (err) {
       console.error('Error setting document context:', err);
     } finally {
       setLoadingDocuments(false);
       setSelectedAnalysis(null);
-      setShowDocumentPicker(false);
     }
   };
   
@@ -321,7 +385,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
           };
           
           // Set the document as active
-          setActiveDocument(document);
+          setActiveDocuments([document]);
           
           // Clear from localStorage to prevent it being used again on refresh
           localStorage.removeItem('activeDocumentForChat');
@@ -399,6 +463,44 @@ const ChatInput: React.FC<ChatInputProps> = ({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [showCommandHint]);
 
+  // Remove a document from activeDocuments
+  const removeActiveDocument = (docId: string) => {
+    setActiveDocuments(prev => prev.filter(d => d.id !== docId));
+  };
+
+  // Add a useEffect to sync the input with selected documents for document-dependent agents
+  useEffect(() => {
+    const task = parseCommand(message.trim());
+    if (!isDocumentAgent(task)) return;
+    let newMessage = message;
+    if (task && task.type === 'agent') {
+      if (task.agent === 'compare') {
+        if (activeDocuments.length >= 2) {
+          newMessage = `/agent compare ${activeDocuments[0].id} ${activeDocuments[1].id}`;
+        } else {
+          newMessage = '/agent compare [docA_id] [docB_id]';
+        }
+      } else if (task.agent === 'find_clause') {
+        const clause = task.clause || '';
+        if (activeDocuments.length >= 1) {
+          newMessage = `/agent find_clause "${clause}" in ${activeDocuments[0].id}`;
+        } else {
+          newMessage = `/agent find_clause "${clause}" in [doc_id]`;
+        }
+      } else if (task.agent === 'flag_privileged_terms' || task.agent === 'generate_timeline') {
+        if (activeDocuments.length >= 1) {
+          newMessage = `/agent ${task.agent} in ${activeDocuments[0].id}`;
+        } else {
+          newMessage = `/agent ${task.agent} in [doc_id]`;
+        }
+      }
+    }
+    if (newMessage !== message) {
+      setMessage(newMessage);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeDocuments, message]);
+
   return (
     <div className="relative w-full">
       <motion.div 
@@ -443,8 +545,9 @@ const ChatInput: React.FC<ChatInputProps> = ({
         )}
         {/* Context pills with animations */}
         <AnimatePresence>
-          {activeDocument && (
-            <motion.div 
+          {activeDocuments.map((doc) => (
+            <motion.div
+              key={doc.id}
               className="rounded-md bg-gray-800 mb-3 p-2 w-full flex items-center justify-between"
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
@@ -457,15 +560,12 @@ const ChatInput: React.FC<ChatInputProps> = ({
                 </svg>
                 <div className="flex flex-col">
                   <span className="text-sm text-text-primary truncate max-w-[220px]">
-                    <span className="text-gray-400">Using document:</span> {activeDocument.filename}
+                    <span className="text-gray-400">Using document:</span> {doc.filename}
                   </span>
-                  {documentContextWarning && (
-                    <span className="text-xs text-yellow-500">{documentContextWarning}</span>
-                  )}
                 </div>
               </div>
               <button
-                onClick={clearDocument}
+                onClick={() => removeActiveDocument(doc.id)}
                 className="text-gray-500 hover:text-gray-300 ml-2 transition-colors duration-200"
                 aria-label="Remove document context"
               >
@@ -473,18 +573,8 @@ const ChatInput: React.FC<ChatInputProps> = ({
                   <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
                 </svg>
               </button>
-              <button
-                className="ml-2 px-2 py-1 text-xs bg-primary text-white rounded"
-                onClick={() => {
-                  setMessage(`/agent find_clause \"\" in ${activeDocument.id}`);
-                  setTimeout(() => textareaRef.current?.focus(), 0);
-                }}
-                title="Find a clause in this document"
-              >
-                Find Clause
-              </button>
             </motion.div>
-          )}
+          ))}
         </AnimatePresence>
         
         {/* Analysis context indicator */}
@@ -647,12 +737,12 @@ const ChatInput: React.FC<ChatInputProps> = ({
             
             {/* Analysis context button - only enabled when document is selected */}
             <button
-              className={`p-2 rounded-md ${activeDocument ? 'bg-gray-700 text-gray-300 hover:text-primary hover:bg-gray-600' : 'bg-gray-800 text-gray-600 cursor-not-allowed'} transition-colors`}
+              className={`p-2 rounded-md ${activeDocuments.length ? 'bg-gray-700 text-gray-300 hover:text-primary hover:bg-gray-600' : 'bg-gray-800 text-gray-600 cursor-not-allowed'} transition-colors`}
               onClick={toggleAnalysisPicker}
               type="button"
-              disabled={disabled || !activeDocument}
+              disabled={disabled || !activeDocuments.length}
               aria-label="Add analysis context"
-              title={activeDocument ? "Include document analysis" : "Select a document first"}
+              title={activeDocuments.length ? "Include document analysis" : "Select a document first"}
             >
               <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
                 <path fillRule="evenodd" d="M9 2a1 1 0 000 2h2a1 1 0 100-2H9z" />
@@ -756,6 +846,12 @@ const ChatInput: React.FC<ChatInputProps> = ({
             >
               Type your message or ask a question about your legal documents
             </motion.div>
+          </div>
+        )}
+
+        {isDocumentAgent(parseCommand(message)) && activeDocuments.length > 0 && (
+          <div className="text-xs text-primary mt-1">
+            {`Selected document${activeDocuments.length > 1 ? 's' : ''} will be used for this agent.`}
           </div>
         )}
       </motion.div>

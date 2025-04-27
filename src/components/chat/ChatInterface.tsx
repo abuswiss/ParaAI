@@ -157,7 +157,7 @@ function ChatInterface({ conversationId }: ChatInterfaceProps) {
   // Function to handle sending a new message
   const handleSendMessage = async (
     content: string,
-    documentContext?: string,
+    documentContexts?: string[],
     analysisContext?: DocumentAnalysisResult,
     suppressUserMessage?: boolean
   ) => {
@@ -221,9 +221,9 @@ function ChatInterface({ conversationId }: ChatInterfaceProps) {
       
       console.log('Active conversation ID:', activeConversationId);
       
-      // If documentContext is provided, set it as the active context
-      if (documentContext) {
-        setActiveContext(documentContext);
+      // If documentContexts is provided, set it as the active context (for backward compatibility, use first if only one expected)
+      if (documentContexts && documentContexts.length > 0) {
+        setActiveContext(documentContexts[0]);
       }
       if (analysisContext) {
         setActiveAnalysis(analysisContext);
@@ -252,7 +252,7 @@ function ChatInterface({ conversationId }: ChatInterfaceProps) {
           });
         },
         conversationId: activeConversationId ?? undefined,
-        documentContext: documentContext || activeContext || undefined,
+        documentContext: documentContexts && documentContexts.length > 0 ? documentContexts : undefined,
         analysisContext: analysisContext ? JSON.stringify(analysisContext) : (activeAnalysis ? JSON.stringify(activeAnalysis) : undefined)
       });
       
@@ -415,133 +415,66 @@ function ChatInterface({ conversationId }: ChatInterfaceProps) {
   // Handle file upload and processing
   const handleFiles = async (files: File[]) => {
     if (!files.length) return;
-    
     try {
       setIsProcessingDocument(true);
       setDocumentProcessingProgress(10);
-      setError(null); // Clear any previous errors
-      console.log('Processing document:', files[0].name);
-      
+      setError(null);
       // Import the document services
       const { uploadDocument, processDocument, getDocumentById } = await import('../../services/documentService');
-      
       // Get current user ID from Supabase
       const { data: userData } = await supabase.auth.getUser();
       const userId = userData?.user?.id;
-      
       if (!userId) {
         throw new Error('User not authenticated. Please sign in to upload documents.');
       }
-
-      // Upload document first
-      setDocumentProcessingProgress(30);
-      console.log('Uploading document to storage...');
-      try {
-        const uploadResult = await uploadDocument(files[0], userId);
-        
-        // Store document info for processing
+      // Upload and process each file
+      const docIds: string[] = [];
+      for (let i = 0; i < files.length; i++) {
+        setDocumentProcessingProgress(10 + Math.floor((80 / files.length) * i));
+        const file = files[i];
+        const uploadResult = await uploadDocument(file, userId);
         const docId = uploadResult.id;
-        // URL may be used later for direct access to the document
-        // const docUrl = uploadResult.url;
-        
-        console.log('Document uploaded successfully with ID:', docId);
-        
         if (!docId) {
-          throw new Error("Failed to upload document: No document ID returned");
+          throw new Error(`Failed to upload document: No document ID returned for ${file.name}`);
         }
-      
-        // Now process it to extract text
-        setDocumentProcessingProgress(60);
-        console.log('Extracting text from document...');
+        // Process document
+        setDocumentProcessingProgress(30 + Math.floor((50 / files.length) * i));
         const { error: processError } = await processDocument(docId);
-        
         if (processError) {
-          console.error('Document processing error:', processError);
-          throw new Error(`Processing failed: ${processError.message || 'Could not extract text from document'}`); 
+          setError(`Processing failed for ${file.name}: ${processError.message}`);
+          continue;
         }
-        
-        // Fetch the document with extracted text
+        docIds.push(docId);
+      }
+      // Fetch processed documents for context display
+      if (docIds.length > 0) {
         setDocumentProcessingProgress(90);
-        console.log('Fetching processed document...');
-        const { data: processedDoc, error: fetchError } = await getDocumentById(docId);
-      
-        if (fetchError) {
-          console.error('Error fetching processed document:', fetchError);
-          throw new Error(`Could not retrieve document: ${fetchError.message}`); 
+        const docNames: string[] = [];
+        for (const docId of docIds) {
+          const { data: processedDoc } = await import('../../services/documentService').then(m => m.getDocumentById(docId));
+          if (processedDoc && processedDoc.filename) {
+            docNames.push(processedDoc.filename);
+          }
         }
-      
-        // Check if document was processed successfully
-        if (!processedDoc || !processedDoc.extractedText) {
-          console.warn('Document processed but no text was extracted');
-          // Continue with a fallback message
-          const fallbackContent = `Document '${files[0].name}' was uploaded, but text extraction was not successful. The AI will not have access to the document content.`;
-          
-          // Alert the user
-          setError(`Could not extract text from ${files[0].name}. The document might be scanned or contain text in images.`);
-          setDocumentProcessingProgress(0);
-
-          // Add a system message with the fallback
-          addMessage({
-            id: uuidv4(),
-            role: 'system',
-            content: fallbackContent,
-            timestamp: new Date().toISOString(),
-          });
-          
-          return; // Exit early
-        }
-
-        // Set the active document context for the chat
-        setActiveContext(processedDoc.extractedText);
-        setActiveDocumentName(processedDoc.filename);
-        
-        // Check if this is fallback content by looking for marker phrases in the text
-        const isFallback = 
-          processedDoc.extractedText.includes('[AI ASSISTANT NOTE:') ||
-          processedDoc.extractedText.includes('[PDF EXTRACTION FALLBACK]') ||
-          processedDoc.extractedText.includes('[DOCX EXTRACTION FALLBACK]') ||
-          // Also check in the database record if this exists
-          (processedDoc as any).is_fallback_content === true;
-        
-        if (isFallback) {
-          console.warn("Using fallback content for document:", processedDoc.filename);
-          // Show a message but don't throw an error since we still have usable content
-          setError("Note: Using AI-generated document summary. The original document could not be accessed.");
-        } else {
-          console.log("Document processed successfully:", processedDoc.filename);
-        }
-      
-        // Success! Add the document to the context
+        setActiveContext(docIds.join(', ')); // Store as comma-separated string for UI
+        setActiveDocumentName(docNames.join(', '));
         setDocumentProcessingProgress(100);
-        
-        // Display to the user
         addMessage({
           id: uuidv4(),
           role: 'system',
-          content: `Document '${files[0].name}' has been uploaded and processed successfully.`,
+          content: `Documents uploaded and processed: ${docNames.join(', ')}`,
           timestamp: new Date().toISOString(),
-          documentContext: processedDoc.extractedText
+          documentContext: docIds.join(', ')
         });
-        
-        // Reduce the progress back to zero
-        setTimeout(() => {
-          setDocumentProcessingProgress(0);
-        }, 1000);
-      } catch (innerError) {
-        // Handle inner-specific errors here if needed
-        console.error('Error in document processing step:', innerError);
-        throw innerError; // Re-throw to be caught by the outer catch
       }
-    } catch (error) {
-      console.error('Error processing document:', error);
-      setError(`Error processing document: ${error instanceof Error ? error.message : 'Unknown error'}`);
-      setDocumentProcessingProgress(0);
-    } finally {
-      // Reset progress after a delay to show completion
       setTimeout(() => {
-        setIsProcessingDocument(false);
         setDocumentProcessingProgress(0);
-      }, 1500);
+        setIsProcessingDocument(false);
+      }, 1000);
+    } catch (error) {
+      setError(`Error processing documents: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      setDocumentProcessingProgress(0);
+      setIsProcessingDocument(false);
     }
   };
 

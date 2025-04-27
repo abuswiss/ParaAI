@@ -1,5 +1,5 @@
 import { Task } from './commandParser';
-import { handleResearchQueryStream, sendMessageStream, handleAgentDraftStream, handleFindClauseStream, handleGenerateTimelineStream, handleExplainTermStream } from '../services/chatService';
+import { handleResearchQueryStream, sendMessageStream, handleAgentDraftStream, handleFindClauseStream, handleGenerateTimelineStream, handleExplainTermStream, handleAgentCompareStream, handleFlagPrivilegedTermsStream } from '../services/chatService';
 
 // Main dispatcher for user input
 export async function handleUserTurn({
@@ -14,7 +14,7 @@ export async function handleUserTurn({
   message: string;
   onChunk: (chunk: string) => void;
   conversationId?: string;
-  documentContext?: string;
+  documentContext?: string | string[];
   analysisContext?: string;
 }) {
   if (task?.type === 'research') {
@@ -22,9 +22,15 @@ export async function handleUserTurn({
     return await handleResearchQueryStream(task.query, onChunk);
   }
   if (task?.type === 'agent') {
+    if (task.agent === 'compare') {
+      // Pass the array of document contexts directly for compare agent
+      return await handleAgentCompareStream(task, onChunk, documentContext, analysisContext);
+    }
+    // For other agents, use the first document if an array is provided (backward compatibility)
+    const docCtx = Array.isArray(documentContext) ? documentContext[0] : documentContext;
     if (task.agent === 'draft') {
       // Route to agent draft handler
-      return await handleAgentDraftStream(task.instructions || '', onChunk, documentContext, analysisContext);
+      return await handleAgentDraftStream(task.instructions || '', onChunk, docCtx, analysisContext);
     }
     if (task.agent === 'find_clause') {
       // Find a clause in a document
@@ -37,6 +43,10 @@ export async function handleUserTurn({
     if (task.agent === 'explain_term') {
       // Explain a legal term or acronym
       return await handleExplainTermStream(task.term, onChunk, task.jurisdiction);
+    }
+    if (task.agent === 'flag_privileged_terms') {
+      // Scan a document for privileged terms
+      return await handleFlagPrivilegedTermsStream(task.docId, onChunk);
     }
     // TODO: Implement other agent tasks
     return { success: false, error: new Error('Agent tasks not yet implemented') };
@@ -82,5 +92,6 @@ General Tips:
     return { success: true, error: null };
   }
   // Default: normal chat
-  return await sendMessageStream(conversationId, message, onChunk, documentContext, analysisContext);
+  const docCtx = Array.isArray(documentContext) ? documentContext[0] : documentContext;
+  return await sendMessageStream(conversationId, message, onChunk, docCtx, analysisContext);
 } 

@@ -606,3 +606,152 @@ export const handleExplainTermStream = async (
     return { success: false, error: error as Error };
   }
 };
+
+/**
+ * Handle a /agent compare query using OpenAI
+ * Accepts an array of document contexts or IDs, fetches their texts if needed, and builds a prompt for comparison.
+ * Streams the response via onChunk.
+ */
+export const handleAgentCompareStream = async (
+  task: any, // Should be typed more strictly in the future
+  onChunk: (chunk: string) => void,
+  documentContexts?: string | string[],
+  analysisContext?: string
+): Promise<{ success: boolean; error: Error | null; answer?: string }> => {
+  try {
+    // Accepts either array of extracted texts or array of IDs
+    let docTexts: string[] = [];
+    if (Array.isArray(documentContexts)) {
+      // If they look like IDs (short, no spaces), fetch their text
+      for (const ctx of documentContexts) {
+        if (ctx.length < 40 && !ctx.includes(' ')) {
+          // Looks like an ID, fetch from DB
+          const { getDocumentById } = await import('./documentService');
+          const { data: doc, error } = await getDocumentById(ctx);
+          if (error || !doc || !doc.extractedText) {
+            docTexts.push(`[Document ${ctx}: could not fetch or extract text]`);
+          } else {
+            docTexts.push(doc.extractedText);
+          }
+        } else {
+          // Looks like extracted text
+          docTexts.push(ctx);
+        }
+      }
+    } else if (typeof documentContexts === 'string') {
+      docTexts = [documentContexts];
+    } else {
+      throw new Error('No document contexts provided for comparison.');
+    }
+    if (docTexts.length < 2) {
+      throw new Error('At least two documents are required for comparison.');
+    }
+    // Build the system and user prompt
+    let contextPrompt = '';
+    docTexts.forEach((text, idx) => {
+      contextPrompt += `Document ${idx + 1}:
+${text.substring(0, 8000)}\n\n`;
+    });
+    if (analysisContext) {
+      contextPrompt += `Relevant analysis context:\n${analysisContext}\n`;
+    }
+    const systemPrompt =
+      'You are a paralegal AI assistant. Compare the following legal documents. Highlight similarities, differences, and any notable legal issues. Be concise and use bullet points or tables where helpful.';
+    const userPrompt = `${contextPrompt}\nCompare the above documents as requested by the user.`;
+    const stream = await openai.chat.completions.create({
+      model: 'gpt-4',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ],
+      stream: true,
+      temperature: 0.2,
+    });
+    let answer = '';
+    for await (const chunk of stream) {
+      const content = chunk.choices[0]?.delta?.content || '';
+      if (content) {
+        answer += content;
+        onChunk(content);
+      }
+    }
+    return { success: true, error: null, answer };
+  } catch (error) {
+    console.error('Error in handleAgentCompareStream:', error);
+    return { success: false, error: error as Error };
+  }
+};
+
+/**
+ * Handle a /agent flag_privileged_terms query using OpenAI
+ * Scans a document for keywords/phrases associated with attorney-client privilege or work product.
+ * Streams the response via onChunk.
+ */
+export const handleFlagPrivilegedTermsStream = async (
+  docId: string,
+  onChunk: (chunk: string) => void
+): Promise<{ success: boolean; error: Error | null; answer?: string }> => {
+  try {
+    // Import here to avoid circular dependency
+    const { getDocumentById } = await import('./documentService');
+    const { data: document, error: docError } = await getDocumentById(docId);
+    if (docError || !document) {
+      throw docError || new Error('Document not found');
+    }
+    if (!document.extractedText) {
+      throw new Error('Document text not available. Please wait for processing to complete.');
+    }
+    // Predefined list of privileged terms/phrases
+    const privilegedTerms = [
+      'attorney-client privilege',
+      'work product',
+      'legal advice',
+      'confidential communication',
+      'prepared in anticipation of litigation',
+      'subject to privilege',
+      'privileged and confidential',
+      'attorney work product',
+      'do not disclose',
+      'for the purpose of obtaining legal advice',
+      'protected by privilege',
+      'client communication',
+      'counsel',
+      'solicitor',
+      'law firm',
+      'legal department',
+      'in-house counsel',
+      'outside counsel',
+      'confidential memorandum',
+      'not for distribution',
+      'privileged information',
+      'confidential draft',
+      'prepared at the request of counsel',
+      'subject to attorney-client privilege',
+      'subject to work product doctrine',
+    ];
+    const systemPrompt =
+      'You are a legal AI assistant. Your task is to help flag potentially privileged content in legal documents. This is a preliminary review and not a substitute for legal review.';
+    const userPrompt = `Scan the following document for any occurrences of these potentially privileged terms or phrases (case-insensitive):\n${privilegedTerms.map(t => `- ${t}`).join('\n')}\n\nDocument text:\n${document.extractedText.substring(0, 12000)}\n\nFor each term found, list the term, the sentence or context where it appears, and the location (e.g., page or section if available). If none are found, say so. Do not make up content. This is only a preliminary flagging tool.`;
+    const stream = await openai.chat.completions.create({
+      model: 'gpt-4',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ],
+      stream: true,
+      temperature: 0.1,
+    });
+    let answer = '';
+    for await (const chunk of stream) {
+      const content = chunk.choices[0]?.delta?.content || '';
+      if (content) {
+        answer += content;
+        onChunk(content);
+      }
+    }
+    return { success: true, error: null, answer };
+  } catch (error) {
+    console.error('Error in handleFlagPrivilegedTermsStream:', error);
+    return { success: false, error: error as Error };
+  }
+};
