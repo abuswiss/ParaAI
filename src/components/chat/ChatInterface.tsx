@@ -1,10 +1,14 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { sendMessageStream, getConversationMessages } from '../../services/chatService';
+import { getConversationMessages } from '../../services/chatService';
 import { DocumentAnalysisResult } from '../../services/documentAnalysisService';
 import { motion } from 'framer-motion';
 import ReactMarkdown from 'react-markdown';
 import { supabase } from '../../lib/supabaseClient';
 import { v4 as uuidv4 } from 'uuid';
+import { parseCommand } from '../../lib/commandParser';
+import { handleUserTurn } from '../../lib/taskDispatcher';
+import { exportAsTxt, exportAsDocx, exportAsPdf } from '../../utils/exportUtils';
+import HowToUsePanel from './HowToUsePanel';
 
 // Import the separate components - only using ChatInput now since we're rendering messages directly
 import ChatInput from './ChatInput';
@@ -220,20 +224,17 @@ function ChatInterface({ conversationId }: ChatInterfaceProps) {
       if (analysisContext) {
         setActiveAnalysis(analysisContext);
       }
-      // Send message and handle streaming response
-      const response = await sendMessageStream(
-        activeConversationId,
-        content,
-        (chunk) => {
+      // Parse the command and dispatch
+      const task = parseCommand(content);
+      const response = await handleUserTurn({
+        task,
+        message: content,
+        onChunk: (chunk) => {
           // Clear the loading interval on first chunk
           if (chunks.length === 0) {
             clearInterval(loadingInterval);
           }
-          
           chunks.push(chunk);
-          console.log('Received chunk:', chunk.length > 20 ? chunk.substring(0, 20) + '...' : chunk);
-
-          // Update the message as chunks come in
           setMessages(prevMessages => {
             const newMessages = [...prevMessages];
             const messageIndex = newMessages.findIndex(m => m.id === placeholderId);
@@ -246,17 +247,18 @@ function ChatInterface({ conversationId }: ChatInterfaceProps) {
             return newMessages;
           });
         },
-        documentContext || activeContext || undefined, // Prefer explicit documentContext, fallback to activeContext
-        analysisContext ? JSON.stringify(analysisContext) : (activeAnalysis ? JSON.stringify(activeAnalysis) : undefined)
-      );
+        conversationId: activeConversationId ?? undefined,
+        documentContext: documentContext || activeContext || undefined,
+        analysisContext: analysisContext ? JSON.stringify(analysisContext) : (activeAnalysis ? JSON.stringify(activeAnalysis) : undefined)
+      });
       
       // Clear the loading interval if it's somehow still running
       clearInterval(loadingInterval);
-
+      
       console.log('Message response:', response);
-
+      
       // If a new conversation was created, update the active conversation ID
-      if (response.newConversationId) {
+      if ('newConversationId' in response && response.newConversationId) {
         console.log('New conversation created:', response.newConversationId);
         setActiveConversationId(response.newConversationId);
       }
@@ -275,8 +277,8 @@ function ChatInterface({ conversationId }: ChatInterfaceProps) {
       });
       
       console.log('Message sending complete');
-    } catch (error) {
-      console.error('Error sending message:', error);
+    } catch (error: unknown) {
+      console.error('Error sending message:', error as Error);
       setError('Failed to send message. Please try again.');
     } finally {
       setIsSendingMessage(false);
@@ -543,14 +545,6 @@ function ChatInterface({ conversationId }: ChatInterfaceProps) {
   // This ensures we don't show the welcome screen when messages exist in the database
   const showWelcome = messages.length === 0 && (!conversationId || conversationId === 'new');
   
-  // Sample quick questions for the welcome screen - reduced to 4 in a 2x2 grid
-  const suggestionItems = [
-    "What are the key elements of a valid contract?",
-    "How do I file a trademark application?",
-    "What's the difference between a patent and copyright?",
-    "What steps should I take if I receive a cease and desist?",
-  ];
-  
   // File upload handling functions
   const handleDragEnter = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -660,28 +654,37 @@ function ChatInterface({ conversationId }: ChatInterfaceProps) {
         {/* Welcome screen for new chats */}
         {showWelcome ? (
           <div className="flex flex-col items-center justify-center h-full text-center py-8">
-            <div className="max-w-xl">
-              <h2 className="text-2xl font-semibold mb-4">Welcome to the Paralegal AI Assistant</h2>
-              <p className="mb-4 text-gray-300 text-lg">
-                I can help you analyze legal documents, draft responses, and answer legal questions.
-              </p>
-              
-              {/* Quick suggestion buttons in a 2x2 grid layout */}
-              <div className="grid grid-cols-2 gap-3 max-w-xl mx-auto mt-6">
-                {suggestionItems.map((suggestion, index) => (
-                  <button
-                    key={index}
-                    className="p-3 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg text-sm text-left transition-colors text-white focus:outline-none focus:ring-2 focus:ring-primary"
-                    onClick={() => handleSendMessage(suggestion)}
-                  >
-                    {suggestion}
-                  </button>
-                ))}
-              </div>
-              
-              <p className="text-sm text-gray-400 mt-4">
-                You can also upload a document or type your own question below.
-              </p>
+            <HowToUsePanel />
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 max-w-2xl mx-auto mt-2">
+              <button
+                className="p-3 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg text-sm text-left transition-colors text-white focus:outline-none focus:ring-2 focus:ring-primary"
+                onClick={() => handleSendMessage('What are the key elements of a valid contract?')}
+              >
+                What are the key elements of a valid contract?
+              </button>
+              <button
+                className="p-3 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg text-sm text-left transition-colors text-white focus:outline-none focus:ring-2 focus:ring-primary"
+                onClick={() => {
+                  // Focus the input and type a slash
+                  const textarea = document.querySelector('textarea');
+                  if (textarea) {
+                    textarea.focus();
+                    setTimeout(() => {
+                      const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
+                      nativeInputValueSetter?.call(textarea, '/');
+                      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+                    }, 0);
+                  }
+                }}
+              >
+                <span className="font-mono text-primary">/</span> Use AI Legal Tools
+              </button>
+              <button
+                className="p-3 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg text-sm text-left transition-colors text-white focus:outline-none focus:ring-2 focus:ring-primary"
+                onClick={() => handleSendMessage('/research Miranda rights')}
+              >
+                <span className="font-mono text-primary">/research</span> Miranda rights
+              </button>
             </div>
           </div>
         ) : (
@@ -689,8 +692,14 @@ function ChatInterface({ conversationId }: ChatInterfaceProps) {
             {/* Messages container with improved styling */}
             <div className="px-4 pt-6 pb-20 h-full flex flex-col overflow-y-auto space-y-6">
               {/* Map and render each message with a flatter design */}
-              {messages.map((message) => {
+              {messages.map((message, idx) => {
                 const isUser = message.role === 'user';
+                // Detect if this is an /agent draft response
+                const isAgentDraft =
+                  message.role === 'assistant' &&
+                  idx > 0 &&
+                  messages[idx - 1].role === 'user' &&
+                  messages[idx - 1].content.trim().toLowerCase().startsWith('/agent draft');
                 return (
                   <motion.div
                     key={message.id}
@@ -794,6 +803,51 @@ function ChatInterface({ conversationId }: ChatInterfaceProps) {
                               </svg>
                               <span className="text-xs">Regenerate</span>
                             </button>
+                            {isAgentDraft && !message.isStreaming && (
+                              <>
+                                <button
+                                  className="px-3 py-1 bg-primary text-white rounded hover:bg-primary-hover text-xs font-medium transition-colors"
+                                  onClick={async () => {
+                                    const filename = prompt('Enter filename for draft:', 'ai_draft') || 'ai_draft';
+                                    // Here you would call your backend save endpoint
+                                    alert(`Draft saved as '${filename}' (mock)`);
+                                  }}
+                                  title="Save to App"
+                                >
+                                  Save to App
+                                </button>
+                                <button
+                                  className="px-3 py-1 bg-primary text-white rounded hover:bg-primary-hover text-xs font-medium transition-colors"
+                                  onClick={() => {
+                                    const filename = prompt('Export as .txt - filename:', 'ai_draft') || 'ai_draft';
+                                    exportAsTxt(message.content, filename);
+                                  }}
+                                  title="Export as .txt"
+                                >
+                                  Export .txt
+                                </button>
+                                <button
+                                  className="px-3 py-1 bg-primary text-white rounded hover:bg-primary-hover text-xs font-medium transition-colors"
+                                  onClick={async () => {
+                                    const filename = prompt('Export as .docx - filename:', 'ai_draft') || 'ai_draft';
+                                    await exportAsDocx(message.content, filename);
+                                  }}
+                                  title="Export as .docx"
+                                >
+                                  Export .docx
+                                </button>
+                                <button
+                                  className="px-3 py-1 bg-primary text-white rounded hover:bg-primary-hover text-xs font-medium transition-colors"
+                                  onClick={async () => {
+                                    const filename = prompt('Export as .pdf - filename:', 'ai_draft') || 'ai_draft';
+                                    await exportAsPdf(message.content, filename);
+                                  }}
+                                  title="Export as .pdf"
+                                >
+                                  Export .pdf
+                                </button>
+                              </>
+                            )}
                             <span className="text-xs text-gray-500 ml-2">{formatMessageTime(message)}</span>
                           </div>
                         </div>
