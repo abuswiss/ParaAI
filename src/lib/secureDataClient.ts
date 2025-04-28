@@ -41,15 +41,19 @@ const getCurrentUserId = async () => {
 };
 
 // Define a type for the raw data expected from the cases table
+// Ensure all fields required by the Case interface are included
 interface RawCaseData {
   id: string;
-  name?: string; // Assuming name might be nullable or handled differently
-  description?: string;
-  status?: string;
+  name: string; // Changed from optional, assuming name is required
+  description: string | null;
+  status: 'active' | 'archived' | 'closed'; // Use specific types
   created_at: string;
-  updated_at?: string;
+  updated_at: string;
   owner_id: string;
-  // Add other potential raw fields if known
+  client_name: string | null;
+  opposing_party: string | null;
+  case_number: string | null;
+  court: string | null;
 }
 
 /**
@@ -57,25 +61,24 @@ interface RawCaseData {
  * This uses direct queries that don't trigger the problematic RLS policy chain
  */
 // Helper function to format case data
-// Use the Case type for the return and RawCaseData for input
-function formatCases(cases: RawCaseData[]): Partial<Case>[] { // Return Partial<Case> as not all fields might be mapped
+// Return full Case[] and map all fields
+function formatCases(cases: RawCaseData[]): Case[] { 
   return cases.map(caseData => ({
     id: caseData.id,
-    // Map relevant fields, ensure null safety
-    client_name: caseData.name || null, // Example mapping 'name' to 'client_name'
-    description: caseData.description || null,
-    status: caseData.status || 'active',
+    name: caseData.name, // Use name directly
+    description: caseData.description,
+    status: caseData.status, // Status should be directly available
     createdAt: caseData.created_at,
-    updatedAt: caseData.updated_at || null,
-    // case_number, opposing_party, court are missing in RawCaseData, set to null or fetch differently
-    case_number: null, 
-    opposing_party: null,
-    court: null,
-    // documentCount: 0, // Assuming document count is handled elsewhere
+    updatedAt: caseData.updated_at,
+    client_name: caseData.client_name,
+    opposing_party: caseData.opposing_party,
+    case_number: caseData.case_number, 
+    court: caseData.court,
+    documentCount: 0, // Initialize count, actual count needs separate query if desired
   }));
 }
 
-export const fetchCasesSafely = async (): Promise<{ data: Partial<Case>[], error: Error | null }> => {
+export const fetchCasesSafely = async (): Promise<{ data: Case[], error: Error | null }> => {
   try {
     console.log('fetchCasesSafely called, checking auth status');
     
@@ -100,34 +103,52 @@ export const fetchCasesSafely = async (): Promise<{ data: Partial<Case>[], error
       console.error('Health check failed:', e);
     }
     
-    // Try the absolute most basic query
-    console.log('Executing basic query to cases table with no filters');
+    // Query specifically for the fields needed by RawCaseData/Case
+    console.log('Executing query to cases table for user cases');
     try {
-      const { data, error } = await supabase.from('cases').select<'*', RawCaseData>('*');
+      const { data, error } = await supabase
+        .from('cases')
+        .select<'*', RawCaseData>('
+          id,
+          name,
+          description,
+          status,
+          created_at,
+          updated_at,
+          owner_id,
+          client_name,
+          opposing_party,
+          case_number,
+          court
+        ')
+        .eq('owner_id', user.id); // Filter by owner_id directly in the query
+
       console.log('Query executed, result:', JSON.stringify({ data: data?.length || 0, error }));
 
       if (error) {
-        console.error('Error executing basic cases query:', error);
-        return { data: [], error: null };
+        console.error('Error executing cases query:', error);
+        // Decide if we should return error or empty data
+        // Returning empty data might be better UX than showing an error for RLS issues
+        return { data: [], error: null }; 
       }
       
       if (!data || data.length === 0) {
-        console.log('No cases found in the database');
+        console.log('No cases found for user in the database');
         return { data: [], error: null };
       }
       
-      // Filter for user's cases client-side
-      console.log('Filtering cases for user:', user.id);
-      const userCases = data.filter(c => String(c.owner_id) === String(user.id));
-      console.log('User cases found:', userCases.length);
+      // No longer need client-side filtering as owner_id is in the query
+      // console.log('Filtering cases for user:', user.id);
+      // const userCases = data.filter(c => String(c.owner_id) === String(user.id));
+      // console.log('User cases found:', userCases.length);
       
       return {
-        data: formatCases(userCases), // formatCases now expects RawCaseData[]
+        data: formatCases(data), // Pass the directly fetched data
         error: null
       };
     } catch (error) {
       console.error('Exception during case fetch:', error);
-      return { data: [], error: null };
+      return { data: [], error: error instanceof Error ? error : new Error('Unknown error fetching cases') };
     }
   } catch (error) {
     console.error('Error in fetchCasesSafely:', error);

@@ -1,73 +1,125 @@
-import React, { useState } from 'react';
-import { createCase } from '../../services/caseService';
+import React, { useState, useEffect } from 'react';
+import { createCase, updateCase, Case } from '../../services/caseService';
+import { Button } from '../ui/Button';
+import { Input } from '../ui/Input';
+import { Label } from '../ui/Label';
+import { Textarea } from '../ui/Textarea';
+import { Spinner } from '../ui/Spinner';
+import { Icons } from '../ui/Icons';
 
 interface CaseFormProps {
   isOpen: boolean;
-  onClose: () => void;
-  onCaseCreated?: () => void;
+  onClose: (refresh?: boolean) => void;
+  caseData?: Case | null;
 }
 
-const CaseForm: React.FC<CaseFormProps> = ({ isOpen, onClose, onCaseCreated }) => {
-  const [name, setName] = useState('');
-  const [description, setDescription] = useState('');
+interface CaseFormData {
+  name: string;
+  description: string;
+  client_name: string;
+  opposing_party: string;
+  case_number: string;
+  court: string;
+  status: 'active' | 'archived' | 'closed';
+}
+
+const CaseForm: React.FC<CaseFormProps> = ({ isOpen, onClose, caseData }) => {
+  const [formData, setFormData] = useState<CaseFormData>({
+    name: '',
+    description: '',
+    client_name: '',
+    opposing_party: '',
+    case_number: '',
+    court: '',
+    status: 'active',
+  });
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const isEditMode = !!caseData;
+
+  useEffect(() => {
+    if (isEditMode && caseData) {
+      setFormData({
+        name: caseData.name || '',
+        description: caseData.description || '',
+        client_name: caseData.client_name || '',
+        opposing_party: caseData.opposing_party || '',
+        case_number: caseData.case_number || '',
+        court: caseData.court || '',
+        status: caseData.status || 'active',
+      });
+      setSuccess(false);
+      setError(null);
+    } else {
+      setFormData({
+        name: '',
+        description: '',
+        client_name: '',
+        opposing_party: '',
+        case_number: '',
+        court: '',
+        status: 'active',
+      });
+    }
+  }, [isOpen, caseData, isEditMode]);
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({ ...prev, [name]: value }));
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    if (!name.trim()) {
+
+    if (!formData.name.trim()) {
       setError('Case name is required');
       return;
     }
-    
+
+    setLoading(true);
+    setError(null);
+    setSuccess(false);
+
     try {
-      console.log('Form submitted with name:', name);
-      setLoading(true);
-      setError(null);
-      
-      // Make sure to add a timeout to avoid UI hanging forever
-      const timeoutPromise = new Promise((_, reject) => {
-        setTimeout(() => reject(new Error('Case creation timed out after 15 seconds')), 15000);
-      });
-      
-      // Race against timeout
-      const result = await Promise.race([
-        createCase(name, description),
-        timeoutPromise
-      ]) as { data: any, error: any };
-      
-      // Check for result
-      if (result.error) {
-        console.error('Error received from createCase:', result.error);
-        throw result.error;
-      }
-      
-      console.log('Case created successfully:', result.data);
-      
-      // Set success state
-      setSuccess(true);
-      setName('');
-      setDescription('');
-      
-      // Even if there's an error with the onCaseCreated callback, we should still close the modal
-      setTimeout(() => {
-        try {
-          if (onCaseCreated) {
-            console.log('Calling onCaseCreated callback');
-            onCaseCreated();
-          }
-        } catch (callbackErr) {
-          console.error('Error in onCaseCreated callback:', callbackErr);
-        } finally {
-          onClose();
+      let result;
+      const updates = { 
+          name: formData.name,
+          description: formData.description,
+          client_name: formData.client_name,
+          opposing_party: formData.opposing_party,
+          case_number: formData.case_number,
+          court: formData.court,
+          status: formData.status
+      };
+
+      if (isEditMode && caseData) {
+        console.log('Updating case:', caseData.id, updates);
+        result = await updateCase(caseData.id, updates);
+        if (!result.success || result.error) {
+          throw result.error || new Error('Failed to update case.');
         }
-      }, 1500);
+        console.log('Case updated successfully');
+      } else {
+        console.log('Creating case:', updates);
+        result = await createCase(updates);
+        if (!result.data || result.error) {
+          throw result.error || new Error('Failed to create case.');
+        }
+        console.log('Case created successfully:', result.data);
+      }
+
+      setSuccess(true);
+      setTimeout(() => {
+        onClose(true);
+      }, 1000);
+
     } catch (err) {
-      console.error('Error creating case:', err);
-      const errorMessage = err instanceof Error ? err.message : 'Failed to create case. Please try again.';
+      console.error('Error submitting case form:', err);
+      const errorMessage = err instanceof Error ? err.message : `Failed to ${isEditMode ? 'update' : 'create'} case.`;
       setError(errorMessage);
+    } finally {
       setLoading(false);
     }
   };
@@ -75,95 +127,137 @@ const CaseForm: React.FC<CaseFormProps> = ({ isOpen, onClose, onCaseCreated }) =
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto">
-      <div className="flex items-center justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
-        <div className="fixed inset-0 transition-opacity" onClick={onClose}>
-          <div className="absolute inset-0 bg-black opacity-75"></div>
-        </div>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-black/70 z-40" onClick={() => onClose()} />
 
-        {/* Modal Content */}
-        <div className="inline-block align-bottom bg-gray-800 rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full">
-          <div className="px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
-            <div className="sm:flex sm:items-start">
-              <div className="mt-3 text-center sm:mt-0 sm:text-left w-full">
-                <h3 className="text-lg leading-6 font-medium text-text-primary mb-4">
-                  Create New Case
+        <div className="relative z-50 w-full max-w-2xl bg-surface rounded-lg shadow-xl p-6">
+             <div className="flex justify-between items-center mb-4">
+                <h3 className="text-lg font-semibold text-text-primary">
+                {isEditMode ? 'Edit Case' : 'Create New Case'}
                 </h3>
-                
-                <form onSubmit={handleSubmit}>
-                  {error && (
-                    <div className="mb-4 text-sm text-red-500 bg-red-100 dark:bg-red-900/20 p-2 rounded">
-                      {error}
-                    </div>
-                  )}
-                  
-                  <div className="mb-4">
-                    <label htmlFor="name" className="block text-sm font-medium text-text-secondary mb-1">
-                      Case Name *
-                    </label>
-                    <input
-                      type="text"
-                      id="name"
-                      value={name}
-                      onChange={(e) => setName(e.target.value)}
-                      className="w-full bg-gray-700 border border-gray-600 rounded-md py-2 px-3 text-text-primary focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
-                      placeholder="Enter case name"
-                    />
-                  </div>
-                  
-                  <div className="mb-4">
-                    <label htmlFor="description" className="block text-sm font-medium text-text-secondary mb-1">
-                      Description (optional)
-                    </label>
-                    <textarea
-                      id="description"
-                      value={description}
-                      onChange={(e) => setDescription(e.target.value)}
-                      rows={4}
-                      className="w-full bg-gray-700 border border-gray-600 rounded-md py-2 px-3 text-text-primary focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
-                      placeholder="Enter case description"
-                    ></textarea>
-                  </div>
-                  
-                  <div className="flex justify-end space-x-3 mt-6">
-                    <button
-                      type="button"
-                      onClick={onClose}
-                      className="bg-gray-600 hover:bg-gray-700 text-white font-medium py-2 px-4 rounded-md transition"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="submit"
-                      disabled={loading || success}
-                      className={`font-medium py-2 px-4 rounded-md transition flex items-center ${success 
-                        ? 'bg-green-600 hover:bg-green-700 text-white' 
-                        : 'bg-primary hover:bg-primary-hover text-white'}`}
-                    >
-                      {loading ? (
-                        <>
-                          <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                          </svg>
-                          Creating...
-                        </>
-                      ) : success ? (
-                        <>
-                          <svg className="-ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
-                            <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                          </svg>
-                          Created!
-                        </>
-                      ) : 'Create'}
-                    </button>
-                  </div>
-                </form>
-              </div>
+                <Button variant="ghost" size="sm" onClick={() => onClose()} className="-mr-2">
+                    <Icons.Close className="h-4 w-4" />
+                    <span className="sr-only">Close</span>
+                </Button>
             </div>
-          </div>
+
+            <form onSubmit={handleSubmit} className="space-y-4">
+            {error && (
+                <div className="mb-4 text-sm text-red-500 bg-red-100 dark:bg-red-900/20 p-3 rounded-md border border-red-300 dark:border-red-600">
+                {error}
+                </div>
+            )}
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <Label>Case Name *</Label>
+                    <Input
+                        id="name"
+                        name="name"
+                        value={formData.name}
+                        onChange={handleInputChange}
+                        placeholder="e.g., Smith v. Jones Discovery"
+                        required
+                    />
+                </div>
+                 <div>
+                    <Label>Status</Label>
+                    <select
+                        id="status"
+                        name="status"
+                        value={formData.status}
+                        onChange={handleInputChange}
+                        className="block w-full mt-1 rounded-md border-border shadow-sm focus:border-primary focus:ring focus:ring-primary focus:ring-opacity-50 bg-input text-foreground"
+                    >
+                        <option value="active">Active</option>
+                        <option value="closed">Closed</option>
+                        <option value="archived">Archived</option>
+                    </select>
+                </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                 <div>
+                    <Label>Client Name</Label>
+                    <Input
+                        id="client_name"
+                        name="client_name"
+                        value={formData.client_name}
+                        onChange={handleInputChange}
+                        placeholder="Enter client name"
+                    />
+                </div>
+                 <div>
+                    <Label>Opposing Party</Label>
+                    <Input
+                        id="opposing_party"
+                        name="opposing_party"
+                        value={formData.opposing_party}
+                        onChange={handleInputChange}
+                        placeholder="Enter opposing party name"
+                    />
+                </div>
+            </div>
+             
+             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                 <div>
+                    <Label>Case Number</Label>
+                    <Input
+                        id="case_number"
+                        name="case_number"
+                        value={formData.case_number}
+                        onChange={handleInputChange}
+                        placeholder="e.g., CV-2024-1234"
+                    />
+                </div>
+                 <div>
+                    <Label>Court</Label>
+                    <Input
+                        id="court"
+                        name="court"
+                        value={formData.court}
+                        onChange={handleInputChange}
+                        placeholder="e.g., Superior Court of California"
+                    />
+                </div>
+            </div>
+
+            <div>
+                <Label>Description</Label>
+                <Textarea
+                id="description"
+                name="description"
+                value={formData.description}
+                onChange={handleInputChange}
+                rows={3}
+                placeholder="Enter case description or key details"
+                />
+            </div>
+
+            <div className="flex justify-end space-x-3 pt-4 border-t border-border mt-6">
+                <Button
+                type="button"
+                variant="outline"
+                onClick={() => onClose()}
+                disabled={loading}
+                >
+                Cancel
+                </Button>
+                <Button
+                type="submit"
+                disabled={loading || success}
+                className={`min-w-[100px] ${success ? 'bg-green-600 hover:bg-green-700' : ''}`}
+                >
+                {loading ? <Spinner size="sm" /> :
+                 success ? <Icons.Check className="h-4 w-4" /> :
+                 isEditMode ? 'Save Changes' : 'Create Case'}
+                <span className="ml-2">
+                    {loading ? 'Saving...' : success ? 'Saved!' : ''}
+                 </span>
+                </Button>
+            </div>
+            </form>
         </div>
-      </div>
     </div>
   );
 };

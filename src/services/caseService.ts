@@ -19,15 +19,25 @@ export interface Case {
   court?: string;
 }
 
+// Define interface for creation data matching the form
+interface CaseCreateData {
+  name: string;
+  description?: string;
+  client_name?: string;
+  opposing_party?: string;
+  case_number?: string;
+  court?: string;
+  status?: 'active' | 'archived' | 'closed'; // Include status
+}
+
 /**
  * Create a new case
  */
 export const createCase = async (
-  name: string,
-  description?: string
+  caseInputData: CaseCreateData // Accept the full object
 ): Promise<{ data: Case | null; error: Error | null }> => {
   try {
-    console.log('Starting case creation for:', name);
+    console.log('Starting case creation for:', caseInputData.name);
     
     // First verify authentication
     const authResponse = await supabase.auth.getUser();
@@ -53,25 +63,31 @@ export const createCase = async (
       console.log('Supabase connection verified:', healthCheck);
     }
 
-    // Prepare the case data
-    const caseData = {
+    // Prepare the case data from input
+    const caseDataToInsert = {
       id: caseId,
       owner_id: user.id,
-      name,
-      title: name, // Database requires title field as well
-      description,
-      status: 'active',
+      name: caseInputData.name,
+      title: caseInputData.name, // Assuming title mirrors name
+      description: caseInputData.description || null,
+      client_name: caseInputData.client_name || null,
+      opposing_party: caseInputData.opposing_party || null,
+      case_number: caseInputData.case_number || null,
+      court: caseInputData.court || null,
+      status: caseInputData.status || 'active', // Default to active if not provided
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
     };
     
-    console.log('Preparing to insert case with data:', JSON.stringify(caseData));
+    console.log('Preparing to insert case with data:', JSON.stringify(caseDataToInsert));
 
-    // Begin a transaction by starting with the case creation
+    // Insert the case
     const insertResult = await supabase
       .from('cases')
-      .insert(caseData);
-      
+      .insert(caseDataToInsert)
+      .select() // Select the inserted row
+      .single(); // Expect a single row
+
     console.log('Case insert response:', JSON.stringify(insertResult));
     
     if (insertResult.error) {
@@ -79,19 +95,7 @@ export const createCase = async (
       throw insertResult.error;
     }
     
-    // Fetch the created case
-    const { data, error } = await supabase
-      .from('cases')
-      .select('*')
-      .eq('id', caseId)
-      .single();
-      
-    console.log('Case fetch after insert response:', JSON.stringify({data, error}));
-    
-    if (error) {
-      console.error('Error fetching created case:', error);
-      throw error;
-    }
+    const data = insertResult.data; // Use the data returned from insert
 
     // Now add the user as a collaborator to ensure they can see the case
     console.log('Adding user as collaborator for case:', caseId);
@@ -111,6 +115,7 @@ export const createCase = async (
     }
 
     console.log('Case creation successful, returning data.');
+    // Map the inserted data back to the Case interface
     return {
       data: {
         id: data.id,
@@ -119,7 +124,11 @@ export const createCase = async (
         status: data.status as 'active' | 'archived' | 'closed',
         createdAt: data.created_at,
         updatedAt: data.updated_at,
-        documentCount: 0,
+        client_name: data.client_name,
+        opposing_party: data.opposing_party,
+        case_number: data.case_number,
+        court: data.court,
+        documentCount: 0, // Initialize count, actual count needs separate query if required here
       },
       error: null,
     };
@@ -215,12 +224,21 @@ export const getUserCases = async (): Promise<{
  */
 export const updateCase = async (
   caseId: string,
-  updates: Partial<Pick<Case, 'name' | 'description' | 'status'>>
+  // Use the same CaseCreateData interface for allowed update fields
+  updates: Partial<CaseCreateData> 
 ): Promise<{ success: boolean; error: Error | null }> => {
   try {
+    // Add updated_at timestamp
+    const updatesWithTimestamp = {
+        ...updates,
+        updated_at: new Date().toISOString(),
+    };
+
+    console.log(`Updating case ${caseId} with data:`, JSON.stringify(updatesWithTimestamp));
+
     const { error } = await supabase
       .from('cases')
-      .update(updates)
+      .update(updatesWithTimestamp)
       .eq('id', caseId);
 
     if (error) {

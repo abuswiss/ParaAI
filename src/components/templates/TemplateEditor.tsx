@@ -227,7 +227,7 @@ const TemplateEditor: React.FC<TemplateEditorProps> = ({ templateId, onSaveSucce
         </div>
 
         <div>
-          <Label>Template Body (use {{variable_name}} for placeholders)</Label>
+          <Label>Template Body (use {'{{variable_name}}'} for placeholders)</Label>
           {editor && <EditorContent editor={editor} />}
         </div>
       </div>
