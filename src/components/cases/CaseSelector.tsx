@@ -91,7 +91,7 @@ const CaseSelector: React.FC<CaseSelectorProps> = ({ showCreateOption = true }) 
         <option value="">{isLoading ? 'Loading cases...' : '-- Select a Case --'}</option>
         {cases.map((c) => (
           <option key={c.id} value={c.id}>
-            {c.case_number} - {c.client_name}
+            {c.case_number || c.name || 'Untitled Case'} {c.client_name ? `- ${c.client_name}` : ''}
           </option>
         ))}
       </select>

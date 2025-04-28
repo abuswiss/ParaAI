@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Outlet, Link } from 'react-router-dom'; // Import Outlet and Link
+import { Outlet, Link, useNavigate } from 'react-router-dom'; // Import Outlet, Link, and useNavigate
 import { useAtomValue, useSetAtom } from 'jotai'; // Import Jotai hooks
 import { useAuth } from '@/hooks/useAuth'; // Import useAuth hook
 import { 
@@ -20,15 +20,31 @@ import * as documentService from '@/services/documentService'; // Import documen
 import * as templateService from '@/services/templateService'; // Import templateService
 import { PanelGroup, Panel, PanelResizeHandle } from "react-resizable-panels"; // Import resizable panel components
 import { motion, AnimatePresence } from 'framer-motion'; // Import framer-motion
+import { Icons } from '@/components/ui/Icons'; // Correct import path
+import { Button } from '@/components/ui/Button'; // Import Button
+import AIDraftModal from '@/components/ai/AIDraftModal'; // Import AI Draft Modal
+import UploadModal from '@/components/documents/UploadModal'; // Import Upload Modal
+
+// Define props for NavigationPanel to receive modal setters
+interface NavigationPanelProps {
+  setShowAIDraftModal: (show: boolean) => void;
+  setAIDraftContext: (context: 'template' | 'document' | 'general') => void;
+  setShowUploadModal: (show: boolean) => void; // Add setter for Upload Modal
+}
 
 // Navigation Panel - Now includes CaseSelector, Case Details, DocumentList, and User Info/Logout
-const NavigationPanel: React.FC = () => {
+const NavigationPanel: React.FC<NavigationPanelProps> = ({ 
+  setShowAIDraftModal, 
+  setAIDraftContext, 
+  setShowUploadModal // Destructure new prop
+}) => {
   const { user, signOut } = useAuth(); // Get user and signOut function
+  const navigate = useNavigate(); // Hook for navigation
   const activeCaseId = useAtomValue(activeCaseIdAtom); // Get active case ID
   const activeCaseDetails = useAtomValue(activeCaseDetailsAtom);
   const isCaseDetailsLoading = useAtomValue(isCaseDetailsLoadingAtom);
   const caseDetailsError = useAtomValue(caseDetailsFetchErrorAtom);
-
+  
   const detailsVariants = { // Define variants for details animation
     hidden: { opacity: 0, height: 0 },
     visible: { opacity: 1, height: 'auto' },
@@ -44,6 +60,29 @@ const NavigationPanel: React.FC = () => {
       <div className="flex-shrink-0"> {/* Section for non-scrolling content */}
         <h2 className="text-lg font-semibold mb-4 text-neutral-900 dark:text-text-primary">Navigation</h2> {/* Added text color */}
         <CaseSelector />
+
+        {/* Link to Case Management - Added Here */}
+        <div className="mt-4">
+          <Link 
+            to="/cases" 
+            className="flex items-center text-sm font-medium text-neutral-600 dark:text-text-secondary hover:text-neutral-900 dark:hover:text-text-primary"
+          >
+            <Icons.Folder className="h-4 w-4 mr-2" /> {/* Updated Icon */}
+            Manage Cases
+          </Link>
+        </div>
+
+        {/* Link to Document Manager - Existing */}
+        <div className="mt-4 pt-4 border-t border-neutral-200 dark:border-surface-lighter"> {/* Added border here */}
+          <Link 
+            to="/documents" 
+            className="flex items-center text-sm font-medium text-neutral-600 dark:text-text-secondary hover:text-neutral-900 dark:hover:text-text-primary"
+          >
+            {/* Use appropriate Icons.Document */}
+            <Icons.Document className="h-4 w-4 mr-2" />
+            Manage Documents
+          </Link>
+        </div>
 
         {/* Link to Template Manager - Added Here */}
         <div className="mt-4 pt-4 border-t border-neutral-200 dark:border-surface-lighter">
@@ -102,23 +141,31 @@ const NavigationPanel: React.FC = () => {
               <p className="text-xs text-neutral-500 dark:text-text-secondary italic">Select a case to view details.</p>
           )}
         </div>
-      </div>
 
-      {/* Document List Section with Animation */}
-      <div className="mt-4 border-t border-neutral-200 dark:border-surface-lighter min-h-0 overflow-y-auto mb-auto"> 
-        <AnimatePresence mode='wait'>
-          <motion.div
-            key={activeCaseId || 'no-case'} // Change key based on activeCaseId to trigger animation
-            variants={listVariants}
-            initial="hidden"
-            animate="visible"
-            exit="hidden"
-            transition={{ duration: 0.2 }}
-            className="h-full" // Ensure motion div takes full height
+        {/* Create Actions Section - Added Here */} 
+        <div className="mt-auto pt-4 border-t border-neutral-200 dark:border-surface-lighter flex flex-col space-y-2 mb-4">
+          <Button 
+            variant="primaryOutline" // Use a primary/orange outline style
+            size="sm" 
+            onClick={() => setShowUploadModal(true)} // Open modal directly
+            className="w-full justify-start"
           >
-            <DocumentList />
-          </motion.div>
-        </AnimatePresence>
+            <Icons.Upload className="h-4 w-4 mr-2" />
+            Upload Document
+          </Button>
+          <Button 
+            variant="primary" // Use a solid primary/orange style
+            size="sm"
+            onClick={() => {
+                setAIDraftContext('general'); // Use prop setter
+                setShowAIDraftModal(true); // Use prop setter
+            }}
+            className="w-full justify-start"
+          >
+            <Icons.Sparkles className="h-4 w-4 mr-2" />
+            AI Draft
+          </Button>
+        </div>
       </div>
 
       {/* User Info and Logout Section */}
@@ -272,28 +319,65 @@ const AssistantPanel: React.FC<AssistantPanelProps> = ({ onInsertContent }) => {
 const AppLayout: React.FC = () => {
   // Create the ref for the editor
   const editorRef = useRef<DocumentEditorRef>(null);
+  
+  // AI Draft Modal state lives here
+  const [showAIDraftModal, setShowAIDraftModal] = useState(false);
+  const [aiDraftContext, setAIDraftContext] = useState<'template' | 'document' | 'general'>('general');
+  
+  // Upload Modal state lives here
+  const [showUploadModal, setShowUploadModal] = useState(false);
 
   // Define the callback function
   const handleInsertContent = useCallback((content: string) => {
     // Call the exposed method via the ref
     editorRef.current?.insertContent(content);
   }, []); // Empty dependency array as it only uses the ref
+  
+  // Placeholder for upload completion handling (e.g., refresh relevant lists)
+  const handleUploadComplete = useCallback((success: boolean) => {
+      setShowUploadModal(false); // Close modal regardless of success for now
+      if (success) {
+          console.log("Global Upload successful - potentially refresh data here");
+          // TODO: Implement refresh logic if needed (e.g., refetch documents for active case)
+      }
+  }, []);
 
   return (
     <div className="flex h-screen bg-white dark:bg-background text-neutral-900 dark:text-text-primary">
-      <NavigationPanel />
+      {/* Pass modal setters down to NavigationPanel */}
+      <NavigationPanel 
+        setShowAIDraftModal={setShowAIDraftModal}
+        setAIDraftContext={setAIDraftContext} 
+        setShowUploadModal={setShowUploadModal} // Pass upload modal setter
+      />
       <PanelGroup direction="horizontal" className="flex-1"> {/* Wrap panels */} 
-        <Panel defaultSize={70} minSize={30} className="flex-1 flex flex-col overflow-hidden"> {/* Main area panel */} 
+        <Panel defaultSize={65} minSize={30}> {/* Main Work Area */} 
           <MainWorkAreaPanel editorRef={editorRef} />
         </Panel>
-        <PanelResizeHandle className="w-2 bg-neutral-200 dark:bg-surface-lighter hover:bg-primary/50 dark:hover:bg-primary/50 active:bg-primary/75 dark:active:bg-primary/75 transition-colors flex items-center justify-center">
-           {/* Optional: Add visual indicator for handle */} 
-           <div className="w-1 h-10 bg-neutral-400 dark:bg-text-tertiary rounded-full"></div>
-        </PanelResizeHandle>
-        <Panel defaultSize={30} minSize={15} maxSize={50} className="flex flex-col overflow-hidden"> {/* Assistant panel */} 
+        <PanelResizeHandle className="w-1 bg-neutral-200 dark:bg-surface-lighter hover:bg-primary dark:hover:bg-primary transition-colors duration-200 cursor-col-resize" />
+        <Panel defaultSize={35} minSize={20} maxSize={50}> {/* Assistant Panel - Added maxSize */} 
           <AssistantPanel onInsertContent={handleInsertContent} />
         </Panel>
       </PanelGroup>
+      
+      {/* Render AI Draft Modal globally if needed */} 
+      <AIDraftModal
+        isOpen={showAIDraftModal}
+        onClose={() => setShowAIDraftModal(false)}
+        context={aiDraftContext}
+        // TODO: Define a proper onExport for global context
+        onExport={(content: string) => { 
+          console.log('AI Draft exported globally:', content); 
+          setShowAIDraftModal(false); // Close modal after export
+        }}
+      />
+      
+      {/* Render Upload Modal globally */} 
+      <UploadModal 
+          isOpen={showUploadModal} 
+          onClose={() => setShowUploadModal(false)} 
+          onUploadComplete={handleUploadComplete}
+      />
     </div>
   );
 };
