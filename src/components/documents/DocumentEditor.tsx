@@ -69,8 +69,6 @@ const DocumentEditor = forwardRef<DocumentEditorRef, DocumentEditorProps>(
     const [saveError, setSaveError] = useState<string | null>(null);
     const [showAIPopup, setShowAIPopup] = useState(false);
     const [aiPopupContent, setAiPopupContent] = useState<string | null>(null);
-    const [isAILoading, setIsAILoading] = useState(false);
-    const [aiError, setAIError] = useState<string | null>(null);
     const [currentSelectionRange, setCurrentSelectionRange] = useState<{ from: number; to: number } | null>(null);
     
     // Use Jotai setter for textToQuery
@@ -191,9 +189,7 @@ const DocumentEditor = forwardRef<DocumentEditorRef, DocumentEditorProps>(
     const handleInlineAIAction = useCallback(async (action: 'rewrite' | 'summarize', text: string) => {
         if (!text) return;
         setShowAIPopup(true);
-        setIsAILoading(true);
         setAiPopupContent(null); 
-        setAIError(null);
         try {
             const response = await fetch(`/api/ai/${action}`, {
                 method: 'POST',
@@ -211,10 +207,7 @@ const DocumentEditor = forwardRef<DocumentEditorRef, DocumentEditorProps>(
 
         } catch (error: unknown) {
             console.error(`Error during ${action}:`, error);
-            setAIError(error instanceof Error ? error.message : 'An unknown error occurred.');
             setAiPopupContent(null);
-        } finally {
-            setIsAILoading(false);
         }
     }, []);
 
@@ -405,11 +398,11 @@ const DocumentEditor = forwardRef<DocumentEditorRef, DocumentEditorProps>(
         {showAIPopup && (
           <InlineAIPopup
             content={aiPopupContent}
-            originalSelectionRange={currentSelectionRange ?? undefined} // Pass range
-            onClose={closeAIPopup} // Use the new closeAIPopup function
-            onReplace={handleReplaceSelection} // Pass replace handler
-            onCopy={handleCopyContent} // Pass copy handler
-            // TODO: Implement actual positioning near selection
+            isLoading={false}
+            originalSelectionRange={currentSelectionRange ?? undefined}
+            onClose={closeAIPopup}
+            onReplace={handleReplaceSelection}
+            onCopy={handleCopyContent}
           />
         )}
         {saveError && (

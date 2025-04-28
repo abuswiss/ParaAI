@@ -31,6 +31,40 @@ export interface Conversation {
 }
 
 /**
+ * Represents a source snippet, e.g., from a web search.
+ */
+export interface Snippet {
+  title: string;
+  url: string;
+  content: string;
+  // Add other relevant fields if needed
+}
+
+/**
+ * Represents a source, potentially aliasing Snippet if structure is identical.
+ */
+export type Source = Snippet; // Alias for now, can be made distinct later
+
+/**
+ * Placeholder interface for the task object in handleAgentCompareStream.
+ * TODO: Define the actual structure based on usage.
+ */
+export interface ComparisonTask {
+  // Define expected properties of the comparison task object
+  [key: string]: unknown; // Allow any properties for now
+}
+
+/**
+ * Represents the expected structure of the response from the /api/research endpoint.
+ */
+interface ResearchApiResponse {
+  success: boolean;
+  answer?: string;
+  snippets?: Snippet[]; // Use the existing Snippet interface
+  error?: string;
+}
+
+/**
  * Create a new conversation
  */
 export const createConversation = async (
@@ -397,7 +431,7 @@ export const addDocumentToConversation = async (
 export const handleResearchQueryStream = async (
   researchQuery: string,
   onChunk: (chunk: string) => void
-): Promise<{ success: boolean; error: Error | null; answer?: string; snippets?: Array<any> }> => {
+): Promise<{ success: boolean; error: Error | null; answer?: string; snippets?: Snippet[] }> => {
   try {
     // Call the backend API instead of CourtListener directly
     const response = await fetch('/api/research', {
@@ -408,14 +442,20 @@ export const handleResearchQueryStream = async (
     if (!response.ok) {
       throw new Error(`Backend /api/research error: ${response.status} ${response.statusText}`);
     }
-    const data = await response.json();
+    const data: ResearchApiResponse = await response.json();
+
+    // Check for backend error reported in the response body
+    if (!data.success && data.error) {
+        throw new Error(`Backend /api/research error: ${data.error}`);
+    }
+
     // If OpenAI answer is present, stream it; otherwise, stream snippets as fallback
     if (data.answer) {
       onChunk(data.answer);
       return { success: true, error: null, answer: data.answer, snippets: data.snippets };
     } else if (data.snippets) {
       // Fallback: stream snippets as a single chunk
-      const snippetText = data.snippets.map((s: any) => s.text || '').join('\n---\n');
+      const snippetText = data.snippets.map((s: Snippet) => s.content || '').join('\n---\n');
       onChunk(snippetText);
       return { success: true, error: null, snippets: data.snippets };
     } else {
@@ -629,7 +669,7 @@ export const handleExplainTermStream = async (
  * Streams the response via onChunk.
  */
 export const handleAgentCompareStream = async (
-  task: any, // Should be typed more strictly in the future
+  task: ComparisonTask, // Use the defined interface
   onChunk: (chunk: string) => void,
   documentContexts?: string | string[],
   analysisContext?: string
@@ -755,7 +795,7 @@ export const handlePerplexityAgent = async (
   conversationId: string, // Keep conversationId if needed for context/history
   params: { query: string },
   onChunk: (chunk: string) => void
-): Promise<{ success: boolean; error: Error | null; sources?: any[] }> => {
+): Promise<{ success: boolean; error: Error | null; sources?: Source[] }> => {
   console.log(`Invoking Perplexity agent for conversation ${conversationId} with query: ${params.query}`);
   
   try {

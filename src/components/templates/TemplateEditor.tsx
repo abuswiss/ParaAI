@@ -11,6 +11,7 @@ import { Textarea } from '@/components/ui/Textarea'; // Assuming Textarea exists
 import { Checkbox } from '@/components/ui/Checkbox'; // Assuming Checkbox exists
 import { Spinner } from '@/components/ui/Spinner';
 import { Icons } from '@/components/ui/Icons';
+import { PostgrestError } from '@supabase/supabase-js';
 
 // Define categories - should match the service/DB definition
 const TEMPLATE_CATEGORIES: DocumentTemplate['category'][] = [
@@ -122,12 +123,10 @@ const TemplateEditor: React.FC<TemplateEditorProps> = ({ templateId, onSaveSucce
     };
 
     try {
-      let result;
+      let result: { data: DocumentTemplate | null; error: PostgrestError | Error | null };
       if (templateId) {
-        // Update existing template - Assuming updateTemplate exists!
-         console.warn("Template update function not implemented yet.");
-        // result = await templateService.updateTemplate(templateId, templateData);
-         throw new Error("Update not implemented yet."); // Placeholder
+        // Update existing template
+        result = await templateService.updateTemplate(templateId, templateData);
       } else {
         // Create new template
         result = await templateService.createTemplate(templateData);
@@ -227,8 +226,20 @@ const TemplateEditor: React.FC<TemplateEditorProps> = ({ templateId, onSaveSucce
         </div>
 
         <div>
-          <Label>Template Body (use {'{{variable_name}}'} for placeholders)</Label>
-          {editor && <EditorContent editor={editor} />}
+          <div className="flex justify-between items-center mb-1">
+            <Label>Template Body</Label>
+            <Button 
+              variant="outline"
+              size="sm"
+              onClick={() => editor?.chain().focus().insertContent('{{}}').run()} 
+              disabled={!editor || isSaving}
+              title="Insert Placeholder Variable"
+            >
+              <Icons.PlusCircle className="h-4 w-4 mr-1" />
+              Insert Variable
+            </Button>
+          </div>
+          {editor && <EditorContent editor={editor} className="template-editor-content" />}
         </div>
       </div>
 

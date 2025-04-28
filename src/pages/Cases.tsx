@@ -2,20 +2,37 @@ import React, { useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { getUserCases, Case, deleteCase } from '../services/caseService';
+import { createBlankDraft } from '../services/templateService';
 import CaseForm from '../components/cases/CaseForm';
 import { Button } from '../components/ui/Button';
-import { Icons } from '../components/ui/Icons';
+import { Icons, FolderIcon, FileTextIcon } from '../components/ui/Icons';
 import { Spinner } from '../components/ui/Spinner';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "../components/ui/DropdownMenu";
+import { useAtomValue, useSetAtom } from 'jotai';
+import { activeCaseIdAtom, activeEditorItemAtom } from '../atoms/appAtoms';
+import UploadModal from '../components/documents/UploadModal';
+import NewAIDraftModal from '../components/documents/NewAIDraftModal';
 
 const Cases: React.FC = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [cases, setCases] = useState<Case[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingAction, setLoadingAction] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isCreateFormOpen, setIsCreateFormOpen] = useState(false);
   const [isEditFormOpen, setIsEditFormOpen] = useState(false);
   const [selectedCaseForEdit, setSelectedCaseForEdit] = useState<Case | null>(null);
+  const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
+  const [isNewAIDraftModalOpen, setIsNewAIDraftModalOpen] = useState(false);
+
+  const activeCaseId = useAtomValue(activeCaseIdAtom);
+  const setActiveEditorItem = useSetAtom(activeEditorItemAtom);
 
   const fetchCases = async () => {
     if (!user) {
@@ -74,21 +91,50 @@ const Cases: React.FC = () => {
 
   const handleDeleteClick = async (caseItem: Case) => {
     if (window.confirm(`Are you sure you want to delete the case "${caseItem.name}"? This action cannot be undone.`)) {
+      setLoadingAction(`delete-${caseItem.id}`);
       try {
-        setError(null); // Clear previous errors
+        setError(null);
         const { success, error: deleteError } = await deleteCase(caseItem.id);
         if (!success || deleteError) {
           throw deleteError || new Error('Failed to delete case.');
         }
-        fetchCases(); // Refresh list on success
+        fetchCases();
       } catch (err) {
         console.error('Error deleting case:', err);
         setError(err instanceof Error ? err.message : 'Could not delete case.');
+      } finally {
+        setLoadingAction(null);
       }
     }
   };
 
-  const handleFormClose = (refresh: boolean) => {
+  const handleDraftCreated = (newDraftId: string) => {
+    setActiveEditorItem({ id: newDraftId, type: 'draft' });
+    if (activeCaseId) {
+      navigate(`/cases/${activeCaseId}`); 
+    } else {
+      navigate('/dashboard');
+    }
+  };
+
+  const handleNewBlankDocument = async () => {
+    setLoadingAction('new-blank');
+    setError(null);
+    try {
+      const { data: newDraft, error: createError } = await createBlankDraft(activeCaseId);
+      if (createError || !newDraft) {
+        throw createError || new Error('Failed to create blank draft.');
+      }
+      handleDraftCreated(newDraft.id);
+    } catch (err) {
+       console.error('Error creating blank document:', err);
+       setError(err instanceof Error ? err.message : 'Could not create blank document.');
+    } finally {
+        setLoadingAction(null);
+    }
+  };
+
+  const handleFormClose = (refresh?: boolean) => {
     setIsCreateFormOpen(false);
     setIsEditFormOpen(false);
     setSelectedCaseForEdit(null);
@@ -97,14 +143,50 @@ const Cases: React.FC = () => {
     }
   };
 
+  const handleUploadModalClose = (refresh?: boolean) => {
+    setIsUploadModalOpen(false);
+    setIsNewAIDraftModalOpen(false);
+    if (refresh) {
+      console.log("Upload complete, potential refresh needed (not implemented)");
+    }
+  };
+
+  const handleAIDraftModalClose = () => {
+    setIsNewAIDraftModalOpen(false);
+  };
+
   return (
     <div className="p-6">
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-2xl font-semibold text-text-primary">Manage Cases</h1>
-        <Button onClick={() => setIsCreateFormOpen(true)}>
-          <Icons.Plus className="mr-2 h-4 w-4" />
-          New Case
-        </Button>
+        
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button disabled={!!loadingAction}>
+              {loadingAction === 'new-blank' || loadingAction === 'new-ai' ? <Spinner size="sm" className="mr-2"/> : <Icons.Plus className="mr-2 h-4 w-4" />}
+              Create
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={() => setIsCreateFormOpen(true)} disabled={!!loadingAction}>
+              <FolderIcon className="mr-2 h-4 w-4" />
+              <span>New Case</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={handleNewBlankDocument} disabled={!!loadingAction}>
+              <FileTextIcon className="mr-2 h-4 w-4" />
+              <span>New Blank Document</span>
+              {loadingAction === 'new-blank' && <Spinner size="xs" className="ml-auto"/>}
+            </DropdownMenuItem>
+             <DropdownMenuItem onClick={() => setIsUploadModalOpen(true)} disabled={!!loadingAction}>
+               <Icons.Upload className="mr-2 h-4 w-4" />
+              <span>Upload Document(s)</span>
+            </DropdownMenuItem>
+             <DropdownMenuItem onClick={() => setIsNewAIDraftModalOpen(true)} disabled={!!loadingAction}>
+               <Icons.Sparkles className="mr-2 h-4 w-4" />
+              <span>New AI Draft</span>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
       
       {loading ? (
@@ -150,13 +232,19 @@ const Cases: React.FC = () => {
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-text-secondary">{caseItem.case_number || '-'}</td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-text-secondary capitalize">{caseItem.status}</td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-2">
-                    <Button variant="ghost" size="sm" onClick={() => handleEditClick(caseItem)}>
+                    <Button variant="ghost" size="sm" onClick={() => handleEditClick(caseItem)} disabled={!!loadingAction}>
                       <Icons.Edit className="h-4 w-4" /> 
                       <span className="sr-only">Edit</span>
                     </Button>
-                    <Button variant="ghost" size="sm" className="text-red-500 hover:text-red-700 hover:bg-red-100/10" onClick={() => handleDeleteClick(caseItem)}>
-                      <Icons.Trash className="h-4 w-4" /> 
-                      <span className="sr-only">Delete</span>
+                    <Button 
+                        variant="ghost" 
+                        size="sm" 
+                        className="text-red-500 hover:text-red-700 hover:bg-red-100/10 disabled:opacity-50" 
+                        onClick={() => handleDeleteClick(caseItem)} 
+                        disabled={loadingAction === `delete-${caseItem.id}` || !!loadingAction && loadingAction !== `delete-${caseItem.id}`}
+                    >
+                        {loadingAction === `delete-${caseItem.id}` ? <Spinner size="sm"/> : <Icons.Trash className="h-4 w-4" />}
+                        <span className="sr-only">Delete</span>
                     </Button>
                   </td>
                 </tr>
@@ -170,7 +258,7 @@ const Cases: React.FC = () => {
       {isCreateFormOpen && (
         <CaseForm
           isOpen={isCreateFormOpen}
-          onClose={() => handleFormClose(true)}
+          onClose={handleFormClose}
         />
       )}
 
@@ -178,10 +266,21 @@ const Cases: React.FC = () => {
       {isEditFormOpen && selectedCaseForEdit && (
         <CaseForm
           isOpen={isEditFormOpen}
-          onClose={() => handleFormClose(true)}
+          onClose={handleFormClose}
           caseData={selectedCaseForEdit}
         />
       )}
+
+      <UploadModal 
+        isOpen={isUploadModalOpen} 
+        onClose={handleUploadModalClose} 
+      />
+
+      <NewAIDraftModal 
+        isOpen={isNewAIDraftModalOpen} 
+        onClose={handleAIDraftModalClose}
+        onSuccess={handleDraftCreated}
+      />
     </div>
   );
 };

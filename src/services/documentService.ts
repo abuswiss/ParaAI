@@ -1,5 +1,6 @@
 import { supabase } from '../lib/supabaseClient';
 import { v4 as uuidv4 } from 'uuid';
+import { PostgrestError } from '@supabase/supabase-js';
 
 /**
  * Interface for document metadata
@@ -667,5 +668,58 @@ export const updateDocument = async (
     const message = error instanceof Error ? error.message : 'Unknown error updating document';
     console.error('Error updating document:', message);
     return { success: false, error: error instanceof Error ? error : new Error(message) };
+  }
+};
+
+/**
+ * Uploads a document, creates the database record, and triggers background processing.
+ */
+export const uploadAndProcessDocument = async (
+  file: File,
+  caseId: string | null,
+  // onProgress is not currently supported by the underlying uploadDocument
+  // onProgress?: (progress: number) => void 
+): Promise<{ data: Pick<DocumentMetadata, 'id' | 'filename'> | null; error: Error | null }> => {
+  try {
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError) throw new Error(`Authentication Error: ${authError.message}`);
+    if (!user) throw new Error('User not authenticated');
+
+    console.log(`Starting uploadAndProcess for ${file.name}, caseId: ${caseId}`);
+
+    // Step 1: Call existing uploadDocument which handles storage and initial DB insert
+    const { id: documentId, url } = await uploadDocument(file, user.id, caseId || undefined); 
+    // Pass undefined instead of null if caseId is null, matching uploadDocument's optional param
+
+    console.log(`Document uploaded and record created with ID: ${documentId}`);
+
+    // Step 2: Trigger background processing (DO NOT AWAIT)
+    // We want to return quickly to the UI while processing happens.
+    // Error handling for processDocument should happen internally 
+    // (e.g., updating the document status to 'failed').
+    processDocument(documentId).catch(error => {
+      console.error(`Background processing failed for document ${documentId}:`, error);
+      // Optionally, update the document status to failed here if processDocument doesn't handle it robustly
+      // supabase.from('documents').update({ processing_status: 'failed' }).eq('id', documentId);
+    });
+
+    console.log(`Background processing triggered for document ${documentId}`);
+
+    // Return success with basic info immediately
+    // The document status is 'pending' in the DB at this point.
+    return {
+      data: { 
+          id: documentId, 
+          filename: file.name 
+      },
+      error: null,
+    };
+
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error during document upload and processing initiation';
+    console.error('Error in uploadAndProcessDocument:', message);
+    // Ensure the caught error is typed correctly
+    const typedError = error instanceof PostgrestError ? error : error instanceof Error ? error : new Error(message);
+    return { data: null, error: typedError };
   }
 };

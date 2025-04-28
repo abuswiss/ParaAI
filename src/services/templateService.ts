@@ -1,6 +1,7 @@
-import { supabase } from '../lib/supabaseClient';
+import { supabase } from '../lib/supabaseClient'; // Import supabase
 import { openai } from '../lib/openaiClient';
 import { v4 as uuidv4 } from 'uuid';
+import { PostgrestError } from '@supabase/supabase-js';
 
 /**
  * Interface for document template
@@ -18,7 +19,7 @@ export interface DocumentTemplate {
   isPublic: boolean;
   isFavorite?: boolean; // Optional flag for user favorites
   useCount?: number; // Number of times template has been used
-  lastUsed?: string; // When the template was last used
+  lastUsed?: string | null; // When the template was last used (allow null)
 }
 
 /**
@@ -27,12 +28,50 @@ export interface DocumentTemplate {
 export interface DocumentDraft {
   id: string;
   name: string;
-  templateId?: string;
+  templateId?: string; // undefined if not from template
   content: string;
-  caseId?: string;
+  caseId?: string; // undefined if not associated
   createdAt: string;
   updatedAt: string;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>; // Use unknown instead of any
+}
+
+// Add interface for the raw data returned by Supabase for document_drafts
+interface RawDocumentDraft {
+    id: string;
+    name: string;
+    template_id: string | null;
+    content: string;
+    case_id: string | null;
+    created_at: string;
+    updated_at: string;
+    user_id: string;
+    metadata: Record<string, unknown> | null; // Match type and allow null
+}
+
+// Interface for raw template data from DB
+interface RawDocumentTemplate {
+    id: string;
+    name: string;
+    description: string | null;
+    category: 'contract' | 'letter' | 'pleading' | 'memorandum' | 'agreement' | 'other';
+    content: string;
+    variables: string[] | null;
+    tags: string[] | null;
+    created_at: string;
+    updated_at: string;
+    is_public: boolean;
+    is_favorite?: boolean | null; // From potential join
+    use_count?: number | null;    // From potential join
+    last_used?: string | null;     // From potential join
+    creator_id: string;
+}
+
+// Interface for template usage history data
+interface TemplateUsageHistory {
+    user_id: string; // Added user_id based on usage in recordTemplateUsage
+    template_id: string;
+    used_at: string;
 }
 
 /**
@@ -40,12 +79,15 @@ export interface DocumentDraft {
  */
 export const getAvailableTemplates = async (
   category?: string
-): Promise<{ data: DocumentTemplate[] | null; error: Error | null }> => {
+): Promise<{ data: DocumentTemplate[] | null; error: PostgrestError | Error | null }> => {
   try {
+    const user = (await supabase.auth.getUser()).data.user;
+    if (!user) throw new Error('User not authenticated');
+
     let query = supabase
       .from('document_templates')
-      .select('*')
-      .or(`is_public.eq.true,creator_id.eq.${(await supabase.auth.getUser()).data.user?.id}`);
+      .select<string, RawDocumentTemplate>('*') // Specify Raw type
+      .or(`is_public.eq.true,creator_id.eq.${user.id}`);
 
     if (category) {
       query = query.eq('category', category);
@@ -54,7 +96,12 @@ export const getAvailableTemplates = async (
     const { data, error } = await query;
 
     if (error) {
-      throw error;
+      console.error('Error fetching templates:', error);
+      return { data: null, error }; // Return PostgrestError
+    }
+
+    if (!data) {
+        return { data: [], error: null }; // Handle no data case
     }
 
     // Transform the data to match our interface
@@ -64,28 +111,29 @@ export const getAvailableTemplates = async (
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Unknown error getting templates';
     console.error('Error getting templates:', message);
-    return { data: null, error: error instanceof Error ? error : new Error(message) };
+    const typedError = error instanceof PostgrestError ? error : error instanceof Error ? error : new Error(message);
+    return { data: null, error: typedError };
   }
 };
 
 /**
  * Transform database template object to our interface
  */
-const transformTemplateData = (data: any): DocumentTemplate => {
+const transformTemplateData = (data: RawDocumentTemplate): DocumentTemplate => {
   return {
     id: data.id,
     name: data.name,
-    description: data.description,
+    description: data.description || '', // Provide default
     category: data.category,
     content: data.content,
     variables: data.variables || [],
-    tags: data.tags || [], // Added for basic filtering
+    tags: data.tags || [], 
     createdAt: data.created_at,
     updatedAt: data.updated_at,
     isPublic: data.is_public,
     isFavorite: data.is_favorite || false,
     useCount: data.use_count || 0,
-    lastUsed: data.last_used || null
+    lastUsed: data.last_used || null // Keep null if db returns null
   };
 };
 
@@ -94,23 +142,28 @@ const transformTemplateData = (data: any): DocumentTemplate => {
  */
 export const getTemplateById = async (
   templateId: string
-): Promise<{ data: DocumentTemplate | null; error: Error | null }> => {
+): Promise<{ data: DocumentTemplate | null; error: PostgrestError | Error | null }> => {
   try {
     const { data, error } = await supabase
       .from('document_templates')
-      .select('*')
+      .select<string, RawDocumentTemplate>('*') // Specify Raw type
       .eq('id', templateId)
       .single();
 
     if (error) {
-      throw error;
+        console.error(`Error fetching template ${templateId}:`, error);
+        return { data: null, error }; // Return PostgrestError
+    }
+    if (!data) {
+        return { data: null, error: new Error('Template not found') };
     }
 
     return { data: transformTemplateData(data), error: null };
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Unknown error getting template by ID';
     console.error('Error getting template:', message);
-    return { data: null, error: error instanceof Error ? error : new Error(message) };
+    const typedError = error instanceof PostgrestError ? error : error instanceof Error ? error : new Error(message);
+    return { data: null, error: typedError };
   }
 };
 
@@ -119,10 +172,9 @@ export const getTemplateById = async (
  */
 export const createTemplate = async (
   templateData: Omit<DocumentTemplate, 'id' | 'createdAt' | 'updatedAt'>
-): Promise<{ data: DocumentTemplate | null; error: Error | null }> => {
+): Promise<{ data: DocumentTemplate | null; error: PostgrestError | Error | null }> => {
   try {
     const user = (await supabase.auth.getUser()).data.user;
-    
     if (!user) {
       throw new Error('User not authenticated');
     }
@@ -130,46 +182,43 @@ export const createTemplate = async (
     const templateId = uuidv4();
     const now = new Date().toISOString();
 
-    const { data, error } = await supabase
-      .from('document_templates')
-      .insert({
+    // Prepare data for insertion matching RawDocumentTemplate structure where possible
+    const dataToInsert = {
         id: templateId,
         name: templateData.name,
         description: templateData.description,
         category: templateData.category,
         content: templateData.content,
         variables: templateData.variables || [],
+        tags: templateData.tags || [],
         created_at: now,
         updated_at: now,
         is_public: templateData.isPublic,
         creator_id: user.id
-      })
-      .select()
+      };
+
+    const { data, error } = await supabase
+      .from('document_templates')
+      .insert(dataToInsert)
+      .select<string, RawDocumentTemplate>('*') // Specify Raw type
       .single();
 
     if (error) {
-      throw error;
+      console.error('Error creating template:', error);
+      return { data: null, error }; // Return PostgrestError
+    }
+    if (!data) {
+        throw new Error("Failed to retrieve created template data.");
     }
 
-    const template: DocumentTemplate = {
-      id: data.id,
-      name: data.name,
-      description: data.description,
-      category: data.category,
-      content: data.content,
-      variables: data.variables || [],
-      tags: data.tags || [], // Added for basic filtering
-      createdAt: data.created_at,
-      updatedAt: data.updated_at,
-      isPublic: data.is_public,
-      isFavorite: data.is_favorite || false
-    };
+    const template: DocumentTemplate = transformTemplateData(data);
 
     return { data: template, error: null };
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Unknown error creating template';
     console.error('Error creating template:', message);
-    return { data: null, error: error instanceof Error ? error : new Error(message) };
+    const typedError = error instanceof PostgrestError ? error : error instanceof Error ? error : new Error(message);
+    return { data: null, error: typedError };
   }
 };
 
@@ -178,10 +227,9 @@ export const createTemplate = async (
  */
 export const getRecentlyUsedTemplates = async (
   limit = 5
-): Promise<{ data: DocumentTemplate[] | null; error: Error | null }> => {
+): Promise<{ data: DocumentTemplate[] | null; error: PostgrestError | Error | null }> => {
   try {
     const user = (await supabase.auth.getUser()).data.user;
-    
     if (!user) {
       throw new Error('User not authenticated');
     }
@@ -189,42 +237,48 @@ export const getRecentlyUsedTemplates = async (
     // Get recently used templates from usage history
     const { data: history, error: historyError } = await supabase
       .from('template_usage_history')
-      .select('template_id, used_at')
+      .select<string, TemplateUsageHistory>('template_id, used_at') // Specify type
       .eq('user_id', user.id)
       .order('used_at', { ascending: false })
       .limit(limit);
     
-    if (historyError) throw historyError;
+    if (historyError) {
+        console.error('Error fetching template usage history:', historyError);
+        return { data: null, error: historyError }; // Return PostgrestError
+    }
     
     if (!history || history.length === 0) return { data: [], error: null };
     
     // Get the actual templates
-    const templateIds = history.map(h => h.template_id);
+    const templateIds = history.map((h: TemplateUsageHistory) => h.template_id); // Add type for h
     const { data, error } = await supabase
       .from('document_templates')
-      .select('*')
+      .select<string, RawDocumentTemplate>('*') // Specify Raw type
       .in('id', templateIds);
+      
+    if (error) {
+        console.error('Error fetching recent templates:', error);
+        return { data: null, error }; // Return PostgrestError
+    }
+    if (!data) {
+        return { data: [], error: null }; // Handle no data
+    }
     
-    if (error) throw error;
+    const templates: DocumentTemplate[] = data.map(transformTemplateData);
     
-    // Sort templates in the same order as the history
-    const templatesMap = data.reduce((acc, template) => {
-      acc[template.id] = template;
-      return acc;
-    }, {} as Record<string, any>);
-    
-    const sortedTemplates = templateIds
-      .map(id => templatesMap[id])
-      .filter(Boolean);
-    
-    return { 
-      data: sortedTemplates.map(transformTemplateData),
-      error: null 
-    };
+    // Sort templates based on recent usage history order
+    templates.sort((a, b) => {
+        const indexA = history.findIndex((h: TemplateUsageHistory) => h.template_id === a.id); // Add type for h
+        const indexB = history.findIndex((h: TemplateUsageHistory) => h.template_id === b.id); // Add type for h
+        return indexA - indexB;
+    });
+
+    return { data: templates, error: null };
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : 'Unknown error getting recently used templates';
-    console.error('Error getting recently used templates:', message);
-    return { data: null, error: error instanceof Error ? error : new Error(message) };
+    const message = error instanceof Error ? error.message : 'Unknown error getting recent templates';
+    console.error('Error getting recent templates:', message);
+    const typedError = error instanceof PostgrestError ? error : error instanceof Error ? error : new Error(message);
+    return { data: null, error: typedError };
   }
 };
 
@@ -234,46 +288,34 @@ export const getRecentlyUsedTemplates = async (
 export const recordTemplateUsage = async (
   templateId: string,
   caseId?: string
-): Promise<{ success: boolean; error: Error | null }> => {
+): Promise<{ success: boolean; error: PostgrestError | Error | null }> => {
   try {
     const user = (await supabase.auth.getUser()).data.user;
-    
-    if (!user) {
-      throw new Error('User not authenticated');
-    }
+    if (!user) throw new Error('User not authenticated');
 
-    const usageId = uuidv4();
-    const now = new Date().toISOString();
-
-    // Record usage in history table
-    const { error: historyError } = await supabase
+    const { error } = await supabase
       .from('template_usage_history')
       .insert({
-        id: usageId,
         user_id: user.id,
         template_id: templateId,
-        used_at: now,
-        case_id: caseId
+        case_id: caseId || null,
+        used_at: new Date().toISOString()
       });
 
-    if (historyError) throw historyError;
+    if (error) {
+      console.error(`Error recording usage for template ${templateId}:`, error);
+      return { success: false, error };
+    }
 
-    // Update template usage count and last used date
-    const { error: templateError } = await supabase
-      .from('document_templates')
-      .update({
-        use_count: supabase.rpc('increment', { row_id: templateId, table: 'document_templates', column: 'use_count' }),
-        last_used: now
-      })
-      .eq('id', templateId);
-
-    if (templateError) throw templateError;
+    // Also increment use_count on the template itself (best effort)
+    await supabase.rpc('increment_template_use_count', { template_id_param: templateId });
 
     return { success: true, error: null };
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Unknown error recording template usage';
     console.error('Error recording template usage:', message);
-    return { success: false, error: error instanceof Error ? error : new Error(message) };
+    const typedError = error instanceof PostgrestError ? error : error instanceof Error ? error : new Error(message);
+    return { success: false, error: typedError };
   }
 };
 
@@ -284,27 +326,12 @@ export const importTemplate = async (
   templateJson: string
 ): Promise<{ data: DocumentTemplate | null; error: Error | null }> => {
   try {
-    const parsedData = JSON.parse(templateJson);
-    
-    // Validate the template data
-    const requiredFields = ['name', 'description', 'category', 'content'];
-    for (const field of requiredFields) {
-      if (!parsedData[field]) {
-        throw new Error(`Missing required field: ${field}`);
-      }
+    const templateData = JSON.parse(templateJson) as Omit<DocumentTemplate, 'id' | 'createdAt' | 'updatedAt'>;
+    // Basic validation could be added here
+    if (!templateData.name || !templateData.content || !templateData.category) {
+        throw new Error("Invalid template JSON structure.");
     }
-
-    // Create a new template from the imported data
-    const templateData: Omit<DocumentTemplate, 'id' | 'createdAt' | 'updatedAt'> = {
-      name: parsedData.name,
-      description: parsedData.description,
-      category: parsedData.category,
-      content: parsedData.content,
-      variables: parsedData.variables || [],
-      tags: parsedData.tags || [],
-      isPublic: false // Default to private for imported templates
-    };
-
+    // Call createTemplate to handle insertion and user association
     return await createTemplate(templateData);
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Unknown error importing template';
@@ -318,28 +345,27 @@ export const importTemplate = async (
  */
 export const exportTemplate = async (
   templateId: string
-): Promise<{ data: string | null; error: Error | null }> => {
+): Promise<{ data: string | null; error: PostgrestError | Error | null }> => {
   try {
     const { data, error } = await getTemplateById(templateId);
-    
     if (error) throw error;
     if (!data) throw new Error('Template not found');
-    
-    // Create a clean version without internal fields
-    const exportData = {
-      name: data.name,
-      description: data.description,
-      category: data.category,
-      content: data.content,
-      variables: data.variables,
-      tags: data.tags
-    };
-    
+
+    // Omit fields not needed for export/import
+    const exportData: Partial<DocumentTemplate> = { ...data };
+    delete exportData.id;
+    delete exportData.createdAt;
+    delete exportData.updatedAt;
+    delete exportData.isFavorite;
+    delete exportData.useCount;
+    delete exportData.lastUsed;
+
     return { data: JSON.stringify(exportData, null, 2), error: null };
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Unknown error exporting template';
     console.error('Error exporting template:', message);
-    return { data: null, error: error instanceof Error ? error : new Error(message) };
+    const typedError = error instanceof PostgrestError ? error : error instanceof Error ? error : new Error(message);
+    return { data: null, error: typedError };
   }
 };
 
@@ -349,86 +375,113 @@ export const exportTemplate = async (
 export const setTemplateFavorite = async (
   templateId: string,
   isFavorite: boolean
-): Promise<{ success: boolean; error: Error | null }> => {
+): Promise<{ success: boolean; error: PostgrestError | Error | null }> => {
   try {
     const user = (await supabase.auth.getUser()).data.user;
-    
-    if (!user) {
-      throw new Error('User not authenticated');
-    }
+    if (!user) throw new Error('User not authenticated');
 
     if (isFavorite) {
-      // Add to favorites
+      // Use upsert to add to favorites - ignores if already exists
       const { error } = await supabase
-        .from('user_template_favorites')
-        .upsert({
-          user_id: user.id,
-          template_id: templateId,
-          created_at: new Date().toISOString()
-        });
-
-      if (error) throw error;
+        .from('user_favorite_templates')
+        // Ensure the object matches the table structure
+        .upsert({ user_id: user.id, template_id: templateId }); 
+      if (error) {
+        console.error("Error upserting favorite:", error);
+        return { success: false, error };
+      } 
     } else {
       // Remove from favorites
       const { error } = await supabase
-        .from('user_template_favorites')
+        .from('user_favorite_templates')
         .delete()
-        .eq('user_id', user.id)
-        .eq('template_id', templateId);
-
-      if (error) throw error;
+        .match({ user_id: user.id, template_id: templateId });
+      if (error) {
+          // Don't treat "No rows found" as an error for delete
+          if (error.code === 'PGRST116') { 
+            console.warn("Tried to unfavorite a template that wasn't favorited.");
+          } else {
+            console.error("Error deleting favorite:", error);
+            return { success: false, error };
+          }
+      }
     }
-
     return { success: true, error: null };
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : 'Unknown error setting template favorite status';
+    const message = error instanceof Error ? error.message : 'Unknown error setting favorite status';
     console.error('Error setting favorite status:', message);
-    return { success: false, error: error instanceof Error ? error : new Error(message) };
+    const typedError = error instanceof PostgrestError ? error : error instanceof Error ? error : new Error(message);
+    return { success: false, error: typedError };
   }
 };
 
-/**
- * Get variable values for a case
- */
+interface CaseVariable {
+    variable_name: string;
+    variable_value: string;
+}
+
 export const getCaseVariables = async (
   caseId: string
-): Promise<{ data: Record<string, string> | null; error: Error | null }> => {
+): Promise<{ data: Record<string, string> | null; error: PostgrestError | Error | null }> => {
   try {
     const { data, error } = await supabase
       .from('template_case_variables')
-      .select('variable_name, variable_value')
+      .select<string, CaseVariable>('variable_name, variable_value') // Specify type
       .eq('case_id', caseId);
     
-    if (error) throw error;
+    if (error) {
+        console.error(`Error fetching case variables for ${caseId}:`, error);
+        return { data: null, error }; // Return PostgrestError
+    }
+    if (!data) {
+        return { data: {}, error: null }; // Return empty object if no vars
+    }
     
-    const variables = data.reduce((acc, v) => {
+    const variables = data.reduce((acc: Record<string, string>, v: CaseVariable) => { // Add types for acc and v
       acc[v.variable_name] = v.variable_value;
       return acc;
-    }, {} as Record<string, string>);
+    }, {}); // Remove unnecessary type assertion
     
     return { data: variables, error: null };
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Unknown error getting case variables';
     console.error('Error getting case variables:', message);
-    return { data: null, error: error instanceof Error ? error : new Error(message) };
+    const typedError = error instanceof PostgrestError ? error : error instanceof Error ? error : new Error(message);
+    return { data: null, error: typedError };
   }
 };
 
-/**
- * Get standard case fields for variable replacement
- */
+interface RawCaseDetails {
+    id: string;
+    name: string | null;
+    description: string | null;
+    case_number: string | null;
+    case_type: string | null;
+    status: 'active' | 'archived' | 'closed' | null;
+    created_at: string;
+    updated_at: string;
+    court: string | null;
+    jurisdiction: string | null;
+    client_name: string | null;
+    opposing_party: string | null;
+    attorney_name: string | null;
+}
+
 export const getCaseFields = async (
   caseId: string
-): Promise<{ data: Record<string, string> | null; error: Error | null }> => {
+): Promise<{ data: Record<string, string> | null; error: PostgrestError | Error | null }> => {
   try {
     // Fetch case data from the cases table
     const { data: caseData, error: caseError } = await supabase
       .from('cases')
-      .select('*')
+      .select<string, RawCaseDetails>('*') // Specify Raw type
       .eq('id', caseId)
       .single();
     
-    if (caseError) throw caseError;
+    if (caseError) {
+        console.error(`Error fetching case details for ${caseId}:`, caseError);
+        return { data: null, error: caseError }; // Return PostgrestError
+    }
     if (!caseData) throw new Error('Case not found');
     
     // Format date fields for better readability
@@ -452,7 +505,10 @@ export const getCaseFields = async (
     };
     
     // Also fetch any custom variables stored for this case
-    const { data: customVars } = await getCaseVariables(caseId);
+    const { data: customVars, error: varsError } = await getCaseVariables(caseId);
+    if (varsError) {
+      console.warn(`Could not fetch custom variables for case ${caseId}:`, varsError);
+    }
     
     // Combine standard fields with custom variables (custom vars take precedence)
     const combinedFields = {
@@ -464,7 +520,8 @@ export const getCaseFields = async (
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Unknown error getting case fields';
     console.error('Error getting case fields:', message);
-    return { data: null, error: error instanceof Error ? error : new Error(message) };
+    const typedError = error instanceof PostgrestError ? error : error instanceof Error ? error : new Error(message);
+    return { data: null, error: typedError };
   }
 };
 
@@ -571,7 +628,7 @@ export const generateDraftWithAI = async (
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt }
       ],
-      temperature: 0.1, // Lower temperature for more formal/structured output
+      temperature: 0.1,
       max_tokens: 2000,
     });
 
@@ -613,15 +670,15 @@ export const getUserDrafts = async (
     }
 
     // Transform the data to match our interface
-    const drafts: DocumentDraft[] = data.map((item) => ({
+    const drafts: DocumentDraft[] = data.map((item: RawDocumentDraft) => ({ // Add type for item
       id: item.id,
       name: item.name,
-      templateId: item.template_id,
+      templateId: item.template_id ?? undefined,
       content: item.content,
-      caseId: item.case_id,
+      caseId: item.case_id ?? undefined,
       createdAt: item.created_at,
       updatedAt: item.updated_at,
-      metadata: item.metadata
+      metadata: item.metadata ?? undefined
     }));
 
     return { data: drafts, error: null };
@@ -673,32 +730,34 @@ export const getDraftById = async (
  */
 export const updateDraft = async (
   draftId: string,
-  updates: Partial<Omit<DocumentDraft, 'id' | 'createdAt' | 'updatedAt'>>
-): Promise<{ success: boolean; error: Error | null }> => {
+  updates: Partial<Omit<DocumentDraft, 'id' | 'createdAt' | 'updatedAt' | 'templateId'>> 
+): Promise<{ success: boolean; error: PostgrestError | Error | null }> => {
   try {
-    const updatedData: Record<string, any> = {
-      updated_at: new Date().toISOString()
+    const dbUpdates: Partial<RawDocumentDraft> = {
+        name: updates.name,
+        content: updates.content,
+        case_id: updates.caseId,
+        metadata: updates.metadata,
+        updated_at: new Date().toISOString(),
     };
-
-    if (updates.name) updatedData.name = updates.name;
-    if (updates.content) updatedData.content = updates.content;
-    if (updates.caseId) updatedData.case_id = updates.caseId;
-    if (updates.metadata) updatedData.metadata = updates.metadata;
+    Object.keys(dbUpdates).forEach(key => dbUpdates[key as keyof typeof dbUpdates] === undefined && delete dbUpdates[key as keyof typeof dbUpdates]);
 
     const { error } = await supabase
       .from('document_drafts')
-      .update(updatedData)
+      .update(dbUpdates)
       .eq('id', draftId);
 
     if (error) {
-      throw error;
+      console.error(`Error updating draft ${draftId}:`, error);
+      return { success: false, error };
     }
 
     return { success: true, error: null };
-  } catch (error: unknown) {
+  } catch (error: unknown) { // Fix any type here
     const message = error instanceof Error ? error.message : 'Unknown error updating draft';
     console.error('Error updating draft:', message);
-    return { success: false, error: error instanceof Error ? error : new Error(message) };
+    const typedError = error instanceof PostgrestError ? error : error instanceof Error ? error : new Error(message);
+    return { success: false, error: typedError };
   }
 };
 
@@ -732,8 +791,8 @@ export const createAIDraft = async (
   name: string,
   content: string,
   caseId?: string,
-  metadata?: Record<string, any>
-): Promise<{ data: DocumentDraft | null; error: Error | null }> => {
+  metadata?: Record<string, unknown>
+): Promise<{ data: DocumentDraft | null; error: PostgrestError | Error | null }> => {
   try {
     const user = (await supabase.auth.getUser()).data.user;
     if (!user) {
@@ -747,30 +806,257 @@ export const createAIDraft = async (
         id: draftId,
         name,
         content,
-        case_id: caseId,
+        case_id: caseId || null,
         created_at: now,
         updated_at: now,
         user_id: user.id,
-        metadata: metadata || null
+        metadata: metadata || null,
+        template_id: null
       })
-      .select()
+      .select<string, RawDocumentDraft>('*')
       .single();
+
     if (error) {
-      throw error;
+      console.error('Error creating AI draft:', error);
+      return { data: null, error };
+    }
+    if (!data) {
+        throw new Error('Failed to retrieve created AI draft data.');
     }
     const draft: DocumentDraft = {
       id: data.id,
       name: data.name,
       content: data.content,
-      caseId: data.case_id,
+      caseId: data.case_id ?? undefined,
       createdAt: data.created_at,
       updatedAt: data.updated_at,
-      templateId: data.template_id,
-      metadata: data.metadata
+      templateId: data.template_id ?? undefined,
+      metadata: data.metadata ?? undefined
     };
     return { data: draft, error: null };
-  } catch (error) {
+  } catch (error: unknown) { // Fix any type here
     console.error('Error creating AI draft:', error);
-    return { data: null, error: error as Error };
+    const typedError = error instanceof PostgrestError ? error : error instanceof Error ? error : new Error('Unknown error creating AI draft');
+    return { data: null, error: typedError };
+  }
+};
+
+/**
+ * Create an empty draft document (not from a template)
+ */
+export const createBlankDraft = async (
+  caseId?: string | null // Optional case ID to associate with
+): Promise<{ data: DocumentDraft | null; error: PostgrestError | Error | null }> => { // Use specific error type
+  try {
+    const { data: { user }, error: authError } = await supabase.auth.getUser(); // Destructure user and error
+    if (authError) {
+        console.error('Auth error in createBlankDraft:', authError);
+        return { data: null, error: new Error('Authentication failed') };
+    }
+    if (!user) {
+      // Use return instead of throw for consistent error handling
+      return { data: null, error: new Error('User not authenticated') };
+    }
+
+    const draftId = uuidv4();
+    const now = new Date().toISOString();
+    const defaultName = "Untitled Draft";
+    const defaultContent = "<p></p>"; // Tiptap requires a paragraph tag
+
+    console.log(`Creating blank draft with ID: ${draftId}, associated with case: ${caseId || 'None'}`);
+
+    // Use RawDocumentDraft for the select type parameter
+    const { data, error } = await supabase
+      .from('document_drafts')
+      .insert({
+        id: draftId,
+        name: defaultName,
+        template_id: null, 
+        content: defaultContent,
+        case_id: caseId || null,
+        created_at: now,
+        updated_at: now,
+        user_id: user.id,
+        metadata: { createdAs: 'blank' } 
+      })
+      .select<string, RawDocumentDraft>('*') // Specify select type
+      .single();
+
+    if (error) {
+      console.error("Error inserting blank draft:", error);
+      return { data: null, error }; // Return PostgrestError directly
+    }
+    
+    if (!data) { // Handle case where insert succeeds but select returns null
+        console.error("Failed to retrieve created blank draft data after insert.");
+        return { data: null, error: new Error("Failed to retrieve created blank draft data.") };
+    }
+
+    // Map Supabase result to DocumentDraft interface, handling nulls
+    const draft: DocumentDraft = {
+      id: data.id,
+      name: data.name,
+      templateId: data.template_id ?? undefined, // Map null to undefined
+      content: data.content,
+      caseId: data.case_id ?? undefined, // Map null to undefined
+      createdAt: data.created_at,
+      updatedAt: data.updated_at,
+      metadata: data.metadata ?? undefined // Map null to undefined
+    };
+
+    console.log("Blank draft created successfully:", draft);
+    return { data: draft, error: null };
+
+  } catch (err) {
+    console.error('Error creating blank draft:', err);
+    // Ensure the caught error is typed correctly
+    const error = err instanceof PostgrestError ? err : err instanceof Error ? err : new Error('Unknown error creating blank draft');
+    return { data: null, error };
+  }
+};
+
+/**
+ * Delete a template by ID
+ */
+export const deleteTemplate = async (
+  templateId: string
+): Promise<{ success: boolean; error: PostgrestError | Error | null }> => {
+  try {
+    const user = (await supabase.auth.getUser()).data.user;
+    if (!user) {
+      throw new Error('User not authenticated');
+    }
+
+    // Add authorization check: Only creator or maybe admin should delete?
+    // For now, we allow deletion if the user is authenticated.
+
+    const { error } = await supabase
+      .from('document_templates')
+      .delete()
+      .eq('id', templateId);
+      // Optional: Add .eq('creator_id', user.id) to restrict deletion to the creator
+
+    if (error) {
+      // Handle specific errors like 'template not found' if needed
+      console.error(`Error deleting template ${templateId}:`, error);
+      return { success: false, error };
+    }
+
+    // Optionally, clean up related data like favorites or usage history
+
+    console.log(`Template ${templateId} deleted successfully.`);
+    return { success: true, error: null };
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error deleting template';
+    console.error('Error deleting template:', message);
+    const typedError = error instanceof PostgrestError ? error : error instanceof Error ? error : new Error(message);
+    return { success: false, error: typedError };
+  }
+};
+
+/**
+ * Duplicate a template by ID
+ */
+export const duplicateTemplate = async (
+  templateId: string
+): Promise<{ data: DocumentTemplate | null; error: PostgrestError | Error | null }> => {
+  try {
+    const { data: originalTemplate, error: fetchError } = await getTemplateById(templateId);
+
+    if (fetchError || !originalTemplate) {
+      console.error(`Error fetching template ${templateId} for duplication:`, fetchError);
+      return { data: null, error: fetchError || new Error('Original template not found') };
+    }
+
+    // Prepare data for the new template
+    const newTemplateData: Omit<DocumentTemplate, 'id' | 'createdAt' | 'updatedAt'> = {
+      ...originalTemplate,
+      name: `${originalTemplate.name} (Copy)`, // Append (Copy) to the name
+      isPublic: false, // Duplicates should probably default to private
+      // Reset usage stats if needed
+      isFavorite: false,
+      useCount: 0,
+      lastUsed: null,
+    };
+
+    // Use the createTemplate function to insert the new duplicate
+    const { data: newTemplate, error: createError } = await createTemplate(newTemplateData);
+
+    if (createError) {
+      console.error('Error creating duplicate template:', createError);
+      return { data: null, error: createError };
+    }
+
+    console.log(`Template ${templateId} duplicated successfully as ${newTemplate?.id}`);
+    return { data: newTemplate, error: null };
+
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error duplicating template';
+    console.error('Error duplicating template:', message);
+    const typedError = error instanceof PostgrestError ? error : error instanceof Error ? error : new Error(message);
+    return { data: null, error: typedError };
+  }
+};
+
+/**
+ * Update an existing template
+ */
+export const updateTemplate = async (
+  templateId: string,
+  // Use Partial<Omit<...>> for flexibility, allowing update of only some fields
+  templateData: Partial<Omit<DocumentTemplate, 'id' | 'createdAt' | 'updatedAt'>> 
+): Promise<{ data: DocumentTemplate | null; error: PostgrestError | Error | null }> => {
+  try {
+    const user = (await supabase.auth.getUser()).data.user;
+    if (!user) {
+      throw new Error('User not authenticated');
+    }
+
+    const now = new Date().toISOString();
+
+    // Prepare data for update, matching DB column names
+    // Use a more specific type based on RawDocumentTemplate + updated_at
+    const dataToUpdate: Partial<Omit<RawDocumentTemplate, 'id' | 'created_at' | 'creator_id'> & { updated_at: string }> = {
+      name: templateData.name,
+      description: templateData.description,
+      category: templateData.category,
+      content: templateData.content,
+      variables: templateData.variables,
+      tags: templateData.tags,
+      is_public: templateData.isPublic,
+      updated_at: now,
+    };
+
+    // Remove undefined keys to avoid overwriting existing values with null
+    // Type assertion needed here due to the way keys are iterated
+    Object.keys(dataToUpdate).forEach(key => dataToUpdate[key as keyof typeof dataToUpdate] === undefined && delete dataToUpdate[key as keyof typeof dataToUpdate]);
+
+    // Add authorization check: Ensure user is the creator?
+    // For now, we allow updates if authenticated.
+    const { data, error } = await supabase
+      .from('document_templates')
+      .update(dataToUpdate)
+      .eq('id', templateId)
+      // Optional: .eq('creator_id', user.id) // Uncomment to restrict updates to creator
+      .select<string, RawDocumentTemplate>('*') // Reselect the updated data
+      .single();
+
+    if (error) {
+      console.error(`Error updating template ${templateId}:`, error);
+      return { data: null, error };
+    }
+    if (!data) {
+        throw new Error("Failed to retrieve updated template data.");
+    }
+
+    const updatedTemplate = transformTemplateData(data);
+    console.log(`Template ${templateId} updated successfully.`);
+    return { data: updatedTemplate, error: null };
+
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error updating template';
+    console.error('Error updating template:', message);
+    const typedError = error instanceof PostgrestError ? error : error instanceof Error ? error : new Error(message);
+    return { data: null, error: typedError };
   }
 };
