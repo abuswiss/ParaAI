@@ -1,0 +1,18 @@
+/* Basic styling for Tiptap editor container */
+.ProseMirror {
+  /* Ensure it takes height and allows scrolling */
+  min-height: 100px; /* Or adjust as needed */
+  height: 100%;
+  outline: none; /* Remove default focus outline if using custom */
+}
+
+.ProseMirror p.is-editor-empty:first-child::before {
+  /* Basic placeholder styling */
+  content: attr(data-placeholder);
+  float: left;
+  color: #adb5bd; /* Match Tailwind gray-400 or similar */
+  pointer-events: none;
+  height: 0;
+}
+
+/* Add any other editor-specific base styles here */ 

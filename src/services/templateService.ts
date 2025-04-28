@@ -61,9 +61,10 @@ export const getAvailableTemplates = async (
     const templates: DocumentTemplate[] = data.map(transformTemplateData);
 
     return { data: templates, error: null };
-  } catch (error) {
-    console.error('Error getting templates:', error);
-    return { data: null, error: error as Error };
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error getting templates';
+    console.error('Error getting templates:', message);
+    return { data: null, error: error instanceof Error ? error : new Error(message) };
   }
 };
 
@@ -106,9 +107,10 @@ export const getTemplateById = async (
     }
 
     return { data: transformTemplateData(data), error: null };
-  } catch (error) {
-    console.error('Error getting template:', error);
-    return { data: null, error: error as Error };
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error getting template by ID';
+    console.error('Error getting template:', message);
+    return { data: null, error: error instanceof Error ? error : new Error(message) };
   }
 };
 
@@ -164,9 +166,10 @@ export const createTemplate = async (
     };
 
     return { data: template, error: null };
-  } catch (error) {
-    console.error('Error creating template:', error);
-    return { data: null, error: error as Error };
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error creating template';
+    console.error('Error creating template:', message);
+    return { data: null, error: error instanceof Error ? error : new Error(message) };
   }
 };
 
@@ -218,9 +221,10 @@ export const getRecentlyUsedTemplates = async (
       data: sortedTemplates.map(transformTemplateData),
       error: null 
     };
-  } catch (error) {
-    console.error('Error getting recently used templates:', error);
-    return { data: null, error: error as Error };
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error getting recently used templates';
+    console.error('Error getting recently used templates:', message);
+    return { data: null, error: error instanceof Error ? error : new Error(message) };
   }
 };
 
@@ -266,9 +270,10 @@ export const recordTemplateUsage = async (
     if (templateError) throw templateError;
 
     return { success: true, error: null };
-  } catch (error) {
-    console.error('Error recording template usage:', error);
-    return { success: false, error: error as Error };
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error recording template usage';
+    console.error('Error recording template usage:', message);
+    return { success: false, error: error instanceof Error ? error : new Error(message) };
   }
 };
 
@@ -301,9 +306,10 @@ export const importTemplate = async (
     };
 
     return await createTemplate(templateData);
-  } catch (error) {
-    console.error('Error importing template:', error);
-    return { data: null, error: error as Error };
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error importing template';
+    console.error('Error importing template:', message);
+    return { data: null, error: error instanceof Error ? error : new Error(message) };
   }
 };
 
@@ -330,9 +336,10 @@ export const exportTemplate = async (
     };
     
     return { data: JSON.stringify(exportData, null, 2), error: null };
-  } catch (error) {
-    console.error('Error exporting template:', error);
-    return { data: null, error: error as Error };
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error exporting template';
+    console.error('Error exporting template:', message);
+    return { data: null, error: error instanceof Error ? error : new Error(message) };
   }
 };
 
@@ -373,9 +380,10 @@ export const setTemplateFavorite = async (
     }
 
     return { success: true, error: null };
-  } catch (error) {
-    console.error('Error setting template favorite status:', error);
-    return { success: false, error: error as Error };
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error setting template favorite status';
+    console.error('Error setting favorite status:', message);
+    return { success: false, error: error instanceof Error ? error : new Error(message) };
   }
 };
 
@@ -399,9 +407,10 @@ export const getCaseVariables = async (
     }, {} as Record<string, string>);
     
     return { data: variables, error: null };
-  } catch (error) {
-    console.error('Error getting case variables:', error);
-    return { data: null, error: error as Error };
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error getting case variables';
+    console.error('Error getting case variables:', message);
+    return { data: null, error: error instanceof Error ? error : new Error(message) };
   }
 };
 
@@ -452,9 +461,10 @@ export const getCaseFields = async (
     };
     
     return { data: combinedFields, error: null };
-  } catch (error) {
-    console.error('Error getting case fields:', error);
-    return { data: null, error: error as Error };
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error getting case fields';
+    console.error('Error getting case fields:', message);
+    return { data: null, error: error instanceof Error ? error : new Error(message) };
   }
 };
 
@@ -524,9 +534,10 @@ export const createDraftFromTemplate = async (
     };
 
     return { data: draft, error: null };
-  } catch (error) {
-    console.error('Error creating draft from template:', error);
-    return { data: null, error: error as Error };
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error creating draft from template';
+    console.error('Error creating draft from template:', message);
+    return { data: null, error: error instanceof Error ? error : new Error(message) };
   }
 };
 
@@ -565,9 +576,10 @@ export const generateDraftWithAI = async (
     });
 
     return { data: response.choices[0]?.message.content || null, error: null };
-  } catch (error) {
-    console.error('Error generating draft with AI:', error);
-    return { data: null, error: error as Error };
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error generating draft with AI';
+    console.error('Error generating draft with AI:', message);
+    return { data: null, error: error instanceof Error ? error : new Error(message) };
   }
 };
 
@@ -613,9 +625,10 @@ export const getUserDrafts = async (
     }));
 
     return { data: drafts, error: null };
-  } catch (error) {
-    console.error('Error getting drafts:', error);
-    return { data: null, error: error as Error };
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error getting user drafts';
+    console.error('Error getting user drafts:', message);
+    return { data: null, error: error instanceof Error ? error : new Error(message) };
   }
 };
 
@@ -648,9 +661,10 @@ export const getDraftById = async (
     };
 
     return { data: draft, error: null };
-  } catch (error) {
-    console.error('Error getting draft:', error);
-    return { data: null, error: error as Error };
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error getting draft by ID';
+    console.error('Error getting draft:', message);
+    return { data: null, error: error instanceof Error ? error : new Error(message) };
   }
 };
 
@@ -681,9 +695,10 @@ export const updateDraft = async (
     }
 
     return { success: true, error: null };
-  } catch (error) {
-    console.error('Error updating draft:', error);
-    return { success: false, error: error as Error };
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error updating draft';
+    console.error('Error updating draft:', message);
+    return { success: false, error: error instanceof Error ? error : new Error(message) };
   }
 };
 

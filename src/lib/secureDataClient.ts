@@ -1,4 +1,5 @@
 import { supabase, isAuthenticated } from './supabaseClient';
+import { Case } from '@/types/case'; // Import the Case type
 
 /**
  * SecureDataClient provides utilities for safely accessing data 
@@ -39,24 +40,42 @@ const getCurrentUserId = async () => {
   throw new Error('User not authenticated despite successful connection');
 };
 
+// Define a type for the raw data expected from the cases table
+interface RawCaseData {
+  id: string;
+  name?: string; // Assuming name might be nullable or handled differently
+  description?: string;
+  status?: string;
+  created_at: string;
+  updated_at?: string;
+  owner_id: string;
+  // Add other potential raw fields if known
+}
+
 /**
  * Fetch cases safely while avoiding RLS recursion
  * This uses direct queries that don't trigger the problematic RLS policy chain
  */
 // Helper function to format case data
-function formatCases(cases: any[]) {
+// Use the Case type for the return and RawCaseData for input
+function formatCases(cases: RawCaseData[]): Partial<Case>[] { // Return Partial<Case> as not all fields might be mapped
   return cases.map(caseData => ({
     id: caseData.id,
-    name: caseData.name,
-    description: caseData.description,
+    // Map relevant fields, ensure null safety
+    client_name: caseData.name || null, // Example mapping 'name' to 'client_name'
+    description: caseData.description || null,
     status: caseData.status || 'active',
     createdAt: caseData.created_at,
-    updatedAt: caseData.updated_at,
-    documentCount: 0, // We'll set this to 0 for now since document counts will be handled elsewhere
+    updatedAt: caseData.updated_at || null,
+    // case_number, opposing_party, court are missing in RawCaseData, set to null or fetch differently
+    case_number: null, 
+    opposing_party: null,
+    court: null,
+    // documentCount: 0, // Assuming document count is handled elsewhere
   }));
 }
 
-export const fetchCasesSafely = async () => {
+export const fetchCasesSafely = async (): Promise<{ data: Partial<Case>[], error: Error | null }> => {
   try {
     console.log('fetchCasesSafely called, checking auth status');
     
@@ -84,10 +103,7 @@ export const fetchCasesSafely = async () => {
     // Try the absolute most basic query
     console.log('Executing basic query to cases table with no filters');
     try {
-      const query = supabase.from('cases').select('*');
-      console.log('Query object created, executing...');
-      
-      const { data, error } = await query;
+      const { data, error } = await supabase.from('cases').select<'*', RawCaseData>('*');
       console.log('Query executed, result:', JSON.stringify({ data: data?.length || 0, error }));
 
       if (error) {
@@ -106,7 +122,7 @@ export const fetchCasesSafely = async () => {
       console.log('User cases found:', userCases.length);
       
       return {
-        data: formatCases(userCases),
+        data: formatCases(userCases), // formatCases now expects RawCaseData[]
         error: null
       };
     } catch (error) {
@@ -119,49 +135,63 @@ export const fetchCasesSafely = async () => {
   }
 };
 
+// Define type for raw conversation data from DB
+interface RawConversationData {
+  id: string;
+  title: string;
+  case_id: string | null;
+  created_at: string;
+  updated_at: string;
+  // owner_id is known from insert/query
+}
+
+// Define type for the returned conversation data
+interface Conversation {
+  id: string;
+  title: string;
+  caseId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 /**
  * Create a conversation securely while avoiding RLS recursion issues
  */
 export const createConversationSafely = async (
   title?: string,
   caseId?: string
-) => {
+): Promise<{ data: Conversation | null; error: Error | null }> => {
   try {
     // Get the current user ID - this will attempt to refresh auth if needed
     const userId = await getCurrentUserId();
     
-    // Generate a unique conversation ID
-    const conversationId = crypto.randomUUID();
+    // Let the database handle ID generation and timestamps
+    // const conversationId = crypto.randomUUID(); // No longer needed
     
-    // Create conversation with proper data validation
+    // Create conversation data, omitting fields with DB defaults
     const conversationData = {
-      id: conversationId,
+      // id: conversationId, // Let DB handle default
       title: title?.trim() || 'New Conversation',
       case_id: caseId || null,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-      owner_id: userId, // Using owner_id as per the database schema
+      // created_at: new Date().toISOString(), // Let DB handle default
+      // updated_at: new Date().toISOString(), // Let DB handle default
+      owner_id: userId, // Still need to provide the owner
     };
 
-    // Store in Supabase
+    // Use the RawConversationData type for the select
     const { data, error } = await supabase
       .from('conversations')
       .insert([conversationData])
-      .select()
+      .select<'*', RawConversationData>('*')
       .single();
 
     if (error) {
       console.error('Error creating conversation:', error);
       
-      // Check if this is a server error (500)
-      if (error.code === '500' || (error as any).status === 500) {
-        // For 500 Internal Server errors, this could be a database schema issue
-        // or a server-side error, not an authentication problem
-        
-        // Let's log the full error details to help debugging
+      // Check specific error codes instead of (error as any).status
+      if (error.code === '500' || error.code === 'PGRST116') { // PGRST116 is often Internal Server Error
         console.error('Database server error details:', {
           code: error.code,
-          status: (error as any).status,
           message: error.message,
           details: error.details,
           hint: error.hint,
@@ -174,8 +204,8 @@ export const createConversationSafely = async (
         };
       }
       
-      // Check if this is an authentication error (401, 403)
-      if (error.code === '401' || error.code === '403') {
+      // Check for Auth errors (often PGRST 301/302 if RLS fails, though 401/403 might appear too)
+      if (error.code === '401' || error.code === '403' || error.code === 'PGRST301' || error.code === 'PGRST302') {
         const authenticated = await isAuthenticated();
         if (!authenticated) {
           return { 
@@ -185,13 +215,21 @@ export const createConversationSafely = async (
         }
       }
       
-      // For any other errors, return a more detailed error message
+      // Foreign key violation check (example code might differ)
+      if (error.code === '23503') { // PostgreSQL FK violation code
+        if (error.message.includes('conversations_owner_id_fkey')) {
+          return { data: null, error: new Error('Failed to create conversation: User profile might be missing. Please contact support or try signing out and back in.') };
+        }
+      }
+      
+      // Default error
       return { 
         data: null, 
         error: new Error(`Database error: ${error.message || 'Unknown error'} (Code: ${error.code || 'unknown'})`) 
       };
     }
 
+    // Map RawConversationData to Conversation type
     return {
       data: {
         id: data.id,
@@ -204,6 +242,10 @@ export const createConversationSafely = async (
     };
   } catch (error) {
     console.error('Secure conversation creation error:', error);
+    // Make sure the error message indicates a potential profile issue if it's an FK violation
+    if (error instanceof Error && error.message.includes('violates foreign key constraint "conversations_owner_id_fkey"')) {
+        return { data: null, error: new Error('Failed to create conversation: User profile might be missing. Please contact support or try signing out and back in.') };
+    }
     return { data: null, error: error as Error };
   }
 };

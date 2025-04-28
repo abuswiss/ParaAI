@@ -13,6 +13,10 @@ export interface Case {
   createdAt: string;
   updatedAt: string;
   documentCount?: number;
+  client_name?: string;
+  opposing_party?: string;
+  case_number?: string;
+  court?: string;
 }
 
 /**
@@ -126,7 +130,7 @@ export const createCase = async (
 };
 
 /**
- * Get a case by ID
+ * Get a case by ID, including detailed fields
  */
 export const getCaseById = async (
   caseId: string
@@ -134,23 +138,34 @@ export const getCaseById = async (
   try {
     const { data, error } = await supabase
       .from('cases')
-      .select('*, documents(count)')
+      // Select base fields, new detailed fields, and document count
+      .select('*, client_name, opposing_party, case_number, court, documents(count)')
       .eq('id', caseId)
       .single();
 
     if (error) {
+      console.error(`Error fetching case ${caseId}:`, error);
       throw error;
+    }
+
+    if (!data) {
+      return { data: null, error: new Error('Case not found') };
     }
 
     return {
       data: {
         id: data.id,
-        name: data.name,
+        name: data.name, // Use 'name' or 'title' based on what's primarily used
         description: data.description,
         status: data.status,
         createdAt: data.created_at,
         updatedAt: data.updated_at,
         documentCount: data.documents?.count || 0,
+        // Map the new detailed fields
+        client_name: data.client_name,
+        opposing_party: data.opposing_party,
+        case_number: data.case_number,
+        court: data.court,
       },
       error: null,
     };

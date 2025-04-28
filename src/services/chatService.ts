@@ -7,6 +7,7 @@ import {
   getConversationMessagesSafely 
 } from '../lib/secureDataClient';
 import { v4 as uuidv4 } from 'uuid';
+import { DocumentAnalysisResult } from './documentAnalysisService';
 
 /**
  * Interface for a chat message
@@ -24,7 +25,7 @@ export interface ChatMessage {
 export interface Conversation {
   id: string;
   title: string;
-  caseId?: string;
+  caseId: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -39,9 +40,10 @@ export const createConversation = async (
   try {
     // Use the secure client to avoid RLS recursive policy issues
     return await createConversationSafely(title, caseId);
-  } catch (error) {
-    console.error('Error creating conversation:', error);
-    return { data: null, error: error as Error };
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error creating conversation';
+    console.error('Error creating conversation:', message);
+    return { data: null, error: error instanceof Error ? error : new Error(message) };
   }
 };
 
@@ -54,9 +56,10 @@ export const getConversation = async (
   try {
     // Use the secure client to avoid RLS recursive policy issues
     return await getConversationSafely(conversationId);
-  } catch (error) {
-    console.error('Error getting conversation:', error);
-    return { data: null, error: error as Error };
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error getting conversation';
+    console.error('Error getting conversation:', message);
+    return { data: null, error: error instanceof Error ? error : new Error(message) };
   }
 };
 
@@ -95,9 +98,10 @@ export const getUserConversations = async (): Promise<{
       })),
       error: null,
     };
-  } catch (error) {
-    console.error('Error getting user conversations:', error);
-    return { data: null, error: error as Error };
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error getting user conversations';
+    console.error('Error getting user conversations:', message);
+    return { data: null, error: error instanceof Error ? error : new Error(message) };
   }
 };
 
@@ -110,9 +114,10 @@ export const getConversationMessages = async (
   try {
     // Use the secure client to avoid RLS recursive policy issues
     return await getConversationMessagesSafely(conversationId);
-  } catch (error) {
-    console.error('Error getting messages:', error);
-    return { data: null, error: error as Error };
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error getting messages';
+    console.error('Error getting messages:', message);
+    return { data: null, error: error instanceof Error ? error : new Error(message) };
   }
 };
 
@@ -128,9 +133,10 @@ export const addMessage = async (
     // Use the secure client to avoid RLS recursive policy issues
     const result = await addMessageSafely(conversationId, role, content);
     return result;
-  } catch (error) {
-    console.error('Error adding message:', error);
-    return { data: null, error: error as Error };
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error adding message';
+    console.error('Error adding message:', message);
+    return { data: null, error: error instanceof Error ? error : new Error(message) };
   }
 };
 
@@ -143,7 +149,8 @@ export const sendMessageStream = async (
   message: string,
   onChunk: (chunk: string) => void,
   documentContext?: string,
-  analysisContext?: string
+  analysisContext?: string,
+  caseId?: string
 ): Promise<{ success: boolean; error: Error | null; newConversationId?: string }> => {
   console.log(`Starting sendMessageStream with conversationId: ${conversationId || 'null'}`);
   try {
@@ -188,17 +195,17 @@ export const sendMessageStream = async (
 
     console.log(`Adding user message to conversation: ${actualConversationId}`);
     // Add user message to the database with the valid conversation ID
-    const { error: userMsgError } = await addMessageSafely(
+    const userMsgResult = await addMessageSafely(
       actualConversationId,
       'user',
       message
     );
 
-    if (userMsgError) {
-      console.error('Error adding user message:', userMsgError);
+    if (userMsgResult.error) {
+      console.error('Error adding user message:', userMsgResult.error);
       return { 
         success: false, 
-        error: userMsgError 
+        error: userMsgResult.error 
       };
     }
 
@@ -242,44 +249,46 @@ export const sendMessageStream = async (
     // Add analysis context if provided
     if (analysisContext) {
       try {
-        const analysis = JSON.parse(analysisContext);
+        // Use the imported type for parsing
+        const analysis: DocumentAnalysisResult = JSON.parse(analysisContext);
         const analysisType = analysis.analysisType || 'document';
         let formattedAnalysis = '';
         
         // Format the analysis based on its type
         switch (analysisType) {
           case 'summary':
-            formattedAnalysis = `Document Summary: ${analysis.summary || ''}`;
-            break;
-          case 'entities':
-            formattedAnalysis = 'Identified Entities:\n' + 
-              (analysis.entities || []).map((entity: any) => 
-                `- ${entity.type}: ${entity.name} ${entity.description ? `(${entity.description})` : ''}`
-              ).join('\n');
+            formattedAnalysis = `Summary of the document provided: ${analysis.result || 'Not available'}`;
             break;
           case 'risks':
-            formattedAnalysis = 'Identified Risks:\n' + 
-              (analysis.risks || []).map((risk: any) => 
-                `- ${risk.severity.toUpperCase()}: ${risk.description} ${risk.mitigation ? `Mitigation: ${risk.mitigation}` : ''}`
-              ).join('\n');
+            formattedAnalysis = `Potential risks identified in the document: ${analysis.result || 'None found or analysis unavailable'}`;
             break;
-          case 'timeline':
-            formattedAnalysis = 'Document Timeline:\n' + 
-              (analysis.timeline || []).map((event: any) => 
-                `- ${event.date}: ${event.description}`
-              ).join('\n');
+          case 'clauses':
+            formattedAnalysis = `Key clauses identified: ${analysis.result || 'None found or analysis unavailable'}`;
             break;
           default:
-            formattedAnalysis = JSON.stringify(analysis, null, 2);
+            formattedAnalysis = `Analysis result provided: ${analysis.result || 'Content unavailable'}`;
         }
         
         messages.unshift({
           role: 'system',
-          content: `The following document analysis may help with the user's query:\n${formattedAnalysis}`,
+          content: `Relevant Analysis Context:\n${formattedAnalysis}`
         });
-      } catch (error) {
-        console.error('Error parsing analysis context:', error);
+      } catch (e: unknown) {
+        const error = e instanceof Error ? e : new Error('Unknown error parsing or formatting analysis context');
+        console.error('Failed to parse or format analysis context:', error.message);
+        messages.unshift({
+          role: 'system',
+          content: '[System Note: Provided analysis context could not be processed.]'
+        });
       }
+    }
+
+    // Add case context if provided
+    if (caseId) {
+        messages.unshift({
+            role: 'system',
+            content: `Current Case Context ID: ${caseId}`
+        });
     }
 
     // Add a default system message if there isn't one
@@ -346,8 +355,9 @@ export const sendMessageStream = async (
       error: null,
       newConversationId: newConversationCreated ? actualConversationId : undefined 
     };
-  } catch (error: any) {
-    console.error('Error sending message:', error);
+  } catch (e: unknown) {
+    const error = e instanceof Error ? e : new Error('Unknown error sending message');
+    console.error('Error in sendMessageStream:', error.message, e); // Log original error too
     return { success: false, error };
   }
 };
@@ -370,9 +380,10 @@ export const addDocumentToConversation = async (
     }
 
     return { success: true, error: null };
-  } catch (error) {
-    console.error('Error adding document to conversation:', error);
-    return { success: false, error: error as Error };
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error adding document to conversation';
+    console.error('Error adding document to conversation:', message);
+    return { success: false, error: error instanceof Error ? error : new Error(message) };
   }
 };
 
@@ -410,9 +421,10 @@ export const handleResearchQueryStream = async (
     } else {
       throw new Error('No answer or snippets returned from backend');
     }
-  } catch (error) {
-    console.error('Error in handleResearchQueryStream:', error);
-    return { success: false, error: error as Error };
+  } catch (e: unknown) {
+    const error = e instanceof Error ? e : new Error('Unknown error in research query');
+    console.error('Error in handleResearchQueryStream:', error.message, e); // Log original error too
+    return { success: false, error };
   }
 };
 
@@ -460,9 +472,10 @@ export const handleAgentDraftStream = async (
       }
     }
     return { success: true, error: null, answer };
-  } catch (error) {
-    console.error('Error in handleAgentDraftStream:', error);
-    return { success: false, error: error as Error };
+  } catch (e: unknown) {
+    const error = e instanceof Error ? e : new Error('Unknown error in agent draft');
+    console.error('Error in handleAgentDraftStream:', error.message, e); // Log original error too
+    return { success: false, error };
   }
 };
 
@@ -511,9 +524,10 @@ export const handleFindClauseStream = async (
       }
     }
     return { success: true, error: null, answer };
-  } catch (error) {
-    console.error('Error in handleFindClauseStream:', error);
-    return { success: false, error: error as Error };
+  } catch (e: unknown) {
+    const error = e instanceof Error ? e : new Error('Unknown error finding clause');
+    console.error('Error in handleFindClauseStream:', error.message, e); // Log original error too
+    return { success: false, error };
   }
 };
 
@@ -561,9 +575,10 @@ export const handleGenerateTimelineStream = async (
       }
     }
     return { success: true, error: null, answer };
-  } catch (error) {
-    console.error('Error in handleGenerateTimelineStream:', error);
-    return { success: false, error: error as Error };
+  } catch (e: unknown) {
+    const error = e instanceof Error ? e : new Error('Unknown error generating timeline');
+    console.error('Error in handleGenerateTimelineStream:', error.message, e); // Log original error too
+    return { success: false, error };
   }
 };
 
@@ -601,9 +616,10 @@ export const handleExplainTermStream = async (
       }
     }
     return { success: true, error: null, answer };
-  } catch (error) {
-    console.error('Error in handleExplainTermStream:', error);
-    return { success: false, error: error as Error };
+  } catch (e: unknown) {
+    const error = e instanceof Error ? e : new Error('Unknown error explaining term');
+    console.error('Error in handleExplainTermStream:', error.message, e); // Log original error too
+    return { success: false, error };
   }
 };
 
@@ -676,9 +692,10 @@ ${text.substring(0, 8000)}\n\n`;
       }
     }
     return { success: true, error: null, answer };
-  } catch (error) {
-    console.error('Error in handleAgentCompareStream:', error);
-    return { success: false, error: error as Error };
+  } catch (e: unknown) {
+    const error = e instanceof Error ? e : new Error('Unknown error in agent comparison');
+    console.error('Error in handleAgentCompareStream:', error.message, e); // Log original error too
+    return { success: false, error };
   }
 };
 
@@ -691,144 +708,236 @@ export const handleFlagPrivilegedTermsStream = async (
   docId: string,
   onChunk: (chunk: string) => void
 ): Promise<{ success: boolean; error: Error | null; answer?: string }> => {
+  console.log(`Starting handleFlagPrivilegedTermsStream for docId: ${docId}`);
   try {
-    // Import here to avoid circular dependency
-    const { getDocumentById } = await import('./documentService');
-    const { data: document, error: docError } = await getDocumentById(docId);
-    if (docError || !document) {
-      throw docError || new Error('Document not found');
+    // Simulate streaming for immediate feedback
+    onChunk('Analyzing document for potentially privileged terms...\n\n');
+    await new Promise(resolve => setTimeout(resolve, 500)); // Simulate work
+    
+    // Call backend document analysis service
+    const { analyzeDocument } = await import('./documentAnalysisService');
+    const { data, error } = await analyzeDocument(docId, 'privilegedTerms');
+    
+    if (error || !data) {
+      console.error('Error flagging privileged terms:', error);
+      onChunk(`Error: Unable to analyze document for privileged terms. ${error?.message || 'Unknown error'}`);
+      return { success: false, error: error || new Error('Unknown error') };
     }
-    if (!document.extractedText) {
-      throw new Error('Document text not available. Please wait for processing to complete.');
+
+    let result = 'Analysis complete.\n\n';
+    if (data.result && Array.isArray(data.result) && data.result.length > 0) {
+      result += 'Potentially Privileged Terms Found:\n';
+      data.result.forEach((term, index) => {
+        result += `${index + 1}. ${term}\n`;
+      });
+      result += '\nPlease review these terms in context to confirm privilege.';
+    } else {
+      result += 'No potentially privileged terms were automatically detected.';
     }
-    // Predefined list of privileged terms/phrases
-    const privilegedTerms = [
-      'attorney-client privilege',
-      'work product',
-      'legal advice',
-      'confidential communication',
-      'prepared in anticipation of litigation',
-      'subject to privilege',
-      'privileged and confidential',
-      'attorney work product',
-      'do not disclose',
-      'for the purpose of obtaining legal advice',
-      'protected by privilege',
-      'client communication',
-      'counsel',
-      'solicitor',
-      'law firm',
-      'legal department',
-      'in-house counsel',
-      'outside counsel',
-      'confidential memorandum',
-      'not for distribution',
-      'privileged information',
-      'confidential draft',
-      'prepared at the request of counsel',
-      'subject to attorney-client privilege',
-      'subject to work product doctrine',
-    ];
-    const systemPrompt =
-      'You are a legal AI assistant. Your task is to help flag potentially privileged content in legal documents. This is a preliminary review and not a substitute for legal review.';
-    const userPrompt = `Scan the following document for any occurrences of these potentially privileged terms or phrases (case-insensitive):\n${privilegedTerms.map(t => `- ${t}`).join('\n')}\n\nDocument text:\n${document.extractedText.substring(0, 12000)}\n\nFor each term found, list the term, the sentence or context where it appears, and the location (e.g., page or section if available). If none are found, say so. Do not make up content. This is only a preliminary flagging tool.`;
+    
+    onChunk(result);
+    console.log('Flag privileged terms analysis complete.');
+    return { success: true, error: null, answer: result };
+
+  } catch (e: unknown) {
+    const error = e instanceof Error ? e : new Error('Unknown error flagging privileged terms');
+    console.error('Error handling flag privileged terms:', error.message, e); // Log original error too
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error flagging privileged terms';
+    onChunk(`Error: An unexpected error occurred while flagging terms. ${errorMessage}`);
+    return { success: false, error };
+  }
+};
+
+/**
+ * Handle Perplexity agent tasks by invoking the Supabase Edge Function.
+ */
+export const handlePerplexityAgent = async (
+  conversationId: string, // Keep conversationId if needed for context/history
+  params: { query: string },
+  onChunk: (chunk: string) => void
+): Promise<{ success: boolean; error: Error | null; sources?: any[] }> => {
+  console.log(`Invoking Perplexity agent for conversation ${conversationId} with query: ${params.query}`);
+  
+  try {
+    onChunk('Asking Perplexity AI...\n'); // Initial feedback
+    
+    // TODO: Fetch conversation history if needed for context
+    // const { data: history, error: historyError } = await getConversationMessages(conversationId);
+    // if (historyError) {
+    //   console.warn('Could not fetch history for Perplexity:', historyError);
+    // }
+
+    // Invoke the Supabase Function
+    const { data, error } = await supabase.functions.invoke('perplexity-agent', {
+      body: { 
+        query: params.query,
+        // conversationHistory: history // Pass history if fetched
+      },
+    });
+
+    if (error) {
+      console.error('Error invoking Perplexity Edge Function:', error);
+      throw new Error(`Failed to call Perplexity agent: ${error.message}`);
+    }
+
+    if (data.error) {
+      console.error('Error returned from Perplexity Edge Function:', data.error);
+      throw new Error(`Perplexity agent failed: ${data.error}`);
+    }
+
+    // Process the response
+    const answer = data.answer || 'Perplexity did not provide an answer.';
+    const sources = data.sources || [];
+    
+    onChunk(answer); // Send the full answer as one chunk for now
+    
+    // If sources exist, format them
+    if (sources.length > 0) {
+      let sourcesText = '\n\nSources:\n';
+      sources.forEach((src: { url?: string, title?: string }, i: number) => {
+        sourcesText += `${i + 1}. ${src.title || 'Source'}${src.url ? ` (${src.url})` : ''}\n`;
+      });
+      onChunk(sourcesText); // Send sources as a separate chunk (or append)
+    }
+
+    console.log('Perplexity agent execution successful.');
+    return { success: true, error: null, sources: sources };
+
+  } catch (e: unknown) {
+    const error = e instanceof Error ? e : new Error('Unknown error in Perplexity agent');
+    console.error('Error handling Perplexity agent:', error.message, e);
+    const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
+    onChunk(`Error interacting with Perplexity: ${errorMessage}`);
+    return { success: false, error: error instanceof Error ? error : new Error(errorMessage) };
+  }
+};
+
+/**
+ * Handle a case-wide document search query.
+ * Fetches documents related to the case and performs a search.
+ */
+export const handleCaseSearch = async (
+  caseId: string,
+  query: string,
+  onChunk: (chunk: string) => void
+): Promise<{ success: boolean; error: Error | null; answer?: string }> => {
+  console.log(`Handling case search for caseId: ${caseId} with query: "${query}"`);
+  try {
+    // 1. Fetch document IDs for the given caseId
+    onChunk('[{"type": "status", "message": "Fetching documents for the case..."}]');
+    const { data: caseDocuments, error: docError } = await supabase
+      .from('case_documents')
+      .select('document_id')
+      .eq('case_id', caseId);
+
+    if (docError) {
+      console.error('Error fetching case documents:', docError);
+      onChunk(`[{"type": "error", "message": "Error fetching documents: ${docError.message}"}]`);
+      return { success: false, error: docError };
+    }
+
+    if (!caseDocuments || caseDocuments.length === 0) {
+      console.log('No documents found for this case.');
+      onChunk('[{"type": "info", "message": "No documents found for this case to search."}]');
+      // Return success with a message and null error
+      return { success: true, answer: "No documents found for this case to search.", error: null };
+    }
+
+    const documentIds = caseDocuments.map(doc => doc.document_id);
+    console.log(`Found ${documentIds.length} documents for case ${caseId}:`, documentIds);
+
+    // 2. Fetch content for each document ID
+    onChunk(`[{"type": "status", "message": "Fetching content for ${documentIds.length} document(s)..."}]`);
+    
+    // Use Promise.all to fetch all document contents concurrently
+    const contentPromises = documentIds.map(async (docId) => {
+      const { data: documentData, error: contentError } = await supabase
+        .from('documents')
+        .select('content, name') // Select content and name
+        .eq('id', docId)
+        .single(); // Expect only one document per ID
+
+      if (contentError) {
+        console.error(`Error fetching content for document ${docId}:`, contentError);
+        // Decide how to handle partial failures. For now, we'll skip this document.
+        // Could also throw an error to fail the whole search or return partial results.
+        return null; 
+      }
+      if (!documentData) {
+        console.warn(`No content found for document ${docId}. Skipping.`);
+        return null;
+      }
+      // Return an object with name and content
+      return { name: documentData.name || `Document ${docId}`, content: documentData.content };
+    });
+
+    const documentContents = (await Promise.all(contentPromises)).filter(doc => doc !== null) as { name: string, content: string }[]; // Filter out nulls
+
+    if (documentContents.length === 0) {
+      console.log('No content could be fetched for any of the documents.');
+      onChunk(`[{"type": "info", "message": "Could not fetch content for the case documents."}]`);
+      return { success: true, answer: "Could not fetch content for the case documents.", error: null };
+    }
+
+    console.log(`Successfully fetched content for ${documentContents.length} documents.`);
+
+    // 3. Combine content
+    let combinedContext = '';
+    documentContents.forEach(doc => {
+        // Add document name as a header for clarity
+        combinedContext += `--- Document: ${doc.name} ---\n\n`;
+        combinedContext += `${doc.content}\n\n`; // Add content, ensure separation
+    });
+    
+    // Limit combined context size if necessary (e.g., for token limits)
+    const MAX_CONTEXT_LENGTH = 100000; // Example limit, adjust as needed
+    if (combinedContext.length > MAX_CONTEXT_LENGTH) {
+        console.warn(`Combined context length (${combinedContext.length}) exceeds limit (${MAX_CONTEXT_LENGTH}). Truncating.`);
+        combinedContext = combinedContext.substring(0, MAX_CONTEXT_LENGTH);
+        onChunk(`[{"type": "warning", "message": "Combined document content is very large and has been truncated."}]`);
+    }
+
+    // 4. Construct prompt and call OpenAI
+    onChunk(`[{"type": "status", "message": "Searching documents with AI..."}]`);
+
+    const systemPrompt = `You are a paralegal AI assistant. You are given a collection of documents related to a specific case, marked with '--- Document: [Document Name] ---'. Search through these documents to find information relevant to the user's query. Summarize your findings clearly. When possible, indicate which document(s) (using their names) contain the relevant information.`;
+
+    const userPrompt = `Case Document Context:
+${combinedContext}
+
+User Query: ${query}
+
+Based *only* on the provided Case Document Context, find and summarize the information relevant to the User Query. Cite the document names where the information is found.`;
+
     const stream = await openai.chat.completions.create({
-      model: 'gpt-4',
+      model: 'gpt-4', // Or consider 'gpt-4-turbo' if context is very large
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt },
       ],
       stream: true,
-      temperature: 0.1,
+      temperature: 0.1, // Low temperature for factual search
     });
-    let answer = '';
+
+    // 5. Stream results via onChunk
+    let fullResponse = '';
     for await (const chunk of stream) {
       const content = chunk.choices[0]?.delta?.content || '';
       if (content) {
-        answer += content;
-        onChunk(content);
+        fullResponse += content;
+        // Stream raw content chunks directly
+        onChunk(content); 
       }
     }
-    return { success: true, error: null, answer };
-  } catch (error) {
-    console.error('Error in handleFlagPrivilegedTermsStream:', error);
-    return { success: false, error: error as Error };
-  }
-};
 
-export const handlePerplexityAgent = async (
-  conversationId: string,
-  params: { query: string },
-  onChunk: (chunk: string) => void
-): Promise<{ success: boolean; error: Error | null; sources?: any[] }> => {
-  try {
-    // a. Save User Request
-    await addMessageSafely(conversationId, 'user', `/agent perplexity ${params.query}`);
+    console.log(`Case search completed for caseId: ${caseId}`);
+    return { success: true, answer: fullResponse, error: null };
 
-    // c. Prepare Perplexity API Request
-    const apiKey = process.env.PERPLEXITY_API_TOKEN;
-    if (!apiKey) throw new Error('Perplexity API token not set');
-    const url = 'https://api.perplexity.ai/chat/completions';
-    const body = JSON.stringify({
-      model: 'sonar-pro',
-      messages: [
-        { role: 'system', content: 'Be precise and concise.' },
-        { role: 'user', content: params.query }
-      ],
-      stream: true
-    });
-    const headers = {
-      'Authorization': `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-      'Accept': 'text/event-stream'
-    };
-
-    // d. Call Perplexity API & Handle Stream
-    const response = await fetch(url, { method: 'POST', headers, body });
-    if (!response.ok || !response.body) {
-      throw new Error(`Perplexity API error: ${response.status}`);
-    }
-    const reader = (response.body as unknown as ReadableStream<Uint8Array>).getReader();
-    let fullText = '';
-    let sources: any[] = [];
-    let done = false;
-    let buffer = '';
-    while (!done) {
-      const { value, done: streamDone } = await reader.read();
-      if (value) {
-        buffer += Buffer.from(value).toString('utf8');
-        let lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-        for (const line of lines) {
-          if (line.startsWith('data:')) {
-            const dataStr = line.replace('data:', '').trim();
-            if (dataStr === '[DONE]') {
-              done = true;
-              break;
-            }
-            try {
-              const data = JSON.parse(dataStr) as any;
-              const contentDelta = data.choices?.[0]?.delta?.content;
-              if (contentDelta) {
-                onChunk(contentDelta);
-                fullText += contentDelta;
-              }
-              // e. Extract sources if present
-              if (data.choices && Array.isArray(data.choices) && data.choices[0]?.delta?.sources) {
-                sources = data.choices[0].delta.sources;
-              }
-            } catch (err) {
-              // Ignore JSON parse errors for non-data lines
-            }
-          }
-        }
-      }
-      if (streamDone) break;
-    }
-    // g. Save Final Response
-    await addMessageSafely(conversationId, 'assistant', fullText);
-    return { success: true, error: null, sources };
-  } catch (error) {
-    return { success: false, error: error as Error };
+  } catch (e: unknown) {
+    const error = e instanceof Error ? e : new Error('Unknown error in case search');
+    console.error('Error handling case search:', error.message, e); // Log original error too
+    const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
+    onChunk(`[{"type": "error", "message": "Error during case search: ${errorMessage}"}]`);
+    return { success: false, error: error instanceof Error ? error : new Error(errorMessage) };
   }
 };

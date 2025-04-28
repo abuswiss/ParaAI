@@ -134,6 +134,82 @@ ${clarifications && clarifications.length ? `Clarifications: ${clarifications.jo
   }
 });
 
+// Helper function for OpenAI API calls
+async function callOpenAI(messages, maxTokens = 500, temperature = 0.5) {
+  const openaiReq = {
+    model: 'gpt-4', // Or consider a faster/cheaper model like gpt-3.5-turbo if appropriate
+    messages,
+    temperature,
+    max_tokens: maxTokens
+  };
+  console.log('Calling OpenAI with messages:', JSON.stringify(messages, null, 2));
+  const openaiRes = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`
+    },
+    body: JSON.stringify(openaiReq)
+  });
+
+  if (!openaiRes.ok) {
+    const errText = await openaiRes.text();
+    console.error('OpenAI API error:', errText);
+    // Throw an error object to be caught by the route handler
+    const error = new Error('OpenAI API error');
+    error.status = openaiRes.status;
+    error.details = errText;
+    throw error;
+  }
+
+  const openaiData = await openaiRes.json();
+  console.log('OpenAI response data:', JSON.stringify(openaiData, null, 2));
+  const resultText = openaiData.choices?.[0]?.message?.content?.trim() || null;
+  if (!resultText) {
+    console.error('OpenAI returned empty or unexpected response structure', openaiData);
+    throw new Error('OpenAI returned empty result');
+  }
+  return resultText;
+}
+
+// POST /api/ai/rewrite
+app.post('/api/ai/rewrite', async (req, res) => {
+  console.log('--- Incoming /api/ai/rewrite request ---');
+  const { text } = req.body;
+  if (!text) return res.status(400).json({ error: 'Missing text to rewrite' });
+
+  try {
+    const messages = [
+      { role: 'system', content: 'You are an expert legal writing assistant. Rewrite the following text clearly and concisely, maintaining the original meaning. Focus on improving clarity and flow for a legal professional audience.' },
+      { role: 'user', content: `Rewrite the following text:\n\n${text}` }
+    ];
+    const rewrittenText = await callOpenAI(messages, 1024, 0.6); // Allow more tokens for rewriting
+    res.json({ result: rewrittenText });
+  } catch (err) {
+    console.error('Error in /api/ai/rewrite:', err);
+    res.status(err.status || 500).json({ error: err.message || 'Internal server error', details: err.details });
+  }
+});
+
+// POST /api/ai/summarize
+app.post('/api/ai/summarize', async (req, res) => {
+  console.log('--- Incoming /api/ai/summarize request ---');
+  const { text } = req.body;
+  if (!text) return res.status(400).json({ error: 'Missing text to summarize' });
+
+  try {
+    const messages = [
+      { role: 'system', content: 'You are an expert legal writing assistant. Summarize the key points of the following text concisely for a legal professional.' },
+      { role: 'user', content: `Summarize the following text:\n\n${text}` }
+    ];
+    const summarizedText = await callOpenAI(messages, 512, 0.3); // Fewer tokens, lower temp for summary
+    res.json({ result: summarizedText });
+  } catch (err) {
+    console.error('Error in /api/ai/summarize:', err);
+    res.status(err.status || 500).json({ error: err.message || 'Internal server error', details: err.details });
+  }
+});
+
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
   console.log(`Backend server running on port ${PORT}`);

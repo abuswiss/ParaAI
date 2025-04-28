@@ -1,24 +1,29 @@
 import React from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
-import { checkSupabaseEnv } from './utils/envCheck'
+// import { checkSupabaseEnv } from './utils/envCheck' // Commented out - file not found
 import App from './App'
 
-// Check environment configuration during startup
-const envCheck = checkSupabaseEnv();
-if (!envCheck.valid && import.meta.env.DEV) {
-  console.warn('⚠️ Environment configuration issues detected:');
-  console.warn(envCheck.debugInfo);
-  console.warn('The application may not function correctly without proper environment variables.');
-  
-  // Display a more visible warning in the console
-  console.log('%c⚠️ ENVIRONMENT CONFIGURATION ERROR', 'background: #f44336; color: white; font-size: 16px; padding: 4px 8px;');
-  console.log('%cSee .env.example for required variables', 'font-size: 14px; color: #f44336;');
-}
+// const envCheck = checkSupabaseEnv(); // Commented out - function source not found
 
-// Initialize app after environment validation
-createRoot(document.getElementById('root')!).render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>,
-)
+// if (!envCheck.valid) {
+//   // Render an error message or a diagnostic component
+//   // For example, you could render a simple message:
+//   document.getElementById("root")!.innerHTML = `
+//     <div style="padding: 20px; font-family: sans-serif;">
+//       <h1>Configuration Error</h1>
+//       <p>Supabase environment variables are missing or invalid.</p>
+//       <p>Please check your .env file and ensure VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY are set correctly.</p>
+//       <ul>
+//         ${envCheck.missing.map(key => `<li>Missing: ${key}</li>`).join('')}
+//       </ul>
+//     </div>
+//   `;
+// } else {
+  // Environment variables are okay, render the app
+  createRoot(document.getElementById('root')!).render(
+    <React.StrictMode>
+      <App />
+    </React.StrictMode>,
+  )
+// }

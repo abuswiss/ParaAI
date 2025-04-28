@@ -1,346 +1,97 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { getUserDocuments, getDocumentUrl, deleteDocument } from '../../services/documentService';
-import { Document, getFileIcon, formatFileSize } from '../../types/document';
-import DocumentViewer from './DocumentViewer';
+import React, { useState, useEffect } from 'react';
+import { useAtomValue, useSetAtom } from 'jotai';
+import { 
+  activeCaseIdAtom, 
+  activeEditorItemAtom, 
+  ActiveEditorItem
+} from '@/atoms/appAtoms';
+import * as documentService from '@/services/documentService';
+import { Document, getFileIcon } from '@/types/document';
+import { Spinner } from '@/components/ui/Spinner';
+import { Icons } from '@/components/ui/Icons';
 
-interface DocumentListProps {
-  caseId?: string;
-  onSelectDocument?: (document: Document) => void;
-  onDocumentDeleted?: () => void;
-}
-
-const DocumentList: React.FC<DocumentListProps> = ({
-  caseId,
-  onSelectDocument,
-  onDocumentDeleted
-}) => {
+const DocumentList: React.FC = () => {
+  const activeCaseId = useAtomValue(activeCaseIdAtom);
+  const activeEditorItem = useAtomValue(activeEditorItemAtom);
+  const setActiveEditorItem = useSetAtom(activeEditorItemAtom);
   const [documents, setDocuments] = useState<Document[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
-  const [viewingDocument, setViewingDocument] = useState<string | null>(null);
-  const [searchQuery, setSearchQuery] = useState<string>('');
-  const [activeFilter, setActiveFilter] = useState<'all' | 'pdf' | 'word'>('all');
-
-  const fetchDocuments = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-
-    try {
-      const { data, error } = await getUserDocuments(caseId);
-      
-      if (error) {
-        throw error;
-      }
-      
-      setDocuments(data || []);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load documents');
-      console.error('Error fetching documents:', err);
-    } finally {
-      setLoading(false);
-    }
-  }, [caseId]);
 
   useEffect(() => {
-    fetchDocuments();
-  }, [fetchDocuments]);
-
-  const handleDocumentClick = (doc: Document) => {
-    setSelectedDocId(doc.id);
-    if (onSelectDocument) {
-      onSelectDocument(doc);
+    if (!activeCaseId) {
+      setDocuments([]);
+      setError(null);
+      setIsLoading(false);
+      return;
     }
-  };
 
-  const handleDownload = async (doc: Document) => {
-    try {
-      const { data: url, error } = await getDocumentUrl(doc.storagePath);
-      
-      if (error) {
-        throw error;
-      }
-      
-      if (url) {
-        window.open(url, '_blank');
-      }
-    } catch (err) {
-      console.error('Error downloading document:', err);
-    }
-  };
-
-  const handleDelete = async (docId: string) => {
-    if (window.confirm('Are you sure you want to delete this document?')) {
+    const fetchDocuments = async () => {
+      setIsLoading(true);
+      setError(null);
       try {
-        const { success, error } = await deleteDocument(docId);
-        
-        if (error) {
-          throw error;
-        }
-        
-        if (success) {
-          setDocuments(docs => docs.filter(d => d.id !== docId));
-          
-          if (onDocumentDeleted) {
-            onDocumentDeleted();
-          }
-        }
+        const { data: fetchedDocuments, error: fetchError } = await documentService.getUserDocuments(activeCaseId);
+         if (fetchError) throw fetchError;
+        setDocuments(fetchedDocuments || []);
       } catch (err) {
-        console.error('Error deleting document:', err);
+        console.error("Error fetching documents:", err);
+        setError("Failed to load documents.");
+      } finally {
+        setIsLoading(false);
       }
-    }
+    };
+
+    fetchDocuments();
+  }, [activeCaseId]);
+
+  const handleSelectDocument = (docId: string) => {
+    setActiveEditorItem({ type: 'document', id: docId });
   };
 
-  const renderFileIcon = (contentType: string) => {
-    const iconType = getFileIcon(contentType);
-    
-    return (
-      <div className={`rounded-lg p-2 flex items-center justify-center ${selectedDocId === null ? 'bg-gray-800' : 'bg-gray-700'}`}>
-        {iconType === 'pdf' && (
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-red-400" viewBox="0 0 20 20" fill="currentColor">
-            <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clipRule="evenodd" />
-          </svg>
-        )}
-        {iconType === 'word' && (
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-blue-400" viewBox="0 0 20 20" fill="currentColor">
-            <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clipRule="evenodd" />
-          </svg>
-        )}
-        {iconType === 'text' && (
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-gray-400" viewBox="0 0 20 20" fill="currentColor">
-            <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clipRule="evenodd" />
-          </svg>
-        )}
-        {iconType === 'image' && (
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-purple-400" viewBox="0 0 20 20" fill="currentColor">
-            <path fillRule="evenodd" d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2H4zm12 12H4l4-8 3 6 2-4 3 6z" clipRule="evenodd" />
-          </svg>
-        )}
-        {(iconType === 'generic' || !['pdf', 'word', 'text', 'image'].includes(iconType)) && (
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-gray-400" viewBox="0 0 20 20" fill="currentColor">
-            <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clipRule="evenodd" />
-          </svg>
-        )}
-      </div>
-    );
+  const renderFileIcon = (filename: string) => {
+    try {
+      const IconComponent = getFileIcon(filename);
+      return <IconComponent className="w-4 h-4 mr-2 flex-shrink-0" />;
+    } catch (e) {
+      return <Icons.File className="w-4 h-4 mr-2 flex-shrink-0 text-text-tertiary" />;
+    }
   };
-
-  const truncateFilename = (filename: string, maxLength = 20) => {
-    if (!filename) return 'Untitled';
-    if (filename.length <= maxLength) return filename;
-    
-    const extension = filename.split('.').pop();
-    const name = filename.substring(0, filename.lastIndexOf('.'));
-    
-    if (name.length <= maxLength - 3 - (extension?.length || 0)) {
-      return filename;
-    }
-    
-    return `${name.substring(0, maxLength - 3 - (extension?.length || 0))}...${extension ? `.${extension}` : ''}`;
-  };
-
-  // Filter documents based on search query and active filter
-  const filteredDocuments = documents.filter(doc => {
-    if (!searchQuery) {
-      if (activeFilter === 'pdf') {
-        return doc.contentType && doc.contentType.includes('pdf');
-      } else if (activeFilter === 'word') {
-        return doc.contentType && (doc.contentType.includes('word') || doc.contentType.includes('officedocument'));
-      }
-      return true;
-    }
-    // Apply search query as well
-    const matchesSearch = doc.filename.toLowerCase().includes(searchQuery.toLowerCase());
-    if (activeFilter === 'pdf') {
-      return matchesSearch && doc.contentType && doc.contentType.includes('pdf');
-    } else if (activeFilter === 'word') {
-      return matchesSearch && doc.contentType && (doc.contentType.includes('word') || doc.contentType.includes('officedocument'));
-    }
-    return matchesSearch;
-  });
 
   return (
-    <div className="flex flex-col h-full overflow-hidden bg-gray-900 rounded-lg">
-      {/* AI Analysis Button Entry Point */}
-      <div className="p-4 pb-2 flex justify-center">
-        <button
-          className="flex items-center gap-2 px-5 py-2 rounded-lg font-semibold text-white shadow-lg bg-gradient-to-r from-primary via-pink-500 to-yellow-400 hover:from-pink-500 hover:to-primary transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
-          onClick={() => {
-            if (selectedDocId) {
-              setViewingDocument(selectedDocId);
-            } else {
-              alert('Please select a document to analyze with AI.');
-            }
-          }}
-          title="Run AI-powered analysis on your document"
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-white drop-shadow" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M12 20a8 8 0 100-16 8 8 0 000 16z" />
-          </svg>
-          <span>AI Analysis</span>
-        </button>
-      </div>
-
-      {/* Search and Filter Controls */}
-      <div className="p-3 border-b border-gray-800">
-        <div className="relative">
-          <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-gray-500" viewBox="0 0 20 20" fill="currentColor">
-              <path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd" />
-            </svg>
+    <div className="document-list-container mt-4 flex-1 overflow-y-auto">
+      <h3 className="text-sm font-semibold text-neutral-600 dark:text-text-secondary mb-2 sticky top-0 bg-white dark:bg-surface py-1">Case Documents</h3>
+      {isLoading && (
+         <div className="flex items-center justify-center py-4">
+            <Spinner size="small" />
+            <span className="ml-2 text-xs text-neutral-500 dark:text-text-secondary">Loading...</span>
           </div>
-          <input
-            type="text"
-            placeholder="Search documents..."
-            className="w-full bg-gray-800 text-sm border border-gray-700 rounded-md pl-10 py-2 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-          />
-        </div>
-        
-        <div className="flex mt-2 space-x-1 overflow-x-auto py-1">
-          <button
-            className={`px-2.5 py-1 text-xs rounded-md whitespace-nowrap font-medium ${activeFilter === 'all' ? 'bg-primary text-white' : 'bg-gray-800 hover:bg-gray-700 text-gray-300'}`}
-            onClick={() => setActiveFilter('all')}
-          >
-            All Files
-          </button>
-          <button
-            className={`px-2.5 py-1 text-xs rounded-md whitespace-nowrap font-medium ${activeFilter === 'pdf' ? 'bg-primary text-white' : 'bg-gray-800 hover:bg-gray-700 text-gray-300'}`}
-            onClick={() => setActiveFilter('pdf')}
-          >
-            PDFs
-          </button>
-          <button
-            className={`px-2.5 py-1 text-xs rounded-md whitespace-nowrap font-medium ${activeFilter === 'word' ? 'bg-primary text-white' : 'bg-gray-800 hover:bg-gray-700 text-gray-300'}`}
-            onClick={() => setActiveFilter('word')}
-          >
-            Word Docs
-          </button>
-          <button
-            className="px-2.5 py-1 text-xs rounded-md whitespace-nowrap font-medium bg-gray-900 text-gray-600 cursor-not-allowed opacity-60"
-            disabled
-            title="Recent filter is currently disabled"
-          >
-            Recent
-          </button>
-        </div>
-      </div>
-
-      {loading ? (
-        <div className="flex-1 flex justify-center items-center">
-          <div className="animate-spin rounded-full h-10 w-10 border-t-2 border-b-2 border-primary"></div>
-        </div>
-      ) : error ? (
-        <div className="p-4">
-          <div className="text-red-500 bg-red-900/20 p-4 rounded-md">
-            {error}
-          </div>
-        </div>
-      ) : filteredDocuments.length === 0 ? (
-        <div className="flex-1 flex flex-col justify-center items-center p-4 text-center">
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-16 w-16 text-gray-500 mb-4" viewBox="0 0 20 20" fill="currentColor">
-            <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clipRule="evenodd" />
-          </svg>
-          <h3 className="text-lg font-medium text-white mb-2">No Documents Found</h3>
-          <p className="text-gray-400 max-w-md">
-            {searchQuery 
-              ? 'No documents match your search. Try different keywords or clear your search.'
-              : caseId 
-                ? 'There are no documents associated with this case yet. Upload documents to get started.' 
-                : 'You haven\'t uploaded any documents yet. Upload your first document to get started.'
-            }
-          </p>
-        </div>
-      ) : (
-        <div className="flex-1 overflow-auto">
-          {filteredDocuments.map((doc) => (
-            <div
-              key={doc.id}
-              className={`border-b border-gray-700 hover:bg-gray-800 transition-colors ${selectedDocId === doc.id ? 'bg-gray-800' : ''}`}
-            >
-              <div 
-                className="p-3 flex items-center group cursor-pointer"
-                onClick={() => handleDocumentClick(doc)}
-              >
-                <div className="mr-3 flex-shrink-0">
-                  {renderFileIcon(doc.contentType)}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center">
-                    <p className="text-white font-medium truncate mr-1">
-                      {truncateFilename(doc.filename, 20)}
-                    </p>
-                    {doc.processingStatus === 'completed' && (
-                      <span className="bg-green-900/30 text-green-400 text-xs px-1.5 py-0.5 rounded-sm">Processed</span>
-                    )}
-                    {doc.processingStatus === 'processing' && (
-                      <span className="bg-blue-900/30 text-blue-400 text-xs px-1.5 py-0.5 rounded-sm flex items-center">
-                        <span className="h-1.5 w-1.5 rounded-full bg-blue-400 animate-pulse mr-1"></span>
-                        Processing
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-gray-400 text-xs flex items-center space-x-2 mt-0.5">
-                    <span>{new Date(doc.uploadedAt).toLocaleDateString()}</span>
-                    {typeof doc.size === 'number' ? <span>• {formatFileSize(doc.size)}</span> : ''}
-                    {doc.contentType && <span className="text-gray-500">• {doc.contentType.split('/')[1]?.toUpperCase()}</span>}
-                  </p>
-                </div>
-                <div className="ml-2 flex items-center opacity-0 group-hover:opacity-100 transition-opacity">
-                  <div className="flex bg-gray-900 bg-opacity-70 rounded-md p-0.5">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleDownload(doc);
-                      }}
-                      className="p-1 rounded-md text-gray-400 hover:text-white hover:bg-gray-700 transition-colors"
-                      title="Download"
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
-                        <path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clipRule="evenodd" />
-                      </svg>
-                    </button>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setViewingDocument(doc.id);
-                      }}
-                      className="p-1 rounded-md text-gray-400 hover:text-white hover:bg-gray-700 transition-colors"
-                      title="View"
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
-                        <path d="M10 12a2 2 0 100-4 2 2 0 000 4z" />
-                        <path fillRule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clipRule="evenodd" />
-                      </svg>
-                    </button>
-
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleDelete(doc.id);
-                      }}
-                      className="p-1 rounded-md text-gray-400 hover:text-red-500 hover:bg-gray-700 transition-colors"
-                      title="Delete"
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
-                        <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
-                      </svg>
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
       )}
-
-      {/* Document Viewer Modal */}
-      {viewingDocument && (
-        <DocumentViewer 
-          documentId={viewingDocument}
-          onClose={() => setViewingDocument(null)}
-        />
+      {error && <p className="text-xs text-error dark:text-error px-2">Error: {error}</p>}
+      {!isLoading && !error && documents.length === 0 && (
+        <p className="text-xs text-neutral-500 dark:text-text-secondary px-2 italic">
+          {activeCaseId ? 'No documents found for this case.' : 'Select a case to view documents.'}
+        </p>
+      )}
+      {!isLoading && !error && documents.length > 0 && (
+        <ul className="space-y-1">
+          {documents.map((doc) => (
+            <li key={doc.id}>
+              <button
+                onClick={() => handleSelectDocument(doc.id)}
+                className={`w-full flex items-center px-2 py-1.5 text-left text-xs rounded-md transition-colors ${
+                  (activeEditorItem?.type === 'document' && activeEditorItem?.id === doc.id)
+                    ? 'bg-primary-light text-primary dark:bg-primary-light dark:text-primary'
+                    : 'text-neutral-700 dark:text-text-secondary hover:bg-neutral-100 dark:hover:bg-surface-lighter'
+                }`}
+              >
+                {renderFileIcon(doc.filename || 'unknown')}
+                <span className="truncate flex-1" title={doc.filename || 'Untitled Document'}>
+                  {doc.filename || 'Untitled Document'}
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
       )}
     </div>
   );

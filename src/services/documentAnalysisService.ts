@@ -10,7 +10,7 @@ const MAX_CHUNK_SIZE = 4000;
 export interface DocumentAnalysisResult {
   id: string;
   documentId: string;
-  analysisType: 'summary' | 'entities' | 'sentiment' | 'clauses' | 'risks' | 'timeline' | 'custom';
+  analysisType: 'summary' | 'entities' | 'sentiment' | 'clauses' | 'risks' | 'timeline' | 'custom' | 'privilegedTerms';
   result: any;
   createdAt: string;
 }
@@ -107,8 +107,9 @@ export const chunkDocumentText = (text: string, maxLength: number = MAX_CHUNK_SI
  */
 export const analyzeDocument = async (
   documentId: string,
-  analysisType: 'summary' | 'entities' | 'sentiment' | 'clauses' | 'risks' | 'timeline' | 'custom',
-  customPrompt?: string
+  analysisType: 'summary' | 'entities' | 'sentiment' | 'clauses' | 'risks' | 'timeline' | 'custom' | 'privilegedTerms',
+  customPrompt?: string,
+  caseId?: string
 ): Promise<{ data: DocumentAnalysisResult | null; error: Error | null }> => {
   try {
     // Check if document exists and has extracted text
@@ -171,6 +172,11 @@ export const analyzeDocument = async (
         systemPrompt = 'You are a legal document analysis assistant.';
         prompt = customPrompt || 'Please analyze this legal document for insights.';
         prompt += ` Document: ${textChunks[0].substring(0, 3000)}`;
+        break;
+      
+      case 'privilegedTerms':
+        systemPrompt = 'You are a legal document analysis tool specialized in identifying potentially privileged terms.';
+        prompt = `Please scan this document and identify any terms, phrases, or sections that might be subject to attorney-client privilege, work-product doctrine, or other common legal privileges. List each potential item clearly. Document: ${textChunks[0].substring(0, 3000)}`;
         break;
     }
 

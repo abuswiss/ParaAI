@@ -1,4 +1,19 @@
 import React from 'react';
+import { 
+  Save, // Import Save directly
+  Heading1, 
+  Heading2, 
+  Type, 
+  Bold, 
+  Italic, 
+  List, 
+  ListOrdered,
+  Quote,
+  Sparkles,
+  File,
+  Upload,
+  Loader
+} from 'lucide-react'; // Import needed lucide icons
 
 export interface IconProps {
   className?: string;
@@ -224,6 +239,23 @@ export const ClockIcon: React.FC<IconProps> = (props) => (
   </BaseIcon>
 );
 
+// Add missing icons from lucide-react (or use existing ones)
+export { 
+  // Save as SaveIcon, // Removed re-export
+  Heading1 as Heading1Icon,
+  Heading2 as Heading2Icon,
+  Type as TypeIcon, // Alternative for Heading
+  Bold as BoldIcon, 
+  Italic as ItalicIcon, 
+  List as ListIcon, 
+  ListOrdered as ListOrderedIcon,
+  Quote as QuoteIcon,
+  Sparkles as SparklesIcon,
+  File as FileIcon, // Generic file icon
+  Upload as UploadIcon,
+  Loader as LoaderIcon // For spinner/loading
+} from 'lucide-react';
+
 // Export all icons as a group
 export const Icons = {
   Document: DocumentIcon,
@@ -252,4 +284,17 @@ export const Icons = {
   Gavel: GavelIcon,
   Scale: ScaleIcon,
   Clock: ClockIcon,
+  Save: Save, // Use the directly imported Save component
+  Heading1: Heading1,
+  Heading2: Heading2,
+  Type: Type,
+  Bold: Bold,
+  Italic: Italic,
+  List: List,
+  ListOrdered: ListOrdered,
+  Quote: Quote,
+  Sparkles: Sparkles,
+  File: File,
+  Upload: Upload,
+  Loader: Loader
 };

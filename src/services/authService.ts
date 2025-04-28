@@ -13,8 +13,9 @@ export const signIn = async ({ email, password }: UserCredentials) => {
 
     if (error) throw error;
     return { data, error: null };
-  } catch (error: any) {
-    console.error('Error signing in:', error.message);
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error during sign in';
+    console.error('Error signing in:', message);
     return { data: null, error };
   }
 };
@@ -34,8 +35,9 @@ export const signUp = async ({ email, password }: SignUpData) => {
 
     if (error) throw error;
     return { data, error: null };
-  } catch (error: any) {
-    console.error('Error signing up:', error.message);
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error during sign up';
+    console.error('Error signing up:', message);
     return { data: null, error };
   }
 };
@@ -48,8 +50,9 @@ export const signOut = async () => {
     const { error } = await supabase.auth.signOut();
     if (error) throw error;
     return { error: null };
-  } catch (error: any) {
-    console.error('Error signing out:', error.message);
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error during sign out';
+    console.error('Error signing out:', message);
     return { error };
   }
 };
@@ -62,8 +65,9 @@ export const getSession = async () => {
     const { data, error } = await supabase.auth.getSession();
     if (error) throw error;
     return { data, error: null };
-  } catch (error: any) {
-    console.error('Error getting session:', error.message);
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error getting session';
+    console.error('Error getting session:', message);
     return { data: null, error };
   }
 };
@@ -76,8 +80,9 @@ export const getCurrentUser = async () => {
     const { data: { user }, error } = await supabase.auth.getUser();
     if (error) throw error;
     return { user, error: null };
-  } catch (error: any) {
-    console.error('Error getting user:', error.message);
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error getting user';
+    console.error('Error getting user:', message);
     return { user: null, error };
   }
 };

@@ -53,8 +53,9 @@ const ensureBucketExists = async (bucketName: string): Promise<boolean> => {
     console.error(`Cannot verify or access bucket '${bucketName}'. Please ensure it exists in the Supabase dashboard.`);
     return false;
     
-  } catch (error) {
-    console.error(`Error checking bucket '${bucketName}':`, error);
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error checking bucket';
+    console.error(`Error checking bucket '${bucketName}':`, message);
     return false;
   }
 };  
@@ -147,9 +148,10 @@ export const uploadDocument = async (
     // This should never be reached due to the throw above, but TypeScript doesn't know that
     throw new Error('Failed to upload document');
     
-  } catch (error) {
-    console.error('Error uploading document:', error);
-    throw error instanceof Error ? error : new Error('Unknown error during upload');
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error during upload';
+    console.error('Error uploading document:', message);
+    throw error instanceof Error ? error : new Error(message);
   }
 };
 
@@ -201,9 +203,10 @@ export const getUserDocuments = async (
     }));
 
     return { data: documents, error: null };
-  } catch (error) {
-    console.error('Error getting documents:', error);
-    return { data: null, error: error as Error };
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error getting user documents';
+    console.error('Error getting user documents:', message);
+    return { data: null, error: error instanceof Error ? error : new Error(message) };
   }
 };
 
@@ -237,9 +240,10 @@ export const getDocumentById = async (
     };
 
     return { data: documentMetadata, error: null };
-  } catch (error) {
-    console.error('Error getting document:', error);
-    return { data: null, error: error as Error };
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error getting document by ID';
+    console.error('Error getting document by ID:', message);
+    return { data: null, error: error instanceof Error ? error : new Error(message) };
   }
 };
 
@@ -259,9 +263,10 @@ export const getDocumentUrl = async (
     }
 
     return { data: data.signedUrl, error: null };
-  } catch (error) {
-    console.error('Error getting document URL:', error);
-    return { data: null, error: error as Error };
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error getting document URL';
+    console.error('Error getting document URL:', message);
+    return { data: null, error: error instanceof Error ? error : new Error(message) };
   }
 };
 
@@ -283,9 +288,10 @@ export const deleteDocument = async (
     }
 
     return { success: true, error: null };
-  } catch (error) {
-    console.error('Error deleting document:', error);
-    return { success: false, error: error as Error };
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error deleting document';
+    console.error('Error deleting document:', message);
+    return { success: false, error: error instanceof Error ? error : new Error(message) };
   }
 };
 
@@ -385,8 +391,9 @@ export const processDocument = async (
       console.error('Error fetching document for processing:', fetchError);
       return await processFallbackDocument(documentId, document);
     }
-  } catch (error) {
-    console.error('Error processing document:', error);
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error processing document';
+    console.error('Error processing document:', message);
     
     // Mark the document as failed
     await supabase
@@ -398,7 +405,7 @@ export const processDocument = async (
     
     return {
       success: false,
-      error: error instanceof Error ? error : new Error('Unknown error occurred during document processing')
+      error: error instanceof Error ? error : new Error(message)
     };
   }
 };
@@ -447,8 +454,9 @@ async function processFallbackDocument(documentId: string, document: DocumentMet
 
     console.log('Fallback content generated successfully');
     return { success: true, error: null };
-  } catch (error) {
-    console.error('Error in fallback processing:', error);
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error processing fallback document';
+    console.error('Error processing fallback document:', message);
     
     // Mark the document as failed
     await supabase
@@ -460,7 +468,7 @@ async function processFallbackDocument(documentId: string, document: DocumentMet
     
     return {
       success: false,
-      error: error instanceof Error ? error : new Error('Fallback processing failed')
+      error: error instanceof Error ? error : new Error(message)
     };
   }
 }
@@ -535,41 +543,10 @@ async function processPdfDocument(blob: Blob, documentFilename: string): Promise
     URL.revokeObjectURL(pdfUrl);
     
     return pdfText || 'No text content could be extracted from this PDF.';
-  } catch (error) {
-    console.error('Error extracting PDF text:', error);
-    
-    // Fallback to mock data if PDF extraction fails
-    return `[PDF EXTRACTION FALLBACK] LEGAL DOCUMENT: ${documentFilename}
-
-This document appears to be a legal agreement between parties dated January 15, 2025.
-
-Section 1: Definitions
-In this Agreement, the following terms shall have the following meanings:
-"Client" means the party engaging the services.
-"Provider" means the party providing the services.
-
-Section 2: Services
-The Provider agrees to provide legal services as described in Schedule A.
-
-Section 3: Payment
-The Client agrees to pay the Provider as per the payment schedule in Schedule B.
-
-Section 4: Confidentiality
-Both parties agree to maintain confidentiality of all information shared during the term of this Agreement.
-
-Section 5: Termination
-This Agreement may be terminated by either party with 30 days written notice.
-
-Section 6: Governing Law
-This Agreement shall be governed by and construed in accordance with the laws of the State of California.
-
-Section 7: Dispute Resolution
-Any disputes arising from this Agreement shall be resolved through arbitration.
-
-Signed and dated: January 15, 2025
-
-Client: [Signature]
-Provider: [Signature]`;
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error processing PDF';
+    console.error(`Error processing PDF ${documentFilename}:`, message);
+    throw error instanceof Error ? error : new Error(message);
   }
 }
 
@@ -583,39 +560,10 @@ async function processDocxDocument(blob: Blob, documentFilename: string): Promis
     const arrayBuffer = await blob.arrayBuffer();
     const result = await mammoth.extractRawText({ arrayBuffer });
     return result.value || 'No text content could be extracted from this document.';
-  } catch (error) {
-    console.error('Error extracting DOCX text:', error);
-    
-    // Fallback to mock data if DOCX extraction fails
-    return `[DOCX EXTRACTION FALLBACK] DOCUMENT: ${documentFilename}
-
-MEMORANDUM
-
-Date: February 3, 2025
-To: Legal Department
-From: John Smith, General Counsel
-Re: Contract Review Process
-
-This memorandum outlines the new contract review process effective March 1, 2025. All contracts must go through the following stages:
-
-1. Initial Review (1-2 days)
-   - Basic terms check
-   - Parties verification
-   - Jurisdiction assessment
-
-2. Risk Analysis (2-3 days)
-   - Liability exposure
-   - Term assessment
-   - Indemnification review
-
-3. Final Approval (1 day)
-   - General Counsel sign-off
-   - Contract database entry
-   - Notification to relevant departments
-
-All contracts with value exceeding $50,000 must receive additional review by the finance department.
-
-Please reach out to the legal operations team with any questions about this process.`;
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error processing DOCX';
+    console.error(`Error processing DOCX ${documentFilename}:`, message);
+    throw error instanceof Error ? error : new Error(message);
   }
 }
 
@@ -626,9 +574,10 @@ async function processTextDocument(blob: Blob): Promise<string> {
   try {
     const text = await new Response(blob).text();
     return text || 'No text content found in document.';
-  } catch (error) {
-    console.error('Error extracting text:', error);
-    return 'Failed to extract text from document.';
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error processing text document';
+    console.error('Error processing text document:', message);
+    throw error instanceof Error ? error : new Error(message);
   }
 }
 
@@ -669,8 +618,54 @@ export const processAndAnalyzeDocument = async (
     };
     
     return { success: true, data: analysisResult, error: null };
-  } catch (error) {
-    console.error(`Error in processAndAnalyzeDocument:`, error);
-    return { success: false, error: error as Error };
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error processing and analyzing document';
+    console.error('Error processing and analyzing document:', message);
+    return { success: false, error: error instanceof Error ? error : new Error(message) };
+  }
+};
+
+/**
+ * Update a document record, primarily its extracted text content.
+ */
+export const updateDocument = async (
+  documentId: string,
+  updates: { extractedText?: string; /* Add other updatable fields if needed, e.g., filename */ }
+): Promise<{ success: boolean; error: Error | null }> => {
+  try {
+    // Ensure we have something to update
+    if (!updates || Object.keys(updates).length === 0) {
+        console.warn('updateDocument called with no updates for id:', documentId);
+        return { success: true, error: null }; // No operation needed
+    }
+
+    const updateData: Record<string, any> = {};
+    if (updates.extractedText !== undefined) {
+        // IMPORTANT: Decide if we update extracted_text directly or have a separate 'editable_content' field.
+        // For now, updating extracted_text. This might overwrite original extraction.
+        // Consider adding an 'editable_content' column to the 'documents' table if preserving original extraction is important.
+        updateData.extracted_text = updates.extractedText;
+    }
+    // Map other fields from `updates` to DB column names if added
+    // e.g., if (updates.filename) updateData.filename = updates.filename;
+
+    updateData.updated_at = new Date().toISOString(); // Always update timestamp
+
+    const { error } = await supabase
+      .from('documents')
+      .update(updateData)
+      .eq('id', documentId);
+
+    if (error) {
+      console.error(`Error updating document ${documentId}:`, error);
+      throw error;
+    }
+
+    console.log(`Document ${documentId} updated successfully.`);
+    return { success: true, error: null };
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error updating document';
+    console.error('Error updating document:', message);
+    return { success: false, error: error instanceof Error ? error : new Error(message) };
   }
 };

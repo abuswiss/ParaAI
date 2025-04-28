@@ -1,17 +1,42 @@
 // Command parser utility for chat input
-// Recognizes /research, /agent draft, /agent help, and returns a Task object or null
+// Recognizes /research, /agent commands, /use template, and returns a Task object or null
 
+import { AgentName } from './agents'; // Assuming AgentName type exists
+
+// Define specific task types for clarity
+interface HelpTask { type: 'help' }
+interface ResearchTask { type: 'research'; query: string }
+interface AgentDraftTask { type: 'agent'; agent: 'draft'; instructions?: string }
+interface FindClauseTask { type: 'agent'; agent: 'find_clause'; clause: string; docId: string }
+interface FlagPrivilegedTask { type: 'agent'; agent: 'flag_privileged_terms'; docId: string }
+interface GenerateTimelineTask { type: 'agent'; agent: 'generate_timeline'; docId: string }
+interface RiskAnalysisTask { type: 'agent'; agent: 'risk_analysis'; docId: string }
+interface KeyClausesTask { type: 'agent'; agent: 'key_clauses'; docId: string }
+interface SummarizeDocTask { type: 'agent'; agent: 'summarize'; docId: string }
+interface ExplainTermTask { type: 'agent'; agent: 'explain_term'; term: string; jurisdiction?: string } // Add jurisdiction
+interface PerplexityTask { type: 'agent'; agent: 'perplexity'; query: string }
+interface AgentCompareTask { type: 'agent'; agent: 'compare'; docIdA: string; docIdB: string } // New task type
+interface UseTemplateTask { type: 'use_template'; templateName: string }
+interface CaseSearchTask { type: 'case_search'; query: string }
+interface UnknownTask { type: 'unknown'; command: string }
+
+// Union type for all possible tasks
 export type Task =
-  | { type: 'research'; query: string }
-  | { type: 'agent'; agent: string; instructions?: string }
-  | { type: 'agent'; agent: 'find_clause'; clause: string; docId: string }
-  | { type: 'agent'; agent: 'flag_privileged_terms'; docId: string }
-  | { type: 'agent'; agent: 'generate_timeline'; docId: string }
-  | { type: 'agent'; agent: 'risk_analysis'; docId: string }
-  | { type: 'agent'; agent: 'key_clauses'; docId: string }
-  | { type: 'agent'; agent: 'summarize'; docId: string }
-  | { type: 'help' }
-  | { type: 'agent'; agent: 'perplexity'; query: string }
+  | HelpTask
+  | ResearchTask
+  | AgentDraftTask
+  | FindClauseTask
+  | FlagPrivilegedTask
+  | GenerateTimelineTask
+  | RiskAnalysisTask
+  | KeyClausesTask
+  | SummarizeDocTask
+  | ExplainTermTask // Add to union
+  | PerplexityTask
+  | AgentCompareTask // Added to union
+  | UseTemplateTask
+  | CaseSearchTask
+  | UnknownTask
   | null;
 
 export function parseCommand(inputText: string): Task {
@@ -84,6 +109,42 @@ export function parseCommand(inputText: string): Task {
       return { type: 'agent', agent: 'perplexity', query };
     }
   }
-  // Add more /agent commands as needed
-  return null;
+  // /agent compare [docA_id] [docB_id]
+  const compareMatch = trimmed.match(/^\/agent compare\s+(\S+)\s+(\S+)$/i);
+  if (compareMatch) {
+    const docIdA = compareMatch[1].trim();
+    const docIdB = compareMatch[2].trim();
+    if (docIdA && docIdB) {
+      return { type: 'agent', agent: 'compare', docIdA, docIdB };
+    }
+  }
+  // /use template "Template Name" OR /use template TemplateName
+  // Also allow /use tmpl ... as shorthand
+  const useTemplateMatch = trimmed.match(/^\/use\s+(?:template|tmpl)\s+(?:"([^"]+)"|(\S+))$/i);
+  if (useTemplateMatch) {
+    const templateName = useTemplateMatch[1] || useTemplateMatch[2]; // Group 1 for quoted, Group 2 for unquoted
+    if (templateName) {
+      return { type: 'use_template', templateName: templateName.trim() };
+    }
+  }
+  // Case Search command (handles quoted and unquoted queries)
+  const caseSearchMatch = trimmed.match(/^\/search\s+(?:\"([^\"]+)\"|(.+))$/);
+  if (caseSearchMatch) {
+    const query = (caseSearchMatch[1] || caseSearchMatch[2]).trim();
+    return { type: 'case_search', query };
+  }
+  // /agent explain_term "..." (optional: in [jurisdiction])
+  const explainTermMatch = trimmed.match(/^\/agent explain_term\s+\"([^\"]+)\"(?:\s+in\s+(.+))?$/i);
+  if (explainTermMatch) {
+    const term = explainTermMatch[1].trim();
+    const jurisdiction = explainTermMatch[2]?.trim();
+    if (term) {
+      return { type: 'agent', agent: 'explain_term', term, jurisdiction };
+    }
+  }
+  // If it starts with / but doesn't match known commands
+  if (trimmed.startsWith('/')) {
+    return { type: 'unknown', command: trimmed };
+  }
+  return null; // Not a command
 } 

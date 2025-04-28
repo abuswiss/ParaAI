@@ -1,8 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { DocumentAnalysisResult } from '../../services/documentAnalysisService';
-import { formatDistanceToNow } from 'date-fns';
-import { motion } from 'framer-motion';
-import { Badge, Button, IconButton, Tooltip, Icons } from '../ui';
+import { Badge, Button, Tooltip, Icons } from '../ui';
 import { RiskAssessment } from '../documents/RiskAssessment';
 import ReactMarkdown from 'react-markdown';
 
@@ -20,22 +18,21 @@ export interface Message {
 interface ChatMessageProps {
   message: Message;
   isStreaming?: boolean;
-  onSaveMessage?: () => void;
   onEditMessage?: (messageId: string, newContent: string) => void;
   onRegenerateResponse?: (messageId: string) => void;
   onCopyContent?: (content: string) => void;
+  onInsertContent?: (content: string) => void;
 }
 
 const ChatMessage: React.FC<ChatMessageProps> = ({ 
   message, 
   isStreaming, 
-  onSaveMessage, 
   onEditMessage, 
   onRegenerateResponse, 
-  onCopyContent 
+  onCopyContent, 
+  onInsertContent
 }) => {
   const isUser = message.role === 'user';
-  const [isExpanded, setIsExpanded] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
   const [editedContent, setEditedContent] = useState(message.content);
   const editTextareaRef = useRef<HTMLTextAreaElement>(null);
@@ -66,9 +63,6 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
   // Determine if this is a key clauses agent reply
   const isKeyClauses = !isUser && message.analysisContext?.analysisType === 'clauses';
 
-  // Determine if this is a summarize agent reply
-  const isSummarize = !isUser && message.analysisContext?.analysisType === 'summary';
-
   const handleCopy = () => {
     if (onCopyContent) {
       onCopyContent(message.content);
@@ -78,6 +72,12 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
   const handleEdit = () => {
     if (onEditMessage) {
       onEditMessage(message.id, editedContent);
+    }
+  };
+
+  const handleInsert = () => {
+    if (onInsertContent) {
+      onInsertContent(message.content);
     }
   };
 
@@ -97,7 +97,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
 
   return (
     <div 
-      className={`py-4 transition-colors duration-200 ${isUser ? 'bg-transparent' : isDocumentSummary ? 'bg-primary/10 border-l-2 border-primary' : isAnalysisResult ? 'bg-blue-900/10 border-l-2 border-blue-500' : isHovered ? 'bg-gray-900/40' : 'bg-gray-900/30'}`}
+      className={`py-4 transition-colors duration-200 relative ${isUser ? 'bg-transparent' : isDocumentSummary ? 'bg-primary/10 border-l-2 border-primary' : isAnalysisResult ? 'bg-blue-900/10 border-l-2 border-blue-500' : isHovered ? 'bg-gray-900/40' : 'bg-gray-900/30'}`}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
     >
@@ -247,124 +247,60 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                             )}
                           </div>
                         ));
+                      } else {
+                        // If no double newlines, treat the whole thing as one block (fallback)
+                        return (
+                          <div className="bg-gray-800 rounded-lg border border-primary/30 p-5">
+                            <ReactMarkdown>{message.analysisContext.result}</ReactMarkdown>
+                          </div>
+                        );
                       }
-                    } catch (e) {
-                      console.error('Error parsing clauses', e);
+                    } catch (parseError) {
+                      console.error('Error parsing key clause result:', parseError);
+                      return <div className="text-text-primary whitespace-pre-wrap"><ReactMarkdown>{message.content}</ReactMarkdown></div>; // Fallback to regular rendering
                     }
-                    // Fallback to raw text
-                    return <div className="markdown-content"><ReactMarkdown>{message.analysisContext.result}</ReactMarkdown></div>;
                   })()}
                 </div>
-              ) : isSummarize && message.analysisContext ? (
-                <div className="bg-green-900/10 border-l-4 border-green-500 rounded-lg p-5 mb-2">
-                  <div className="text-lg font-bold text-green-400 mb-2">Legal Document Summary</div>
-                  <div className="prose prose-invert max-w-none">
-                    <ReactMarkdown>{message.analysisContext.result}</ReactMarkdown>
-                  </div>
-                </div>
               ) : (
-                <div className={`${isDocumentSummary ? 'p-2 border border-primary/20 rounded-md bg-primary/5' : 
-                                  isAnalysisResult ? 'p-2 border border-blue-500/20 rounded-md bg-blue-900/5' : 
-                                  ''} text-text-primary ${isDocumentSummary || isAnalysisResult ? 'max-h-60 overflow-y-auto' : ''} ${!isExpanded && (isDocumentSummary || isAnalysisResult) && message.content.length > 500 ? 'whitespace-pre-line line-clamp-8' : 'whitespace-pre-wrap'}`}>
-                  {message.content}
+                <div className="text-text-primary whitespace-pre-wrap">
+                  <ReactMarkdown>{message.content}</ReactMarkdown>
                 </div>
               )
             )}
-            
-            {/* Message actions */}
-            {(!isUser || (isUser && !message.isEditing)) && (
-              <motion.div 
-                className={`flex mt-2 space-x-2 ${!isHovered && isUser ? 'opacity-0' : 'opacity-100'}`}
-                initial={{ opacity: 0 }}
-                animate={{ opacity: isHovered || !isUser ? 1 : 0 }}
-                transition={{ duration: 0.2 }}
-              >
-                {/* Add to Notes button */}
-                <Tooltip content="Add to your case notes" placement="top">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    leftIcon={
-                      <Icons.Document className="h-3 w-3" />
-                    }
-                  >
-                    Add to Notes
-                  </Button>
-                </Tooltip>
-                
-                {/* Save button for analysis results */}
-                {(isDocumentSummary || isAnalysisResult) && onSaveMessage && (
-                  <Tooltip content="Save this analysis">
-                    <Button
-                      onClick={onSaveMessage}
-                      variant="secondary"
-                      size="sm"
-                      leftIcon={
-                      <Icons.FileText className="h-3 w-3" />
-                      }
-                    >
-                      Save
-                    </Button>
-                  </Tooltip>
-                )}
-                
-                {/* Copy button */}
-                {!isUser && onCopyContent && (
-                  <Tooltip content="Copy to clipboard">
-                    <IconButton
-                      onClick={handleCopy}
-                      variant="ghost"
-                      size="sm"
-                      icon={
-                      <Icons.Copy className="h-3 w-3" />
-                      }
-                      label="Copy to clipboard"
-                    />
-                  </Tooltip>
-                )}
-                
-                {/* Regenerate button */}
-                {!isUser && onRegenerateResponse && !isStreaming && (
-                  <Tooltip content="Regenerate response">
-                    <Button
-                      onClick={() => onRegenerateResponse(message.id)}
-                      variant="primary"
-                      size="sm"
-                      leftIcon={
-                      <Icons.Refresh className="h-3 w-3" />
-                      }
-                    >
-                      Regenerate
-                    </Button>
-                  </Tooltip>
-                )}
-                
-                {/* Edit button - only for user messages */}
-                {isUser && onEditMessage && (
-                  <Tooltip content="Edit your message">
-                    <IconButton
-                      onClick={() => onEditMessage(message.id, editedContent)}
-                      variant="ghost"
-                      size="sm"
-                      icon={
-                      <Icons.Edit className="h-3 w-3" />
-                      }
-                      label="Edit message"
-                    />
-                  </Tooltip>
-                )}
-                
-                {/* Timestamp */}
-                <Badge variant="secondary" size="xs" className="ml-auto">
-                  <span className="flex items-center">
-                    <Icons.Clock className="h-3 w-3 mr-1" />
-                    {formatDistanceToNow(new Date(message.timestamp), { addSuffix: true })}
-                  </span>
-                </Badge>
-              </motion.div>
-            )}
           </div>
         </div>
+
+        {/* Hover actions for non-streaming messages */}
+        {!isStreaming && isHovered && (
+          <div className="absolute top-2 right-2 flex space-x-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+            <Tooltip content="Copy message">
+              <Button onClick={handleCopy} variant="ghost" size="sm" aria-label="Copy message">
+                <Icons.Copy className="h-4 w-4" />
+              </Button>
+            </Tooltip>
+            {!isUser && onRegenerateResponse && (
+              <Tooltip content="Regenerate response">
+                <Button onClick={() => onRegenerateResponse(message.id)} variant="ghost" size="sm" aria-label="Regenerate response">
+                  <Icons.Refresh className="h-4 w-4" />
+                </Button>
+              </Tooltip>
+            )}
+            {!isUser && onInsertContent && (
+              <Tooltip content="Insert to Editor">
+                <Button onClick={handleInsert} variant="ghost" size="sm" aria-label="Insert to Editor">
+                  <Icons.Plus className="h-4 w-4" />
+                </Button>
+              </Tooltip>
+            )}
+            {isUser && onEditMessage && (
+              <Tooltip content="Edit message">
+                <Button onClick={() => onEditMessage(message.id, message.content)} variant="ghost" size="sm" aria-label="Edit message">
+                  <Icons.Edit className="h-4 w-4" />
+                </Button>
+              </Tooltip>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

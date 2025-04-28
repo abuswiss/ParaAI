@@ -104,8 +104,9 @@ class ErrorService {
         console.error('Failed to log error:', dbError);
         this.queueError(errorLog);
       }
-    } catch (e) {
-      console.error('Error while logging error:', e);
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : 'Unknown error while logging error';
+      console.error('Error while logging error:', message);
       this.queueError(errorLog);
     }
   }
@@ -165,8 +166,9 @@ class ErrorService {
     // Store in localStorage for persistence
     try {
       localStorage.setItem('errorQueue', JSON.stringify(this.errorQueue));
-    } catch (e) {
-      console.error('Failed to store error queue:', e);
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : 'Unknown error storing error queue';
+      console.error('Failed to store error queue:', message);
     }
   }
   
@@ -180,8 +182,9 @@ class ErrorService {
       if (storedQueue) {
         this.errorQueue = JSON.parse(storedQueue);
       }
-    } catch (e) {
-      console.error('Failed to load error queue:', e);
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : 'Unknown error loading error queue';
+      console.error('Failed to load error queue:', message);
     }
     
     if (this.errorQueue.length === 0) return;
@@ -198,15 +201,23 @@ class ErrorService {
       if (error) {
         console.error('Failed to send queued errors:', error);
         // Put errors back in queue
-        this.errorQueue = [...this.errorQueue, ...errors];
+        this.errorQueue = [...errors, ...this.errorQueue]; // Prepend unsent errors
+        this.queueError({} as ErrorLog); // Trigger save
       } else {
-        // Clear stored queue
-        localStorage.removeItem('errorQueue');
+        // Clear stored queue if successful
+        try {
+          localStorage.removeItem('errorQueue');
+        } catch (e: unknown) {
+          const message = e instanceof Error ? e.message : 'Unknown error clearing stored error queue';
+          console.error('Failed to clear stored error queue:', message);
+        }
       }
-    } catch (e) {
-      console.error('Error processing error queue:', e);
-      // Put errors back in queue
-      this.errorQueue = [...this.errorQueue, ...errors];
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : 'Unknown error processing error queue';
+      console.error('Error processing error queue:', message);
+      // Put errors back in queue if the entire request failed
+      this.errorQueue = [...errors, ...this.errorQueue];
+      this.queueError({} as ErrorLog); // Trigger save
     }
   }
 }
@@ -225,19 +236,19 @@ export function withErrorHandling<T extends any[], R>(
   return async (...args: T): Promise<R> => {
     try {
       return await fn(...args);
-    } catch (error) {
-      // Log the error
-      errorService.logError(error as Error, ErrorSeverity.ERROR, {
-        component,
-        arguments: args
-      });
-      
-      // Call custom error handler if provided
+    } catch (error: unknown) {
+      // Catch any synchronous errors during the function execution or error handling
+      const typedError = error instanceof Error ? error : new Error(String(error));
+      console.error(`Unhandled error in wrapped function ${component || 'unknown'}:`, typedError);
       if (errorHandler) {
-        errorHandler(error as Error);
+        try {
+          errorHandler(typedError);
+        } catch (handlerError: unknown) {
+          console.error('Error in custom error handler:', handlerError);
+        }
       }
-      
-      throw error;
+      // Ensure the function still returns a rejected promise
+      throw typedError;
     }
   };
 }
