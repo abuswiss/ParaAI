@@ -50,6 +50,7 @@ interface RawCaseData {
   created_at: string;
   updated_at: string;
   owner_id: string;
+  // Added back columns confirmed to exist in DB
   client_name: string | null;
   opposing_party: string | null;
   case_number: string | null;
@@ -70,6 +71,7 @@ function formatCases(cases: RawCaseData[]): Case[] {
     status: caseData.status, // Status should be directly available
     createdAt: caseData.created_at,
     updatedAt: caseData.updated_at,
+    // Added back columns confirmed to exist in DB
     client_name: caseData.client_name,
     opposing_party: caseData.opposing_party,
     case_number: caseData.case_number, 
@@ -95,6 +97,7 @@ export const fetchCasesSafely = async (): Promise<{ data: Case[], error: Error |
     console.log('Fetching cases for user:', user.id);
     
     // Check if we can query any table first
+    /* // Commenting out health check as the table doesn't exist
     try {
       console.log('Testing basic query to _health check table');
       const healthCheck = await supabase.from('_health_check').select('*').limit(1);
@@ -102,25 +105,16 @@ export const fetchCasesSafely = async (): Promise<{ data: Case[], error: Error |
     } catch (e) {
       console.error('Health check failed:', e);
     }
+    */
     
     // Query specifically for the fields needed by RawCaseData/Case
     console.log('Executing query to cases table for user cases');
     try {
       const { data, error } = await supabase
         .from('cases')
-        .select<'*', RawCaseData>('
-          id,
-          name,
-          description,
-          status,
-          created_at,
-          updated_at,
-          owner_id,
-          client_name,
-          opposing_party,
-          case_number,
-          court
-        ')
+        // Corrected select syntax: provide columns as a comma-separated string
+        // Added back columns confirmed to exist in DB
+        .select<string, RawCaseData>('id, name, description, status, created_at, updated_at, owner_id, client_name, opposing_party, case_number, court')
         .eq('owner_id', user.id); // Filter by owner_id directly in the query
 
       console.log('Query executed, result:', JSON.stringify({ data: data?.length || 0, error }));

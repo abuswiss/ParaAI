@@ -49,12 +49,12 @@ const TemplateList: React.FC<TemplateListProps> = ({
 
   return (
     <div className="template-list-container flex-1 overflow-y-auto pt-1">
-      {templates.length === 0 && (
+      {!isLoading && !error && templates && templates.length === 0 && (
         <p className="text-xs text-neutral-500 dark:text-text-secondary px-2 italic">
           No templates found.
         </p>
       )}
-      {templates.length > 0 && (
+      {!isLoading && !error && templates && templates.length > 0 && (
         <ul className="space-y-1 px-1">
           {templates.map((tmpl) => (
             <li key={tmpl.id}>

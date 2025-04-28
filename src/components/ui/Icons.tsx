@@ -258,36 +258,6 @@ export {
   Square // <-- Export Square directly
 } from 'lucide-react';
 
-// Export custom icons
-export {
-  DocumentIcon,
-  FileTextIcon,
-  FolderIcon,
-  PlusIcon,
-  MinusIcon,
-  EditIcon,
-  TrashIcon,
-  CloseIcon,
-  SendIcon,
-  MessageIcon,
-  CopyIcon,
-  RefreshIcon,
-  MenuIcon,
-  ChevronDownIcon,
-  ChevronUpIcon,
-  ChevronLeftIcon,
-  ChevronRightIcon,
-  UserIcon,
-  SettingsIcon,
-  LogoutIcon,
-  InfoIcon,
-  AlertIcon,
-  CheckIcon,
-  GavelIcon,
-  ScaleIcon,
-  ClockIcon,
-};
-
 // Create the consolidated Icons object
 export const Icons = {
   Document: DocumentIcon,

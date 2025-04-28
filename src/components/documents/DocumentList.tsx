@@ -47,12 +47,12 @@ const DocumentList: React.FC<DocumentListProps> = ({
         </div>
       )}
       {error && <p className="text-xs text-error dark:text-error px-2">Error: {error}</p>}
-      {!isLoading && !error && documents.length === 0 && (
+      {!isLoading && !error && documents && documents.length === 0 && (
         <p className="text-xs text-neutral-500 dark:text-text-secondary px-2 italic">
           No documents found.
         </p>
       )}
-      {!isLoading && !error && documents.length > 0 && (
+      {!isLoading && !error && documents && documents.length > 0 && (
         <ul className="space-y-1 px-1">
           {documents.map((doc) => (
             <li key={doc.id}>
