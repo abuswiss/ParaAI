@@ -15,4 +15,42 @@
   height: 0;
 }
 
-/* Add any other editor-specific base styles here */ 
+/* Add any other editor-specific base styles here */
+
+.document-editor-container {
+  /* Add container styles if needed */
+}
+
+.editor-toolbar {
+  /* Styles for the toolbar container */
+  /* Example: Add bottom padding if needed */
+  /* padding-bottom: 0.5rem; */
+}
+
+.editor-content-wrapper {
+  /* Styles for the scrollable editor content area */
+  position: relative; /* Needed for placeholder positioning */
+}
+
+/* Tiptap Editor Content Styling */
+.tiptap {
+  /* Base styles for the editor */
+  min-height: 300px; /* Ensure it has some height */
+  outline: none; /* Remove default focus outline if desired */
+  /* The prose styles are applied via className in the component */
+}
+
+/* Placeholder Styling (Notion Style) */
+.tiptap p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder); /* Use the data-placeholder attribute */
+  float: left;
+  color: #adb5bd; /* Adjust color as needed (match dark/light theme maybe?) */
+  pointer-events: none;
+  height: 0;
+  font-style: italic;
+  /* Position it slightly below where the text would be */
+  /* This might need tweaking depending on line-height/font-size */
+  margin-top: 1.5em; 
+}
+
+/* Add any other specific editor styles below */ 

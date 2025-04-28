@@ -877,17 +877,17 @@ export const createBlankDraft = async (
         created_at: now,
         updated_at: now,
         user_id: user.id,
-        metadata: { createdAs: 'blank' } 
+        metadata: { createdAs: 'blank' } // Re-added metadata field
       })
       .select<string, RawDocumentDraft>('*') // Specify select type
       .single();
 
     if (error) {
-      console.error("Error inserting blank draft:", error);
-      return { data: null, error }; // Return PostgrestError directly
+      console.error("Error inserting blank draft (Supabase client error):", error); // Log Supabase client error specifically
+      return { data: null, error }; 
     }
     
-    if (!data) { // Handle case where insert succeeds but select returns null
+    if (!data) { 
         console.error("Failed to retrieve created blank draft data after insert.");
         return { data: null, error: new Error("Failed to retrieve created blank draft data.") };
     }
@@ -908,8 +908,17 @@ export const createBlankDraft = async (
     return { data: draft, error: null };
 
   } catch (err) {
-    console.error('Error creating blank draft:', err);
-    // Ensure the caught error is typed correctly
+    // Log the entire error object for detailed debugging
+    console.error('Detailed error in createBlankDraft catch block:', err); 
+    // Optionally, stringify if the object might be complex or not log well directly
+    try {
+        console.error('Stringified error:', JSON.stringify(err, null, 2));
+    } catch (stringifyError) {
+        // Log the stringify error itself
+        console.error('Could not stringify error object:', stringifyError);
+    }
+    
+    // Maintain existing error handling structure
     const error = err instanceof PostgrestError ? err : err instanceof Error ? err : new Error('Unknown error creating blank draft');
     return { data: null, error };
   }
@@ -1056,6 +1065,109 @@ export const updateTemplate = async (
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Unknown error updating template';
     console.error('Error updating template:', message);
+    const typedError = error instanceof PostgrestError ? error : error instanceof Error ? error : new Error(message);
+    return { data: null, error: typedError };
+  }
+};
+
+// --- Placeholder Functions for AI Template Drafting ---
+
+/**
+ * Generate template content using AI based on instructions.
+ * Adapts logic from generateDraftWithAI.
+ */
+export const generateTemplateDraftWithAI = async (
+  instructions: string,
+): Promise<{ data: string | null; error: Error | null }> => {
+  try {
+    const systemPrompt = `You are an expert legal template drafting assistant. \nCreate a professional, well-structured legal template based on the user's requirements. \nUse standard legal language and formatting. \nClearly indicate variable placeholders using double curly braces, e.g., {{client_name}} or {{agreement_date}}. \nDo NOT fill in the placeholders; leave them as variables.\nEnsure the output is only the template content itself, suitable for direct use.`;
+
+    const userPrompt = `Draft a reusable legal template based on the following instructions:\n\n${instructions}`; 
+
+    console.log("Calling OpenAI for template generation...");
+    const response = await openai.chat.completions.create({
+      model: 'gpt-4', // Or a suitable model like gpt-3.5-turbo
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt }
+      ],
+      temperature: 0.2, // Lower temperature for more deterministic template structure
+      max_tokens: 2500, // Adjust as needed
+    });
+
+    const generatedContent = response.choices[0]?.message.content;
+    
+    if (!generatedContent) {
+        return { data: null, error: new Error('AI did not return content for the template.') };
+    }
+
+    console.log("AI template generation successful.");
+    return { data: generatedContent.trim(), error: null };
+
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error generating template draft with AI';
+    console.error('Error generating template draft with AI:', message);
+    return { data: null, error: error instanceof Error ? error : new Error(message) };
+  }
+};
+
+/**
+ * Create a new template entry in the database from AI generated content.
+ * Adapts logic from createTemplate.
+ */
+export const createAITemplateDraft = async (
+  name: string,
+  content: string
+): Promise<{ data: { id: string } | null; error: PostgrestError | Error | null }> => {
+  try {
+    const user = (await supabase.auth.getUser()).data.user;
+    if (!user) {
+      throw new Error('User not authenticated');
+    }
+
+    const templateId = uuidv4();
+    const now = new Date().toISOString();
+
+    // Extract potential variables (simple regex for {{...}})
+    const potentialVariables = Array.from(content.matchAll(/\{\{([^}]+)\}\} /g)).map(match => match[1].trim());
+    const uniqueVariables = [...new Set(potentialVariables)];
+
+    // Prepare data for insertion matching RawDocumentTemplate structure
+    const dataToInsert = {
+        id: templateId,
+        name: name.trim(),
+        description: "AI Generated Template Draft", // Default description
+        category: 'other' as DocumentTemplate['category'], // Default category, can be refined
+        content: content.trim(),
+        variables: uniqueVariables,
+        tags: ['ai-generated', 'draft'], // Default tags
+        created_at: now,
+        updated_at: now,
+        is_public: false, // Default to private
+        creator_id: user.id
+      };
+
+    console.log(`Attempting to insert AI generated template draft: ${name}`);
+    const { data, error } = await supabase
+      .from('document_templates')
+      .insert(dataToInsert)
+      .select('id') // Only select the ID as we already have the other info
+      .single();
+
+    if (error) {
+      console.error('Error inserting AI template draft:', error);
+      return { data: null, error };
+    }
+    if (!data) {
+        throw new Error("Failed to retrieve created AI template draft ID after insert.");
+    }
+
+    console.log(`AI template draft saved successfully with ID: ${data.id}`);
+    return { data: { id: data.id }, error: null }; 
+
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error creating AI template draft';
+    console.error('Error creating AI template draft:', message);
     const typedError = error instanceof PostgrestError ? error : error instanceof Error ? error : new Error(message);
     return { data: null, error: typedError };
   }

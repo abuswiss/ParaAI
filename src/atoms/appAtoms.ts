@@ -1,5 +1,6 @@
 import { atom } from 'jotai';
 import { Case, getCaseById } from '@/services/caseService';
+import { Document, getUserDocuments } from '@/services/documentService';
 
 // Define type for the item being viewed/edited in the main panel
 export type ActiveEditorItem = { type: 'document' | 'draft'; id: string } | null;
@@ -14,6 +15,9 @@ export const activeEditorItemAtom = atom<ActiveEditorItem | null>(null);
 
 // Atom for holding text selected in the editor, intended to be sent to the chat query.
 export const editorTextToQueryAtom = atom<string | null>(null);
+
+// Atom to track the ID of a newly created blank draft that hasn't been saved yet.
+export const newlyCreatedDraftIdAtom = atom<string | null>(null);
 
 // --- Derived State Atoms for Case Details ---
 
@@ -87,25 +91,84 @@ export const loadCaseDetailsAtom = atom(
 // Read-only atom to access the fetched case details.
 export const activeCaseDetailsAtom = atom((get) => get(activeCaseDetailsDataAtom));
 
+// --- Derived State Atoms for Case Documents ---
+
+// Atom to track the loading state of documents for the active case.
+const caseDocumentsLoadingAtom = atom<boolean>(false);
+
+// Atom to store any error messages during document list fetching.
+const caseDocumentsErrorAtom = atom<string | null>(null);
+
+// Atom for storing the fetched list of documents for the active case.
+const caseDocumentsDataAtom = atom<Document[] | null>(null);
+
+// Read-only atom for the documents loading state.
+export const isCaseDocumentsLoadingAtom = atom((get) => get(caseDocumentsLoadingAtom));
+
+// Read-only atom for the documents error state.
+export const caseDocumentsFetchErrorAtom = atom((get) => get(caseDocumentsErrorAtom));
+
+// Read-only atom to access the fetched documents list.
+export const caseDocumentsAtom = atom((get) => get(caseDocumentsDataAtom));
+
+// Atom to trigger fetching the document list for the active case.
+export const loadCaseDocumentsAtom = atom(
+  null, // This atom is write-only for triggering the fetch
+  async (get, set, caseId: string | null) => {
+    if (!caseId) {
+      set(caseDocumentsDataAtom, null);
+      set(caseDocumentsLoadingAtom, false);
+      set(caseDocumentsErrorAtom, null);
+      return;
+    }
+
+    // Optional: Add logic to skip refetch if already loading or data exists for the same ID
+    // if (get(activeCaseIdAtom) === caseId && (get(caseDocumentsDataAtom) !== null || get(caseDocumentsLoadingAtom))) {
+    //   return;
+    // }
+
+    set(caseDocumentsLoadingAtom, true);
+    set(caseDocumentsErrorAtom, null);
+    set(caseDocumentsDataAtom, null); // Clear previous data
+
+    try {
+      const { data, error } = await getUserDocuments(caseId);
+      if (error) {
+        throw error;
+      }
+      set(caseDocumentsDataAtom, data || []); // Set fetched data, default to empty array if null/undefined
+    } catch (error) {
+      console.error("Error fetching case documents:", error);
+      set(caseDocumentsErrorAtom, error instanceof Error ? error.message : 'Failed to load documents');
+      set(caseDocumentsDataAtom, null); // Ensure data is null on error
+    } finally {
+      set(caseDocumentsLoadingAtom, false); // Always set loading to false
+    }
+  }
+);
+
 // --- Combined Atom for Setting Active Case ---
 
 /* 
  * This derived atom handles the combined logic of setting the activeCaseId 
- * AND triggering the fetch for its details.
- * Components will primarily interact with this atom to change the active case.
+ * AND triggering the fetch for its details AND triggering the fetch for its documents.
  */
 export const activeCaseAtom = atom(
   (get) => {
-    // The read part provides the current ID and details (optional, might not be needed)
     return {
       id: get(activeCaseIdAtom),
-      details: get(activeCaseDetailsAtom)
+      details: get(activeCaseDetailsAtom),
+      // Optionally include documents status here if needed
+      // documentsLoading: get(isCaseDocumentsLoadingAtom),
+      // documentsError: get(caseDocumentsFetchErrorAtom)
     }
   },
   (get, set, caseId: string | null) => {
     // 1. Set the primary ID atom
     set(activeCaseIdAtom, caseId);
-    // 2. Trigger the detail fetch by writing the ID to the load atom
+    // 2. Trigger the detail fetch 
     set(loadCaseDetailsAtom, caseId);
+    // 3. Trigger the document list fetch
+    set(loadCaseDocumentsAtom, caseId);
   }
 ); 

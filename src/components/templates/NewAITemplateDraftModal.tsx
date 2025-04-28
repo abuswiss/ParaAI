@@ -1,8 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useAtomValue } from 'jotai';
-import { activeCaseIdAtom } from '@/atoms/appAtoms';
+// Removed useAtomValue and activeCaseIdAtom - Templates are not case-specific
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Label } from '@/components/ui/Label';
@@ -10,21 +9,24 @@ import { Textarea } from '@/components/ui/Textarea';
 import { Spinner } from '@/components/ui/Spinner';
 import { Icons } from '@/components/ui/Icons';
 import * as templateService from '@/services/templateService';
-import { DocumentDraft } from '@/services/templateService'; // Import type
+// Assuming a similar type structure for templates
+// import { TemplateDraft } from '@/services/templateService'; 
 
-interface NewAIDraftModalProps {
+interface NewAITemplateDraftModalProps { // Renamed interface
   isOpen: boolean;
   onClose: () => void;
-  onSuccess: (newDraftId: string) => void; // Callback with new draft ID
+  // onSuccess might not be needed if we just close, or could signal refresh needed
+  // onSuccess?: (newTemplateDraftId: string) => void; 
 }
 
-const NewAIDraftModal: React.FC<NewAIDraftModalProps> = ({ isOpen, onClose, onSuccess }) => {
+// Renamed component
+const NewAITemplateDraftModal: React.FC<NewAITemplateDraftModalProps> = ({ isOpen, onClose /*, onSuccess */ }) => {
   const [instructions, setInstructions] = useState('');
-  const [draftName, setDraftName] = useState('');
+  const [templateName, setTemplateName] = useState(''); // Renamed state
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   
-  const activeCaseId = useAtomValue(activeCaseIdAtom);
+  // Removed activeCaseId logic
 
   // Ref for the modal content area
   const modalRef = useRef<HTMLDivElement>(null);
@@ -33,11 +35,10 @@ const NewAIDraftModal: React.FC<NewAIDraftModalProps> = ({ isOpen, onClose, onSu
   useEffect(() => {
     if (isOpen) {
       setInstructions('');
-      setDraftName(`AI Draft - ${new Date().toLocaleTimeString()}`); // Default name
+      setTemplateName(`AI Template - ${new Date().toLocaleTimeString()}`); // Default template name
       setIsLoading(false);
       setError(null);
     } else {
-        // Clear potentially sensitive data when closed
         setInstructions(''); 
     }
   }, [isOpen]);
@@ -55,16 +56,16 @@ const NewAIDraftModal: React.FC<NewAIDraftModalProps> = ({ isOpen, onClose, onSu
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
     };
-  }, [isOpen, isLoading, onClose]); // Dependencies for the effect
+  }, [isOpen, isLoading, onClose]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!instructions.trim()) {
-      setError('Drafting instructions are required.');
+      setError('Template drafting instructions are required.');
       return;
     }
-    if (!draftName.trim()) {
-      setError('Draft name is required.');
+    if (!templateName.trim()) {
+      setError('Template name is required.');
       return;
     }
 
@@ -72,35 +73,46 @@ const NewAIDraftModal: React.FC<NewAIDraftModalProps> = ({ isOpen, onClose, onSu
     setError(null);
 
     try {
-      // Step 1: Generate content using AI
-      console.log("Generating AI draft content with instructions:", instructions);
-      const { data: generatedContent, error: generateError } = await templateService.generateDraftWithAI(instructions);
-      
+      // Step 1: Generate template content using AI (New Service Call)
+      console.log("Generating AI template draft content:", instructions);
+      // TODO: Replace with actual template generation service call
+      // const { data: generatedContent, error: generateError } = await templateService.generateTemplateDraftWithAI(instructions);
+      // Placeholder until service function exists:
+      const generatedContent = `Placeholder: AI generated content for template based on: ${instructions}`;
+      const generateError = null; // Placeholder
+      await new Promise(resolve => setTimeout(resolve, 1500)); // Simulate API call
+
       if (generateError || !generatedContent) {
-        throw generateError || new Error('AI failed to generate draft content.');
+        throw generateError || new Error('AI failed to generate template draft content.');
       }
-      console.log("AI content generated successfully.");
+      console.log("AI template content generated successfully.");
 
-      // Step 2: Create the draft document entry in DB
-      console.log("Saving AI generated content as draft:", draftName);
-      const { data: newDraft, error: createError } = await templateService.createAIDraft(
-        draftName.trim(),
-        generatedContent,
-        activeCaseId || undefined // Pass caseId if available
-      );
+      // Step 2: Create the template draft entry in DB (New Service Call)
+      console.log("Saving AI generated content as template draft:", templateName);
+       // TODO: Replace with actual template creation service call
+      // const { data: newTemplateDraft, error: createError } = await templateService.createAITemplateDraft(
+      //   templateName.trim(),
+      //   generatedContent
+      // );
+      // Placeholder:
+      const newTemplateDraft = { id: `template_${Date.now()}` }; // Placeholder ID
+      const createError = null; // Placeholder
+      await new Promise(resolve => setTimeout(resolve, 500)); // Simulate DB save
 
-      if (createError || !newDraft) {
-        throw createError || new Error('Failed to save the generated draft.');
+      if (createError || !newTemplateDraft) {
+        throw createError || new Error('Failed to save the generated template draft.');
       }
-      console.log("AI draft saved successfully:", newDraft.id);
+      console.log("AI template draft saved successfully:", newTemplateDraft.id);
 
-      // Step 3: Call success callback and close
-      onSuccess(newDraft.id);
+      // Step 3: Call success callback (if used) and close
+      // if (onSuccess) {
+      //   onSuccess(newTemplateDraft.id);
+      // }
       onClose(); // Close modal on full success
 
     } catch (err) {
-      console.error('Error during AI draft creation:', err);
-      const errorMessage = err instanceof Error ? err.message : 'An unknown error occurred during AI draft creation.';
+      console.error('Error during AI template draft creation:', err);
+      const errorMessage = err instanceof Error ? err.message : 'An unknown error occurred during AI template draft creation.';
       setError(errorMessage);
     } finally {
       setIsLoading(false);
@@ -122,14 +134,16 @@ const NewAIDraftModal: React.FC<NewAIDraftModalProps> = ({ isOpen, onClose, onSu
         ref={modalRef} 
         className="relative z-50 w-full max-w-2xl bg-surface rounded-lg shadow-xl p-6"
       >
+        {/* Header - Updated Title */}
         <div className="flex justify-between items-center mb-4">
-          <h3 className="text-lg font-semibold text-text-primary">Create New AI Draft</h3>
+          <h3 className="text-lg font-semibold text-text-primary">Create New AI Template Draft</h3>
           <Button variant="ghost" size="sm" onClick={handleClose} className="-mr-2" disabled={isLoading}>
             <Icons.Close className="h-4 w-4" />
             <span className="sr-only">Close</span>
           </Button>
         </div>
 
+        {/* Form */}
         <form onSubmit={handleSubmit} className="space-y-4">
           {error && (
             <div className="mb-4 text-sm text-red-500 bg-red-100 dark:bg-red-900/20 p-3 rounded-md border border-red-300 dark:border-red-600">
@@ -137,48 +151,46 @@ const NewAIDraftModal: React.FC<NewAIDraftModalProps> = ({ isOpen, onClose, onSu
             </div>
           )}
 
+          {/* Updated Input */}
           <div>
-            <Label>Draft Name</Label>
+            <Label htmlFor="templateName">Template Name</Label> {/* Added htmlFor */}
             <Input
-              id="draftName"
-              name="draftName"
-              value={draftName}
-              onChange={(e) => setDraftName(e.target.value)}
-              placeholder="Enter a name for this draft"
+              id="templateName"
+              name="templateName"
+              value={templateName}
+              onChange={(e) => setTemplateName(e.target.value)}
+              placeholder="Enter a name for this template draft"
               required
               disabled={isLoading}
             />
           </div>
 
+          {/* Updated Textarea */}
           <div>
-            <Label>Drafting Instructions</Label>
+            <Label htmlFor="instructions">Template Drafting Instructions</Label> {/* Added htmlFor */}
             <Textarea
               id="instructions"
               name="instructions"
               value={instructions}
               onChange={(e) => setInstructions(e.target.value)}
-              rows={6} // Adjust rows as needed
-              placeholder="Describe the document you want the AI to draft (e.g., 'Draft a simple non-disclosure agreement between Company A and Company B regarding project X...')"
+              rows={6}
+              placeholder="Describe the template you want the AI to draft (e.g., 'Draft a standard consulting agreement template...')"
               required
               disabled={isLoading}
             />
             <p className="mt-1 text-xs text-muted-foreground">Provide clear and specific instructions for the best results.</p>
           </div>
 
-          {activeCaseId && (
-             <p className="text-xs text-muted-foreground">Draft will be associated with case: {activeCaseId}</p>
-           )}
-           {!activeCaseId && (
-             <p className="text-xs text-muted-foreground">No active case selected. Draft will not be associated with a case.</p>
-           )}
+          {/* Removed Case Info */}
 
+          {/* Footer - Updated Button Text */}
           <div className="flex justify-end space-x-3 pt-4 border-t border-border mt-2">
             <Button type="button" variant="outline" onClick={handleClose} disabled={isLoading}>
               Cancel
             </Button>
             <Button type="submit" disabled={isLoading} className="min-w-[120px]">
               {isLoading ? <Spinner size="sm" className="mr-2" /> : <Icons.Sparkles className="mr-2 h-4 w-4" />}
-              {isLoading ? 'Generating...' : 'Generate Draft'}
+              {isLoading ? 'Generating...' : 'Generate Template'}
             </Button>
           </div>
         </form>
@@ -187,4 +199,4 @@ const NewAIDraftModal: React.FC<NewAIDraftModalProps> = ({ isOpen, onClose, onSu
   );
 };
 
-export default NewAIDraftModal; 
+export default NewAITemplateDraftModal; 

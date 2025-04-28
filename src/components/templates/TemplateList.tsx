@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { Card } from '@/components/ui/Card';
 import { Spinner } from '@/components/ui/Spinner';
-import { AlertCircle, Star, PlusCircle } from 'lucide-react';
+import { AlertCircle, Star, PlusCircle, Edit2, Trash2, Play } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { Icons } from '@/components/ui/Icons';
 
@@ -12,8 +12,9 @@ interface TemplateListProps {
   templates: DocumentTemplate[];
   isLoading: boolean;
   error: string | null;
-  activeTemplateId: string | null;
-  onSelectTemplate: (templateId: string) => void;
+  activeTemplateId: string | null | undefined;
+  onSelectTemplate: (templateId: string | null) => void;
+  onUseTemplate: (templateId: string) => void;
 }
 
 const TemplateList: React.FC<TemplateListProps> = ({
@@ -22,6 +23,7 @@ const TemplateList: React.FC<TemplateListProps> = ({
   error,
   activeTemplateId,
   onSelectTemplate,
+  onUseTemplate,
 }) => {
   const renderTemplateIcon = (category: string) => {
     switch(category?.toLowerCase()) {
@@ -77,6 +79,30 @@ const TemplateList: React.FC<TemplateListProps> = ({
                   }
                 </div>
               </button>
+              <div className="flex justify-end space-x-2 mt-2 pt-3 border-t border-gray-200 dark:border-gray-700">
+                <Button 
+                  variant="outline"
+                  size="sm"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onUseTemplate(tmpl.id);
+                  }}
+                  title="Use this template"
+                >
+                  <Play className="h-4 w-4" />
+                </Button>
+                <Button 
+                  variant="ghost"
+                  size="sm"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onSelectTemplate(tmpl.id);
+                  }}
+                  title="Edit this template"
+                >
+                  <Edit2 className="h-4 w-4" />
+                </Button>
+              </div>
             </li>
           ))}
         </ul>

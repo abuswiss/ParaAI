@@ -1,17 +1,14 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { useEditor, EditorContent } from '@tiptap/react';
-import StarterKit from '@tiptap/starter-kit';
-import DocumentEditor from '@/components/documents/DocumentEditor'; // Re-use the viewer component
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import DocumentEditor, { DocumentEditorRef } from '@/components/documents/DocumentEditor';
 import * as templateService from '@/services/templateService';
 import { DocumentTemplate } from '@/services/templateService';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
-import { Label } from '@/components/ui/Label'; // Assuming Label exists
-import { Textarea } from '@/components/ui/Textarea'; // Assuming Textarea exists
-import { Checkbox } from '@/components/ui/Checkbox'; // Assuming Checkbox exists
+import { Label } from '@/components/ui/Label';
+import { Textarea } from '@/components/ui/Textarea';
 import { Spinner } from '@/components/ui/Spinner';
-import { Icons } from '@/components/ui/Icons';
 import { PostgrestError } from '@supabase/supabase-js';
+import { Save, PlusCircle } from 'lucide-react';
 
 // Define categories - should match the service/DB definition
 const TEMPLATE_CATEGORIES: DocumentTemplate['category'][] = [
@@ -29,24 +26,14 @@ const TemplateEditor: React.FC<TemplateEditorProps> = ({ templateId, onSaveSucce
   const [description, setDescription] = useState('');
   const [category, setCategory] = useState<DocumentTemplate['category']>('other');
   const [tags, setTags] = useState(''); // Simple comma-separated string for now
-  const [isPublic, setIsPublic] = useState(false);
-  const [initialContent, setInitialContent] = useState(''); // For Tiptap editor
+  const [initialContent, setInitialContent] = useState(''); // For DocumentEditor
 
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const editor = useEditor({
-    extensions: [StarterKit],
-    content: initialContent, // Start with fetched or empty content
-    editable: true, // Make editor editable
-    editorProps: {
-      attributes: {
-        class:
-          'prose prose-sm sm:prose lg:prose-lg xl:prose-2xl focus:outline-none dark:prose-invert max-w-full border border-gray-300 dark:border-gray-600 rounded-md p-4 min-h-[300px]',
-      },
-    },
-  });
+  // Ref for the DocumentEditor component
+  const editorRef = useRef<DocumentEditorRef>(null);
 
   // Fetch existing template data if editing
   useEffect(() => {
@@ -61,10 +48,7 @@ const TemplateEditor: React.FC<TemplateEditorProps> = ({ templateId, onSaveSucce
             setDescription(data.description || '');
             setCategory(data.category || 'other');
             setTags(data.tags?.join(', ') || '');
-            setIsPublic(data.isPublic || false);
             setInitialContent(data.content || '');
-            // Update editor content after state is set
-            editor?.commands.setContent(data.content || '');
           }
         })
         .catch(err => {
@@ -78,20 +62,9 @@ const TemplateEditor: React.FC<TemplateEditorProps> = ({ templateId, onSaveSucce
       setDescription('');
       setCategory('other');
       setTags('');
-      setIsPublic(false);
-      setInitialContent('<p></p>'); // Start with empty paragraph
-      editor?.commands.setContent('<p></p>');
+      setInitialContent('<p></p>'); // Default content for new template
     }
-    // Reset editor content when templateId changes
-    // Dependency array includes editor instance to re-run if it re-initializes
-  }, [templateId, editor]);
-
-  // Update editor content when initialContent is loaded asynchronously
-  useEffect(() => {
-      if (editor && initialContent !== editor.getHTML()) {
-          editor.commands.setContent(initialContent);
-      }
-  }, [initialContent, editor]);
+  }, [templateId]);
 
   const extractVariables = (htmlContent: string): string[] => {
     const regex = /{{\s*([a-zA-Z0-9_]+)\s*}}/g;
@@ -104,14 +77,21 @@ const TemplateEditor: React.FC<TemplateEditorProps> = ({ templateId, onSaveSucce
   };
 
   const handleSave = async () => {
-    if (!editor) return;
+    // Get content from DocumentEditor ref
+    const htmlContent = editorRef.current?.getContent() ?? '';
+    if (!htmlContent && !templateId) {
+      // Prevent saving if content is empty for a new template, maybe add user feedback
+      setError("Template body cannot be empty.");
+      return;
+    }
+    
     setIsSaving(true);
     setError(null);
 
-    const htmlContent = editor.getHTML();
     const variables = extractVariables(htmlContent);
     const parsedTags = tags.split(',').map(t => t.trim()).filter(Boolean);
 
+    // Ensure isPublic is always false or remove entirely from DB schema if not needed
     const templateData = {
       name,
       description,
@@ -119,22 +99,18 @@ const TemplateEditor: React.FC<TemplateEditorProps> = ({ templateId, onSaveSucce
       content: htmlContent,
       variables,
       tags: parsedTags,
-      isPublic,
+      isPublic: false, // Always false or omit if DB column is removed/nullable
     };
 
     try {
       let result: { data: DocumentTemplate | null; error: PostgrestError | Error | null };
       if (templateId) {
-        // Update existing template
         result = await templateService.updateTemplate(templateId, templateData);
       } else {
-        // Create new template
         result = await templateService.createTemplate(templateData);
       }
-
       if (result.error) throw result.error;
-
-      onSaveSuccess(); // Callback on success
+      onSaveSuccess();
     } catch (err) {
       console.error("Error saving template:", err);
       setError(err instanceof Error ? err.message : "Failed to save template.");
@@ -153,8 +129,8 @@ const TemplateEditor: React.FC<TemplateEditorProps> = ({ templateId, onSaveSucce
   }
 
   return (
-    <div className="template-editor">
-      <h3 className="text-lg font-semibold mb-4">
+    <div className="template-editor flex flex-col h-full">
+      <h3 className="text-lg font-semibold mb-4 text-gray-800 dark:text-white">
         {templateId ? 'Edit Template' : 'Create New Template'}
       </h3>
 
@@ -164,7 +140,7 @@ const TemplateEditor: React.FC<TemplateEditorProps> = ({ templateId, onSaveSucce
         </div>
       )}
 
-      <div className="space-y-4">
+      <div className="space-y-4 flex-grow overflow-y-auto pr-2">
         <div>
           <Label htmlFor="template-name">Template Name</Label>
           <Input
@@ -173,9 +149,9 @@ const TemplateEditor: React.FC<TemplateEditorProps> = ({ templateId, onSaveSucce
             onChange={(e) => setName(e.target.value)}
             placeholder="e.g., Cease and Desist Letter"
             disabled={isSaving}
+            className="w-full dark:bg-gray-700 dark:border-gray-600 dark:text-white"
           />
         </div>
-
         <div>
           <Label htmlFor="template-description">Description</Label>
           <Textarea
@@ -185,9 +161,9 @@ const TemplateEditor: React.FC<TemplateEditorProps> = ({ templateId, onSaveSucce
             placeholder="Briefly describe what this template is for."
             rows={3}
             disabled={isSaving}
+            className="w-full dark:bg-gray-700 dark:border-gray-600 dark:text-white"
           />
         </div>
-
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
             <Label htmlFor="template-category">Category</Label>
@@ -211,42 +187,40 @@ const TemplateEditor: React.FC<TemplateEditorProps> = ({ templateId, onSaveSucce
               onChange={(e) => setTags(e.target.value)}
               placeholder="e.g., litigation, discovery, intellectual property"
               disabled={isSaving}
+              className="w-full dark:bg-gray-700 dark:border-gray-600 dark:text-white"
             />
           </div>
         </div>
 
-        <div className="flex items-center space-x-2">
-          <Checkbox
-            id="template-public"
-            checked={isPublic}
-            onCheckedChange={(checked) => setIsPublic(Boolean(checked))}
-            disabled={isSaving}
-          />
-          <Label htmlFor="template-public" className="mb-0">Make template public</Label>
-        </div>
-
-        <div>
+        <div className="template-body-section flex flex-col flex-grow min-h-[400px]">
           <div className="flex justify-between items-center mb-1">
             <Label>Template Body</Label>
             <Button 
               variant="outline"
               size="sm"
-              onClick={() => editor?.chain().focus().insertContent('{{}}').run()} 
-              disabled={!editor || isSaving}
+              onClick={() => editorRef.current?.insertContent('{{NEW_VARIABLE}}')}
+              disabled={isSaving}
               title="Insert Placeholder Variable"
             >
-              <Icons.PlusCircle className="h-4 w-4 mr-1" />
+              <PlusCircle className="h-4 w-4 mr-1" />
               Insert Variable
             </Button>
           </div>
-          {editor && <EditorContent editor={editor} className="template-editor-content" />}
+          <div className="flex-grow h-full">
+            <DocumentEditor
+              ref={editorRef}
+              initialContent={initialContent}
+              editorItem={{ type: 'template', id: templateId || 'new_template' }}
+              showToolbar={true}
+            />
+          </div>
         </div>
       </div>
 
-      <div className="mt-6 flex justify-end space-x-3">
+      <div className="mt-6 pt-4 border-t border-gray-200 dark:border-gray-700 flex justify-end space-x-3">
         <Button variant="outline" onClick={onCancel} disabled={isSaving}>Cancel</Button>
-        <Button onClick={handleSave} disabled={isSaving || isLoading || !editor}>
-          {isSaving ? <Spinner size="small" className="mr-2" /> : <Icons.Save className="mr-2 h-4 w-4" />}
+        <Button onClick={handleSave} disabled={isSaving || isLoading}>
+          {isSaving ? <Spinner size="sm" className="mr-2" /> : <Save className="mr-2 h-4 w-4" />}
           {isSaving ? 'Saving...' : (templateId ? 'Update Template' : 'Create Template')}
         </Button>
       </div>

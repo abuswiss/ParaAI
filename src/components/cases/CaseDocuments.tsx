@@ -2,6 +2,9 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Document } from '../../types/document';
 import { getUserDocuments } from '../../services/documentService';
 import { addDocumentToCase } from '../../services/caseService';
+import { createBlankDraft } from '../../services/templateService';
+import { DocumentDraft } from '@/services/templateService';
+import { useNavigate } from 'react-router-dom';
 
 interface CaseDocumentsProps {
   caseId: string;
@@ -16,6 +19,8 @@ const CaseDocuments: React.FC<CaseDocumentsProps> = ({ caseId, onDocumentAdded }
   const [isSelectingDocument, setIsSelectingDocument] = useState(false);
   const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
   const [addingDocument, setAddingDocument] = useState(false);
+  const [creatingDraft, setCreatingDraft] = useState(false);
+  const navigate = useNavigate();
 
   const fetchDocuments = useCallback(async () => {
     try {
@@ -83,20 +88,66 @@ const CaseDocuments: React.FC<CaseDocumentsProps> = ({ caseId, onDocumentAdded }
     }
   };
 
+  const handleCreateBlankDraft = async () => {
+    try {
+      setCreatingDraft(true);
+      setError(null);
+      const { data: newDraft, error: createError } = await createBlankDraft(caseId);
+
+      if (createError || !newDraft) {
+        console.error('Error creating blank draft:', createError);
+        setError('Failed to create blank draft. Please try again.');
+        throw createError || new Error('Failed to create blank draft: No data returned');
+      }
+
+      console.log('Blank draft created successfully:', newDraft.id);
+      navigate(`/documents/drafts/${newDraft.id}`);
+
+    } catch (err) {
+      console.error('Exception in handleCreateBlankDraft:', err);
+    } finally {
+      setCreatingDraft(false);
+    }
+  };
+
   return (
     <div className="mb-6">
       <div className="flex justify-between items-center mb-4">
         <h2 className="text-xl font-semibold text-text-primary">Case Documents</h2>
-        <button 
-          onClick={() => setIsSelectingDocument(true)}
-          className="bg-primary hover:bg-primary-hover text-white text-sm font-medium py-1.5 px-3 rounded-md transition flex items-center"
-          disabled={isSelectingDocument || availableDocuments.length === 0}
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" viewBox="0 0 20 20" fill="currentColor">
-            <path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd" />
-          </svg>
-          Add Document
-        </button>
+        <div className="flex space-x-2">
+          <button 
+            onClick={handleCreateBlankDraft}
+            className="bg-secondary hover:bg-secondary-hover text-white text-sm font-medium py-1.5 px-3 rounded-md transition flex items-center"
+            disabled={creatingDraft}
+          >
+            {creatingDraft ? (
+              <>
+                <svg className="animate-spin -ml-0.5 mr-1.5 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                Creating...
+              </>
+            ) : (
+              <>
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-11a1 1 0 10-2 0v2H7a1 1 0 100 2h2v2a1 1 0 102 0v-2h2a1 1 0 100-2h-2V7z" clipRule="evenodd" />
+                </svg>
+                New Blank Document
+              </>
+            )}
+          </button>
+          <button 
+            onClick={() => setIsSelectingDocument(true)}
+            className="bg-primary hover:bg-primary-hover text-white text-sm font-medium py-1.5 px-3 rounded-md transition flex items-center"
+            disabled={isSelectingDocument || availableDocuments.length === 0 || creatingDraft}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd" />
+            </svg>
+            Add Existing Document
+          </button>
+        </div>
       </div>
 
       {loading ? (
@@ -156,7 +207,7 @@ const CaseDocuments: React.FC<CaseDocumentsProps> = ({ caseId, onDocumentAdded }
                 </button>
                 <button
                   onClick={handleAddDocument}
-                  disabled={!selectedDocId || addingDocument}
+                  disabled={!selectedDocId || addingDocument || creatingDraft}
                   className={`bg-primary hover:bg-primary-hover text-white font-medium py-2 px-4 rounded-md transition flex items-center ${
                     !selectedDocId ? 'opacity-50 cursor-not-allowed' : ''
                   }`}
@@ -178,7 +229,7 @@ const CaseDocuments: React.FC<CaseDocumentsProps> = ({ caseId, onDocumentAdded }
       ) : documents.length === 0 ? (
         <div className="bg-gray-800 rounded-lg p-6 text-center">
           <p className="text-text-secondary mb-2">No documents associated with this case yet.</p>
-          <p className="text-sm text-gray-400">Upload documents or add existing ones to this case.</p>
+          <p className="text-sm text-gray-400">Create a blank document or add existing ones to this case.</p>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

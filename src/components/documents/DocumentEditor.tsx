@@ -1,47 +1,143 @@
 import React, { useState, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react';
-import { useSetAtom } from 'jotai'; // Import Jotai hooks (useAtom removed)
-import { editorTextToQueryAtom, ActiveEditorItem } from '@/atoms/appAtoms'; // Import atoms
+import { useSetAtom } from 'jotai';
+import { editorTextToQueryAtom, ActiveEditorItem as AppActiveEditorItem } from '@/atoms/appAtoms';
 import { useEditor, EditorContent, Editor, BubbleMenu, AnyExtension } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
-import { slashCommandSuggestion } from '@/lib/editor/slashCommands'; // Uncommented
-import Suggestion, { SuggestionOptions } from '@tiptap/suggestion'; // Uncommented
-import { CommandItem } from '@/components/editor/SlashCommandList'; // Import CommandItem type for assertion
-import * as templateService from '@/services/templateService'; // For updating drafts
-import * as documentService from '@/services/documentService'; // For updating documents
-// import { ActiveEditorItem, useAppStore } from '@/store/appStore'; // Remove Zustand import
-import { Button } from '@/components/ui/Button';
+// Slash commands are currently broken due to deleted file
+// import { slashCommandSuggestion } from '@/lib/editor/slashCommands';
+// import Suggestion, { SuggestionOptions } from '@tiptap/suggestion';
+// import { CommandItem } from '@/components/editor/SlashCommandList';
+import * as templateService from '@/services/templateService';
+import * as documentService from '@/services/documentService';
+import { Button, ButtonVariant, ButtonSize } from '@/components/ui/Button'; // Import types
 import { Spinner } from '@/components/ui/Spinner';
-import { Icons } from '@/components/ui/Icons';
-import { RefreshCcw as RefreshCcwIcon, TextQuote as TextQuoteIcon } from 'lucide-react';
+import { Icons as CustomIcons } from '@/components/ui/Icons'; // Renamed to avoid clash
+// Import necessary Lucide icons
+import {
+  Bold, Italic, Strikethrough,
+  Heading1, Heading2, Heading3,
+  List, ListOrdered, Quote,
+  Undo, Redo,
+  TextQuote as TextQuoteIcon, // Alias for Bubble Menu
+  Save,
+  Sparkles
+} from 'lucide-react';
 import './DocumentEditor.css';
-import InlineAIPopup from '@/components/editor/InlineAIPopup'; // Correct the import path for InlineAIPopup
+import InlineAIPopup from '@/components/editor/InlineAIPopup';
 
-// Simple Toolbar Component
+// Define type for the item being viewed/edited in the main panel - Allow 'template'
+export type ActiveEditorItem = AppActiveEditorItem | { type: 'template'; id: string };
+
+// Define type for the key used in editor.isActive() checks
+type EditorActiveKey = string | { [key: string]: any };
+
+// Toolbar Component with Formatting Buttons
 interface EditorToolbarProps {
   editor: Editor | null;
   isDirty: boolean;
   isSaving: boolean;
-  saveStatus: string; // e.g., "Unsaved", "Saving...", "Saved", "Error"
+  saveStatus: string;
   onSave: () => void;
+  // Add handlers for AI actions triggered from toolbar
+  onAskAi: () => void;
+  onRewrite: () => void;
+  onSummarize: () => void;
+  isSaveDisabled?: boolean; // Add prop to disable save button externally
 }
 
-const EditorToolbar: React.FC<EditorToolbarProps> = ({ editor, isDirty, isSaving, saveStatus, onSave }) => {
+const EditorToolbar: React.FC<EditorToolbarProps> = ({
+  editor,
+  isDirty,
+  isSaving,
+  saveStatus,
+  onSave,
+  onAskAi,
+  onRewrite,
+  onSummarize,
+  isSaveDisabled = false, // Default to false
+}) => {
   if (!editor) return null;
 
+  // Helper to create button props - Now defaults to 'md' size
+  const getButtonProps = (action: () => void, isActiveKey: EditorActiveKey, title: string) => ({
+    onClick: () => action(),
+    variant: (editor.isActive(isActiveKey) ? 'secondary' : 'ghost') as ButtonVariant,
+    size: 'md' as ButtonSize, // Changed default size to 'md'
+    title: title,
+    // Adjusted className for potentially larger size ('md') - might need fine-tuning
+    className: "p-1.5 data-[state=on]:bg-muted data-[state=on]:text-foreground",
+    disabled: isSaving
+  });
+
+  const hasSelection = editor.state.selection && !editor.state.selection.empty;
+
   return (
+    // Increased vertical padding (py-2) for a bigger toolbar
     <div className="editor-toolbar sticky top-0 z-10 flex items-center justify-between p-2 border-b border-neutral-200 dark:border-surface-lighter bg-white dark:bg-surface">
-      {/* Placeholder for formatting buttons later */}
-      <div className="flex items-center space-x-2">
-        {/* Example: <Button variant="ghost" size="sm">Bold</Button> */}
+      {/* Formatting Buttons Group */}
+      <div className="flex items-center space-x-1">
+        {/* Use getButtonProps for formatting buttons */}
+        <Button {...getButtonProps(() => editor.chain().focus().toggleBold().run(), 'bold', 'Bold')} aria-label="Bold">
+          <Bold className="h-5 w-5" /> {/* Increased icon size */}
+        </Button>
+        <Button {...getButtonProps(() => editor.chain().focus().toggleItalic().run(), 'italic', 'Italic')} aria-label="Italic">
+          <Italic className="h-5 w-5" /> {/* Increased icon size */}
+        </Button>
+        <Button {...getButtonProps(() => editor.chain().focus().toggleStrike().run(), 'strike', 'Strikethrough')} aria-label="Strikethrough">
+          <Strikethrough className="h-5 w-5" /> {/* Increased icon size */}
+        </Button>
+        <div className="h-6 w-px bg-border mx-1.5"></div> {/* Adjusted Separator */}
+        {/* Pass heading object directly to isActiveKey */}
+        <Button {...getButtonProps(() => editor.chain().focus().toggleHeading({ level: 1 }).run(), { heading: { level: 1 } }, 'Heading 1')} aria-label="Heading 1">
+          <Heading1 className="h-5 w-5" /> {/* Increased icon size */}
+        </Button>
+        <Button {...getButtonProps(() => editor.chain().focus().toggleHeading({ level: 2 }).run(), { heading: { level: 2 } }, 'Heading 2')} aria-label="Heading 2">
+          <Heading2 className="h-5 w-5" /> {/* Increased icon size */}
+        </Button>
+        <Button {...getButtonProps(() => editor.chain().focus().toggleHeading({ level: 3 }).run(), { heading: { level: 3 } }, 'Heading 3')} aria-label="Heading 3">
+          <Heading3 className="h-5 w-5" /> {/* Increased icon size */}
+        </Button>
+        <div className="h-6 w-px bg-border mx-1.5"></div> {/* Adjusted Separator */}
+        <Button {...getButtonProps(() => editor.chain().focus().toggleBulletList().run(), 'bulletList', 'Bullet List')} aria-label="Bullet List">
+          <List className="h-5 w-5" /> {/* Increased icon size */}
+        </Button>
+        <Button {...getButtonProps(() => editor.chain().focus().toggleOrderedList().run(), 'orderedList', 'Numbered List')} aria-label="Numbered List">
+          <ListOrdered className="h-5 w-5" /> {/* Increased icon size */}
+        </Button>
+        <Button {...getButtonProps(() => editor.chain().focus().toggleBlockquote().run(), 'blockquote', 'Blockquote')} aria-label="Blockquote">
+          <Quote className="h-5 w-5" /> {/* Increased icon size */}
+        </Button>
+         <div className="h-6 w-px bg-border mx-1.5"></div> {/* Adjusted Separator */}
+         {/* Added AI Action Buttons */} 
+         <Button variant="ghost" size="md" onClick={onAskAi} disabled={!hasSelection || isSaving} title="Send selected text to chat">
+            <Sparkles className="h-5 w-5" />
+         </Button>
+         <Button variant="ghost" size="md" onClick={onRewrite} disabled={!hasSelection || isSaving} title="Rewrite selection with AI">
+            <CustomIcons.Refresh className="h-5 w-5" />
+         </Button>
+         <Button variant="ghost" size="md" onClick={onSummarize} disabled={!hasSelection || isSaving} title="Summarize selection with AI">
+            <TextQuoteIcon className="h-5 w-5" />
+         </Button>
+         <div className="h-6 w-px bg-border mx-1.5"></div> {/* Adjusted Separator */} 
+         {/* Undo/Redo buttons - using 'md' size */}
+        <Button onClick={() => editor.chain().focus().undo().run()} disabled={!editor.can().undo()} variant="ghost" size="md" className="p-1.5" title="Undo" aria-label="Undo">
+          <Undo className="h-5 w-5" /> {/* Increased icon size */}
+        </Button>
+        <Button onClick={() => editor.chain().focus().redo().run()} disabled={!editor.can().redo()} variant="ghost" size="md" className="p-1.5" title="Redo" aria-label="Redo">
+          <Redo className="h-5 w-5" /> {/* Increased icon size */}
+        </Button>
       </div>
+
+      {/* Save Status and Button Group */}
       <div className="flex items-center space-x-2">
-          <span className={`text-xs mr-2 ${saveStatus === 'Error' ? 'text-error' : isDirty ? 'text-warning dark:text-warning' : 'text-text-tertiary'}`}>
+          <span className={`text-sm mr-2 ${saveStatus === 'Error' ? 'text-error' : isDirty ? 'text-warning dark:text-warning' : 'text-text-tertiary'}`}> {/* Slightly larger text */}
              {isSaving ? 'Saving...' : (saveStatus === 'Saved' && !isDirty) ? 'Saved' : isDirty ? 'Unsaved changes' : 'Up to date'}
              {saveStatus === 'Error' && <span className="ml-1">(Error)</span>}
            </span>
-        <Button onClick={onSave} size="sm" disabled={!isDirty || isSaving} variant="primary">
-          {isSaving ? <Spinner size="sm" className="mr-1" /> : <Icons.Save className="mr-1 h-4 w-4" />}
+        {/* Keep Save button size potentially different if desired, using md here for consistency */}
+        <Button onClick={onSave} size="md" disabled={!isDirty || isSaving || isSaveDisabled} variant="primary">
+          {isSaving ? <Spinner size="sm" className="mr-1.5" /> : <Save className="mr-1.5 h-5 w-5" />} {/* Increased icon size */}
           Save
         </Button>
       </div>
@@ -51,75 +147,75 @@ const EditorToolbar: React.FC<EditorToolbarProps> = ({ editor, isDirty, isSaving
 
 interface DocumentEditorProps {
   initialContent: string;
-  editorItem: ActiveEditorItem; // Receive item type and ID
+  editorItem: ActiveEditorItem; // Use updated type
+  showToolbar?: boolean; // Prop to optionally hide the toolbar
 }
 
 // Define the type for the methods we want to expose via the ref
 export interface DocumentEditorRef {
   insertContent: (content: string) => void;
+  getContent: () => string | undefined; // Add getContent method
 }
 
-// Wrap the component with forwardRef
+// DocumentEditor Component
 const DocumentEditor = forwardRef<DocumentEditorRef, DocumentEditorProps>(
-  ({ initialContent, editorItem }, ref) => {
+  ({ initialContent, editorItem, showToolbar = true }, ref) => {
     // Local state
     const [isDirty, setIsDirty] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
     const [saveStatus, setSaveStatus] = useState<'Idle' | 'Saving' | 'Saved' | 'Error'>('Idle');
-    const [saveError, setSaveError] = useState<string | null>(null);
     const [showAIPopup, setShowAIPopup] = useState(false);
     const [aiPopupContent, setAiPopupContent] = useState<string | null>(null);
+    // Consider adding a dedicated loading state for AI actions
+    // const [isAILoading, setIsAILoading] = useState(false);
     const [currentSelectionRange, setCurrentSelectionRange] = useState<{ from: number; to: number } | null>(null);
-    
+
     // Use Jotai setter for textToQuery
     const setTextToQuery = useSetAtom(editorTextToQueryAtom);
 
     const editor = useEditor({
       extensions: [
-        StarterKit.configure({
-          // Ensure common block types are enabled
-          heading: { levels: [1, 2, 3] },
-          bulletList: { keepMarks: true, keepAttributes: true },
-          orderedList: { keepMarks: true, keepAttributes: true },
-          blockquote: {},
-          codeBlock: {},
-          // Also ensure formatting marks are enabled
-          bold: {},
-          italic: {},
-        }),
+        StarterKit, // Keep StarterKit for basic functionality
         Placeholder.configure({
-          placeholder: ({ node }) => {
-            if (node.type.name === 'paragraph' && node.content.size === 0 && node.nodeSize === 2) {
-              return "Type '/' for commands, or just start writing...";
-            }
-            return '';
-          },
-           includeChildren: true,
+          // Placeholder handled by CSS now
+          placeholder: ' ', // Use non-breaking space or empty to prevent default rendering
         }),
-        // Use type assertion with imported types
-        Suggestion(slashCommandSuggestion as SuggestionOptions<CommandItem>), 
+        // Slash commands are disabled
+        // Suggestion(slashCommandSuggestion as SuggestionOptions<CommandItem>),
       ] as AnyExtension[],
       content: initialContent || '<p></p>',
       editable: true,
       editorProps: {
         attributes: {
+          // Keep existing editor styling class
           class:
-            'prose prose-sm sm:prose lg:prose-lg xl:prose-2xl m-5 focus:outline-none dark:prose-invert max-w-full',
+            'prose prose-sm sm:prose lg:prose-lg xl:prose-2xl focus:outline-none dark:prose-invert max-w-full p-4 min-h-[300px]',
         },
       },
       onUpdate: () => {
         setIsDirty(true);
         setSaveStatus('Idle');
       },
+       onSelectionUpdate: ({ editor: currentEditor }) => {
+        if (currentEditor.state.selection.empty || !showAIPopup) {
+          setShowAIPopup(false);
+          setCurrentSelectionRange(null);
+        }
+        // Force toolbar re-render on selection change to update disabled states
+        forceToolbarUpdate(); // Call the new force update function
+      },
     });
+
+    // Use a counter state to force re-render for toolbar disabled state updates
+    const [, setToolbarUpdateKey] = useState(0); // Omit unused state variable
+    const forceToolbarUpdate = useCallback(() => setToolbarUpdateKey(k => k + 1), []);
 
     // Debounce save function to avoid saving on every keystroke (optional, but good UX)
     const handleSave = useCallback(async () => {
-      if (!editor || !editorItem || !isDirty) return;
+      if (!editor || !editorItem || !isDirty || editorItem.type === 'template') return;
 
       setIsSaving(true);
       setSaveStatus('Saving');
-      setSaveError(null);
       console.log(`Saving ${editorItem.type} with ID ${editorItem.id}`);
 
       const contentToSave = editor.getHTML();
@@ -144,7 +240,6 @@ const DocumentEditor = forwardRef<DocumentEditorRef, DocumentEditorProps>(
 
       } catch (err) {
         console.error("Error saving content:", err);
-        setSaveError(err instanceof Error ? err.message : "Failed to save content.");
         setSaveStatus('Error');
         // Optionally show an error toast/message here
       } finally {
@@ -172,12 +267,13 @@ const DocumentEditor = forwardRef<DocumentEditorRef, DocumentEditorProps>(
       if (!editor || editor.state.selection.empty) return null;
       const { from, to } = editor.state.selection;
       const range = { from, to };
-      setCurrentSelectionRange(range);
+      setCurrentSelectionRange(range); // Store range for potential replacement
+      forceToolbarUpdate(); // Update toolbar when selection changes
       return editor.state.doc.textBetween(from, to, ' ');
-    }, [editor]);
+    }, [editor, forceToolbarUpdate]);
 
     const handleAskAi = useCallback(() => {
-      const selectedText = storeSelection();
+      const selectedText = storeSelection(); // Store selection first
       if (selectedText) {
           console.log("Sending selected text to chat:", selectedText);
           setTextToQuery(selectedText.trim());
@@ -185,11 +281,13 @@ const DocumentEditor = forwardRef<DocumentEditorRef, DocumentEditorProps>(
       }
     }, [storeSelection, setTextToQuery]);
 
-    // Generic handler for inline AI actions
+    // Generic handler for inline AI actions (rewrite, summarize)
     const handleInlineAIAction = useCallback(async (action: 'rewrite' | 'summarize', text: string) => {
         if (!text) return;
+        storeSelection(); // Ensure selection range is stored before showing popup
         setShowAIPopup(true);
-        setAiPopupContent(null); 
+        setAiPopupContent(null); // Indicate loading visually
+        // setIsAILoading(true); // If using dedicated state
         try {
             const response = await fetch(`/api/ai/${action}`, {
                 method: 'POST',
@@ -207,26 +305,33 @@ const DocumentEditor = forwardRef<DocumentEditorRef, DocumentEditorProps>(
 
         } catch (error: unknown) {
             console.error(`Error during ${action}:`, error);
-            setAiPopupContent(null);
+            setAiPopupContent(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`); // Display error in popup
+        } finally {
+           // setIsAILoading(false); // If using dedicated state
         }
-    }, []);
+    }, [storeSelection]);
 
-    const handleRewrite = useCallback(() => {
-      const selectedText = storeSelection();
-      if (selectedText) {
-        handleInlineAIAction('rewrite', selectedText);
+    // Define handlers for toolbar AI buttons
+    const handleToolbarRewrite = useCallback(() => {
+      // Get selected text directly within the handler
+      const text = editor?.state.doc.textBetween(editor.state.selection.from, editor.state.selection.to, ' ');
+      if (text) {
+          // Call the main AI action handler with specific action
+          handleInlineAIAction('rewrite', text);
       }
-    }, [storeSelection, handleInlineAIAction]);
+    }, [editor, handleInlineAIAction]); // Dependencies: editor and the main handler
 
-    const handleSummarize = useCallback(() => {
-      const selectedText = storeSelection();
-      if (selectedText) {
-        handleInlineAIAction('summarize', selectedText);
+    const handleToolbarSummarize = useCallback(() => {
+      // Get selected text directly within the handler
+      const text = editor?.state.doc.textBetween(editor.state.selection.from, editor.state.selection.to, ' ');
+      if (text) {
+          // Call the main AI action handler with specific action
+          handleInlineAIAction('summarize', text);
       }
-    }, [storeSelection, handleInlineAIAction]);
+    }, [editor, handleInlineAIAction]); // Dependencies: editor and the main handler
 
-    // Callback for popup: Replace selection
-    const handleReplaceSelection = useCallback((newContent: string) => {
+    // Callback passed to popup for replacing selection
+    const handleReplace = useCallback((newContent: string) => {
       if (editor && currentSelectionRange) {
         editor
           .chain()
@@ -235,24 +340,20 @@ const DocumentEditor = forwardRef<DocumentEditorRef, DocumentEditorProps>(
           .insertContent(newContent)
           .run();
         setCurrentSelectionRange(null); // Clear range after replacing
+        setShowAIPopup(false); // Close popup
       }
     }, [editor, currentSelectionRange]);
 
-    // Callback for popup: Copy content
-    const handleCopyContent = useCallback((content: string) => {
-      navigator.clipboard.writeText(content).then(() => {
+    // Callback passed to popup for copying content
+    const handleCopy = useCallback((contentToCopy: string) => {
+      navigator.clipboard.writeText(contentToCopy).then(() => {
         console.log("AI content copied to clipboard");
         // Optionally show a toast message
       }).catch(err => {
         console.error("Failed to copy text:", err);
       });
-    }, []);
-
-    // Add closeAIPopup function with empty dependency array
-    const closeAIPopup = useCallback(() => {
-      setShowAIPopup(false);
-      setAiPopupContent(null);
-      setCurrentSelectionRange(null);
+      // Decide whether to close popup after copy
+       setShowAIPopup(false);
     }, []);
 
     // Expose the insertContent method using useImperativeHandle
@@ -263,153 +364,92 @@ const DocumentEditor = forwardRef<DocumentEditorRef, DocumentEditorProps>(
           editor.chain().focus().insertContent(content).run();
         }
       },
+      // Implement getContent
+      getContent: () => {
+          return editor?.getHTML();
+      }
     }));
 
     if (!editor) {
       return null;
     }
 
+    // Determine if the toolbar save should be disabled
+    const isToolbarSaveDisabled = editorItem?.type === 'template'; // Add null check
+
     return (
-      <div className="document-editor-container relative border border-neutral-300 dark:border-surface-lighter rounded-md overflow-hidden h-full flex flex-col bg-white dark:bg-background">
-        <EditorToolbar
-          editor={editor}
-          isDirty={isDirty}
-          isSaving={isSaving}
-          saveStatus={saveStatus}
-          onSave={handleSave}
-        />
-
-        {/* Bubble Menu for Inline Formatting */}
-        {editor && (
-          <BubbleMenu
+      <div className="document-editor-container h-full flex flex-col border border-border rounded-md shadow-sm overflow-hidden">
+        {showToolbar && (
+           <EditorToolbar
             editor={editor}
-            tippyOptions={{ duration: 100, placement: 'top-start' }}
-            className="flex items-center flex-wrap gap-1 bg-surface dark:bg-surface-darker border border-surface-lighter dark:border-surface-lighter rounded-md shadow-lg px-2 py-1"
-            shouldShow={({ from, to }) => {
-              // Only show for text selections, not cursor position
-              return from !== to;
-            }}
-          >
-            {/* Formatting Buttons */}
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()}
-              className={`p-1 h-auto ${editor.isActive('heading', { level: 1 }) ? 'bg-primary-light text-primary dark:bg-primary-light dark:text-primary' : 'text-text-secondary hover:bg-surface-lighter dark:hover:bg-surface-lighter'}`}
-              title="Heading 1"
-            >
-              <Icons.Heading1 className="h-4 w-4" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}
-              className={`p-1 h-auto ${editor.isActive('heading', { level: 2 }) ? 'bg-primary-light text-primary dark:bg-primary-light dark:text-primary' : 'text-text-secondary hover:bg-surface-lighter dark:hover:bg-surface-lighter'}`}
-              title="Heading 2"
-            >
-              <Icons.Heading2 className="h-4 w-4" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => editor.chain().focus().toggleBold().run()}
-              disabled={!editor.can().chain().focus().toggleBold().run()}
-              className={`p-1 h-auto ${editor.isActive('bold') ? 'bg-primary-light text-primary dark:bg-primary-light dark:text-primary' : 'text-text-secondary hover:bg-surface-lighter dark:hover:bg-surface-lighter'}`}
-              title="Bold (Ctrl+B)"
-            >
-              <Icons.Bold className="h-4 w-4" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => editor.chain().focus().toggleItalic().run()}
-              disabled={!editor.can().chain().focus().toggleItalic().run()}
-              className={`p-1 h-auto ${editor.isActive('italic') ? 'bg-primary-light text-primary dark:bg-primary-light dark:text-primary' : 'text-text-secondary hover:bg-surface-lighter dark:hover:bg-surface-lighter'}`}
-              title="Italic (Ctrl+I)"
-            >
-              <Icons.Italic className="h-4 w-4" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => editor.chain().focus().toggleBulletList().run()}
-              className={`p-1 h-auto ${editor.isActive('bulletList') ? 'bg-primary-light text-primary dark:bg-primary-light dark:text-primary' : 'text-text-secondary hover:bg-surface-lighter dark:hover:bg-surface-lighter'}`}
-              title="Bullet List"
-            >
-              <Icons.List className="h-4 w-4" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => editor.chain().focus().toggleOrderedList().run()}
-              className={`p-1 h-auto ${editor.isActive('orderedList') ? 'bg-primary-light text-primary dark:bg-primary-light dark:text-primary' : 'text-text-secondary hover:bg-surface-lighter dark:hover:bg-surface-lighter'}`}
-              title="Numbered List"
-            >
-              <Icons.ListOrdered className="h-4 w-4" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => editor.chain().focus().toggleBlockquote().run()}
-              className={`p-1 h-auto ${editor.isActive('blockquote') ? 'bg-primary-light text-primary dark:bg-primary-light dark:text-primary' : 'text-text-secondary hover:bg-surface-lighter dark:hover:bg-surface-lighter'}`}
-              title="Blockquote"
-            >
-              <Icons.Quote className="h-4 w-4" />
-            </Button>
-            {/* Separator */}
-            <div className="h-4 w-px bg-neutral-300 dark:bg-surface-lighter mx-1"></div>
-            {/* AI Action Buttons */}
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={handleAskAi}
-              disabled={editor.state.selection.empty}
-              className={`p-1 h-auto text-text-secondary hover:bg-surface-lighter dark:hover:bg-surface-lighter flex items-center disabled:opacity-50`}
-              title="Ask AI about selected text (sends to chat)"
-            >
-              <Icons.Sparkles className="h-4 w-4 mr-1" /> Ask Chat
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={handleRewrite}
-              disabled={editor.state.selection.empty}
-              className={`p-1 h-auto text-text-secondary hover:bg-surface-lighter dark:hover:bg-surface-lighter flex items-center disabled:opacity-50`}
-              title="Rewrite selected text"
-            >
-              <RefreshCcwIcon className="h-4 w-4 mr-1" /> Rewrite
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={handleSummarize}
-              disabled={editor.state.selection.empty}
-              className={`p-1 h-auto text-text-secondary hover:bg-surface-lighter dark:hover:bg-surface-lighter flex items-center disabled:opacity-50`}
-              title="Summarize selected text"
-            >
-              <TextQuoteIcon className="h-4 w-4 mr-1" /> Summarize
-            </Button>
-          </BubbleMenu>
-        )}
-
-        <div className="editor-content-area flex-grow overflow-y-auto p-0"> {/* Remove padding here, handled by prose class */}
-          <EditorContent editor={editor} className="h-full" />
-        </div>
-        {showAIPopup && (
-          <InlineAIPopup
-            content={aiPopupContent}
-            isLoading={false}
-            originalSelectionRange={currentSelectionRange ?? undefined}
-            onClose={closeAIPopup}
-            onReplace={handleReplaceSelection}
-            onCopy={handleCopyContent}
+            isDirty={isDirty}
+            isSaving={isSaving}
+            saveStatus={saveStatus}
+            onSave={handleSave}
+            onAskAi={handleAskAi}
+            onRewrite={handleToolbarRewrite}
+            onSummarize={handleToolbarSummarize}
+            isSaveDisabled={isToolbarSaveDisabled} // Pass disable flag
           />
         )}
-        {saveError && (
-           <div className="text-xs text-error p-2 border-t border-neutral-200 dark:border-surface-lighter bg-red-50 dark:bg-error/10">
-             Save Error: {saveError}
-           </div>
-         )}
+        {editor && (
+            <BubbleMenu
+              editor={editor}
+              tippyOptions={{ duration: 100 }}
+              // Keeping BubbleMenu smaller/more compact
+              className="bg-background border border-border rounded-md shadow-lg p-1 flex items-center space-x-1"
+            >
+              {/* Ask Chat Button */}
+              <Button
+                onClick={handleAskAi}
+                variant="ghost"
+                size="sm" // Keep bubble menu buttons small
+                className="text-xs px-2 py-1"
+                disabled={!editor.state.selection.content()}
+                title="Send selected text to chat"
+              >
+                <Sparkles className="h-3 w-3 mr-1" /> Ask Chat
+              </Button>
+              {/* Rewrite Button */}
+              <Button
+                onClick={handleToolbarRewrite} // Use specific handler
+                variant="ghost"
+                size="sm" // Keep bubble menu buttons small
+                className="text-xs px-2 py-1"
+                disabled={!editor.state.selection.content()}
+                title="Rewrite selection with AI"
+              >
+                 <CustomIcons.Refresh className="h-3 w-3 mr-1" /> Rewrite
+              </Button>
+              {/* Summarize Button */}
+               <Button
+                onClick={handleToolbarSummarize} // Use specific handler
+                variant="ghost"
+                size="sm" // Keep bubble menu buttons small
+                className="text-xs px-2 py-1"
+                disabled={!editor.state.selection.content()}
+                title="Summarize selection with AI"
+              >
+                 <TextQuoteIcon className="h-3 w-3 mr-1" /> Summarize
+              </Button>
+            </BubbleMenu>
+          )}
+
+         {/* Render InlineAIPopup conditionally */}
+         {showAIPopup && currentSelectionRange && (
+            <InlineAIPopup
+              originalSelectionRange={currentSelectionRange}
+              content={aiPopupContent}
+              isLoading={aiPopupContent === null}
+              onClose={() => setShowAIPopup(false)}
+              onReplace={handleReplace}
+              onCopy={handleCopy}
+            />
+          )}
+
+        <div className="editor-content-wrapper flex-grow overflow-y-auto">
+          <EditorContent editor={editor} className="h-full" />
+        </div>
       </div>
     );
   }

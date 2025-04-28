@@ -1,6 +1,6 @@
 "use client"; // If using Next.js App Router or similar client-side features
 
-import React, { useState, useCallback, ChangeEvent } from 'react';
+import React, { useState, useCallback, ChangeEvent, useRef, useEffect } from 'react';
 import { useAtomValue } from 'jotai';
 import { activeCaseIdAtom } from '@/atoms/appAtoms';
 import { Button } from '@/components/ui/Button';
@@ -31,6 +31,29 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose }) => {
   // Get active case ID to pre-select or associate
   const activeCaseId = useAtomValue(activeCaseIdAtom);
   // TODO: Add state/select input if user needs to choose a different case
+
+  // Ref for the modal content area
+  const modalRef = useRef<HTMLDivElement>(null);
+
+  // Close modal on outside click
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      // Check if the click is outside the modal content and the modal is open
+      if (isOpen && modalRef.current && !modalRef.current.contains(event.target as Node) && !isUploading) {
+        handleClose();
+      }
+    };
+
+    // Add event listener when the modal is open
+    if (isOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+
+    // Cleanup: remove event listener when the modal closes or component unmounts
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isOpen, isUploading, onClose]); // Dependencies for the effect
 
   const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
     if (event.target.files) {
@@ -134,14 +157,14 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose }) => {
     // or the user refreshes the document list later.
   };
 
-  const handleClose = () => {
+  const handleClose = useCallback(() => {
       if (isUploading) return; // Prevent closing during upload
       // Reset state on close
       setFilesToUpload([]);
       setOverallError(null);
       setIsUploading(false);
       onClose(); // Call parent close handler
-  }
+  }, [isUploading, onClose]); // Add dependencies to useCallback
 
   if (!isOpen) return null;
 
@@ -150,7 +173,10 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose }) => {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70">
-      <div className="relative z-50 w-full max-w-2xl bg-surface rounded-lg shadow-xl p-6">
+      <div 
+        ref={modalRef} 
+        className="relative z-50 w-full max-w-2xl bg-surface rounded-lg shadow-xl p-6"
+      >
         <div className="flex justify-between items-center mb-4">
           <h3 className="text-lg font-semibold text-text-primary">Upload Documents</h3>
           <Button variant="ghost" size="sm" onClick={handleClose} className="-mr-2" disabled={isUploading}>

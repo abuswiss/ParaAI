@@ -578,7 +578,7 @@ const Documents: React.FC = () => {
                          >
                            <Icons.Trash className="h-4 w-4" />
                          </Button>
-                         <Button variant="primary" size="sm" 
+                         <Button variant="secondary" size="sm" 
                            onClick={() => { setShowDraftEditor(true); }} 
                            className="h-auto py-1.5 px-3 ml-2"
                            title="Use this template to start a new document"

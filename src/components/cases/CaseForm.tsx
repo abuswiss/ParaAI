@@ -167,7 +167,7 @@ const CaseForm: React.FC<CaseFormProps> = ({ isOpen, onClose, caseData }) => {
                         name="status"
                         value={formData.status}
                         onChange={handleInputChange}
-                        className="block w-full mt-1 rounded-md border-border shadow-sm focus:border-primary focus:ring focus:ring-primary focus:ring-opacity-50 bg-input text-foreground"
+                        className="block w-full mt-1 rounded-md border border-border dark:border-gray-600 shadow-sm focus:border-primary focus:ring focus:ring-primary focus:ring-opacity-50 bg-input text-foreground dark:bg-gray-700! dark:text-white p-2 text-sm"
                     >
                         <option value="active">Active</option>
                         <option value="closed">Closed</option>

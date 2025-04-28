@@ -160,33 +160,10 @@ const Cases: React.FC = () => {
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-2xl font-semibold text-text-primary">Manage Cases</h1>
         
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button disabled={!!loadingAction}>
-              {loadingAction === 'new-blank' || loadingAction === 'new-ai' ? <Spinner size="sm" className="mr-2"/> : <Icons.Plus className="mr-2 h-4 w-4" />}
-              Create
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={() => setIsCreateFormOpen(true)} disabled={!!loadingAction}>
-              <FolderIcon className="mr-2 h-4 w-4" />
-              <span>New Case</span>
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={handleNewBlankDocument} disabled={!!loadingAction}>
-              <FileTextIcon className="mr-2 h-4 w-4" />
-              <span>New Blank Document</span>
-              {loadingAction === 'new-blank' && <Spinner size="xs" className="ml-auto"/>}
-            </DropdownMenuItem>
-             <DropdownMenuItem onClick={() => setIsUploadModalOpen(true)} disabled={!!loadingAction}>
-               <Icons.Upload className="mr-2 h-4 w-4" />
-              <span>Upload Document(s)</span>
-            </DropdownMenuItem>
-             <DropdownMenuItem onClick={() => setIsNewAIDraftModalOpen(true)} disabled={!!loadingAction}>
-               <Icons.Sparkles className="mr-2 h-4 w-4" />
-              <span>New AI Draft</span>
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        <Button onClick={() => setIsCreateFormOpen(true)} disabled={!!loadingAction}>
+          <Icons.Plus className="mr-2 h-4 w-4" />
+          New Case
+        </Button>
       </div>
       
       {loading ? (
