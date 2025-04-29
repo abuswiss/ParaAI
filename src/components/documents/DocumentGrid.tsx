@@ -1,10 +1,16 @@
 import React from 'react';
-import { Document } from '@/types/document';
-import DocumentCard from './DocumentCard';
+import { useSetAtom } from 'jotai';
+import {
+  activeEditorItemAtom,
+} from '@/atoms/appAtoms';
+import { DocumentMetadata } from '@/services/documentService';
+import { getFileIcon } from '@/types/document';
 import { Spinner } from '@/components/ui/Spinner';
+import { Icons } from '@/components/ui/Icons';
+import DocumentCard from './DocumentCard';
 
 interface DocumentGridProps {
-  documents: Document[];
+  documents: DocumentMetadata[];
   isLoading: boolean;
   error: string | null;
   activeDocumentId: string | null;

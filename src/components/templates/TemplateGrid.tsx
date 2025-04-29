@@ -66,6 +66,7 @@ const TemplateGrid: React.FC<TemplateGridProps> = ({
             bg-white dark:bg-surface-lighter rounded-lg shadow 
             border border-gray-200 dark:border-gray-700 
             p-4 flex flex-col 
+            min-h-[220px] /* Add minimum height for consistency */
             transition-all duration-150 ease-in-out cursor-pointer
             hover:shadow-md hover:border-primary dark:hover:border-primary
             ${activeTemplateId === template.id ? 'border-primary dark:border-primary ring-2 ring-primary' : ''}
@@ -75,8 +76,8 @@ const TemplateGrid: React.FC<TemplateGridProps> = ({
           <div className="flex justify-center mb-2">
              {renderTemplateIcon(template.category)}
           </div>
-          {/* Centered Text Info */}
-          <div className="text-center flex-grow mb-3">
+          {/* Left-aligned Text Info */}
+          <div className="text-left flex-grow mb-3">
             <h4 className="text-sm font-semibold text-gray-800 dark:text-white mb-1 truncate" title={template.name}>
               {template.name}
             </h4>

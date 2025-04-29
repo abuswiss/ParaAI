@@ -90,7 +90,14 @@ export const getAvailableTemplates = async (
       .or(`is_public.eq.true,creator_id.eq.${user.id}`);
 
     if (category) {
-      query = query.eq('category', category);
+      // Explicitly cast the category string to the ENUM type
+      query = query.eq('category', category as any); // Cast needed for Supabase client 
+                                                   // The actual SQL will use the value directly
+                                                   // Supabase should handle the cast if the type matches, 
+                                                   // but let's re-evaluate if this doesn't work.
+                                                   // A more explicit raw query might be needed if Supabase fails.
+      // Alternative using raw filter if Supabase client struggles:
+      // query = query.filter('category', 'eq', `${category}::template_category_enum`);
     }
 
     const { data, error } = await query;
@@ -1080,19 +1087,26 @@ export const generateTemplateDraftWithAI = async (
   instructions: string,
 ): Promise<{ data: string | null; error: Error | null }> => {
   try {
-    const systemPrompt = `You are an expert legal template drafting assistant. \nCreate a professional, well-structured legal template based on the user's requirements. \nUse standard legal language and formatting. \nClearly indicate variable placeholders using double curly braces, e.g., {{client_name}} or {{agreement_date}}. \nDo NOT fill in the placeholders; leave them as variables.\nEnsure the output is only the template content itself, suitable for direct use.`;
+    // Update the system prompt
+    const systemPrompt = `You are an expert legal template drafting assistant. 
+Create a professional, well-structured legal template in valid HTML format based on the user's requirements. 
+Use standard legal language and formatting (e.g., using <p>, <h1>, <h2>, <ul>, <ol>, <li> tags appropriately). 
+Clearly indicate sections where the user needs to provide input using the specific placeholder format: %%[Descriptive Prompt Text Here]%%. 
+For example, instead of "Client Name:", write "%%[Client Name]%%". 
+Do NOT fill in the placeholders; leave them exactly as specified.
+Ensure the output is ONLY the HTML content of the template body itself, suitable for direct use in an editor. Do not include preamble or explanations outside the HTML.`;
 
     const userPrompt = `Draft a reusable legal template based on the following instructions:\n\n${instructions}`; 
 
     console.log("Calling OpenAI for template generation...");
     const response = await openai.chat.completions.create({
-      model: 'gpt-4', // Or a suitable model like gpt-3.5-turbo
+      model: 'gpt-4', // Or a suitable model
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt }
       ],
-      temperature: 0.2, // Lower temperature for more deterministic template structure
-      max_tokens: 2500, // Adjust as needed
+      temperature: 0.3, // Keep relatively low for structure
+      max_tokens: 3000, // Increase if needed
     });
 
     const generatedContent = response.choices[0]?.message.content;
@@ -1113,11 +1127,11 @@ export const generateTemplateDraftWithAI = async (
 
 /**
  * Create a new template entry in the database from AI generated content.
- * Adapts logic from createTemplate.
  */
 export const createAITemplateDraft = async (
   name: string,
-  content: string
+  content: string,
+  category: DocumentTemplate['category']
 ): Promise<{ data: { id: string } | null; error: PostgrestError | Error | null }> => {
   try {
     const user = (await supabase.auth.getUser()).data.user;
@@ -1128,26 +1142,22 @@ export const createAITemplateDraft = async (
     const templateId = uuidv4();
     const now = new Date().toISOString();
 
-    // Extract potential variables (simple regex for {{...}})
-    const potentialVariables = Array.from(content.matchAll(/\{\{([^}]+)\}\} /g)).map(match => match[1].trim());
-    const uniqueVariables = [...new Set(potentialVariables)];
-
-    // Prepare data for insertion matching RawDocumentTemplate structure
+    // Prepare data for insertion
     const dataToInsert = {
         id: templateId,
         name: name.trim(),
-        description: "AI Generated Template Draft", // Default description
-        category: 'other' as DocumentTemplate['category'], // Default category, can be refined
-        content: content.trim(),
-        variables: uniqueVariables,
-        tags: ['ai-generated', 'draft'], // Default tags
+        description: "AI Generated Template Draft", 
+        category: category,
+        content: content.trim(), 
+        variables: [], // Pass empty array as the DB column likely still exists
+        tags: ['ai-generated', 'draft', category],
         created_at: now,
         updated_at: now,
-        is_public: false, // Default to private
+        is_public: false, 
         creator_id: user.id
       };
 
-    console.log(`Attempting to insert AI generated template draft: ${name}`);
+    console.log(`Attempting to insert AI generated template draft: ${name} with category: ${category}`);
     const { data, error } = await supabase
       .from('document_templates')
       .insert(dataToInsert)

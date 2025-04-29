@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Outlet, Link, useNavigate } from 'react-router-dom'; // Import Outlet, Link, and useNavigate
-import { useAtomValue, useSetAtom } from 'jotai'; // Import Jotai hooks
+import React, { useState, useRef, useCallback, useEffect } from 'react';
+import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom'; // Import Outlet, Link, useNavigate, useLocation
+import { useAtomValue, useSetAtom, useAtom } from 'jotai'; // Import Jotai hooks
 import { useAuth } from '@/hooks/useAuth'; // Import useAuth hook
 import { 
   activeCaseDetailsAtom, 
@@ -11,317 +11,270 @@ import {
   // Import new document list atoms
   caseDocumentsAtom,
   isCaseDocumentsLoadingAtom,
-  caseDocumentsFetchErrorAtom
+  caseDocumentsFetchErrorAtom,
+  loadCaseDocumentsAtom,
+  uploadModalOpenAtom,
+  isNavCollapsedAtom,
+  activeEditorTypeAtom,
+  aiDraftContextAtom,
+  selectTemplateModalOpenAtom,
+  fillTemplateModalTriggerAtom
 } from '@/atoms/appAtoms'; // Import atoms
 import ChatInterface from '@/components/chat/ChatInterface';
 import CaseSelector from '@/components/cases/CaseSelector'; // Import CaseSelector
-import { Spinner } from '@/components/ui/Spinner'; // Import Spinner
 import DocumentList from '@/components/documents/DocumentList';
-import DocumentEditor, { DocumentEditorRef } from '@/components/documents/DocumentEditor'; // Import Ref from correct path
-import * as documentService from '@/services/documentService'; // Import documentService
-import * as templateService from '@/services/templateService'; // Re-add templateService import
+import { DocumentEditorRef } from '@/components/documents/DocumentEditor'; // Only import Ref type
 import { PanelGroup, Panel, PanelResizeHandle } from "react-resizable-panels"; // Import resizable panel components
 import { motion, AnimatePresence } from 'framer-motion'; // Import framer-motion
 import { Icons } from '@/components/ui/Icons'; // Correct import path
 import { Button } from '@/components/ui/Button'; // Import Button
-import AIDraftModal from '@/components/ai/AIDraftModal'; // Import AI Draft Modal
+import AIDraftModal from '@/components/ai/AIDraftModal'; // Import AIDraftModal
 import UploadModal from '@/components/documents/UploadModal'; // Import Upload Modal
 import NewAITemplateDraftModal from '@/components/templates/NewAITemplateDraftModal'; // Import the new modal
+import SelectTemplateModal from '@/components/templates/SelectTemplateModal'; // <-- Import SelectTemplateModal
+import FillTemplateModal from '@/components/templates/FillTemplateModal'; // <-- Import FillTemplateModal
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/DropdownMenu"; // Import Dropdown components
-import { Document } from '@/types/document'; // Import Document type
+import { DocumentMetadata } from '@/services/documentService'; // Correct import path
+import { ChevronLeft, ChevronRight } from 'lucide-react'; // <-- Import icons for toggle
+import * as templateService from '@/services/templateService'; // Import template service
+import * as documentService from '@/services/documentService'; // Import document service
+
+// Define placeholder regex globally or import if defined elsewhere
+const PLACEHOLDER_REGEX = /%%\s*\[(.*?)\]\s*%%/g;
 
 // Define props for NavigationPanel to receive modal setters and action handlers
 interface NavigationPanelProps {
   setShowAIDraftModal: (show: boolean) => void;
-  setAIDraftContext: (context: 'template' | 'document') => void; // Context type updated
-  setShowUploadModal: (show: boolean) => void;
-  setShowAITemplateDraftModal: (show: boolean) => void; // Add the setter prop
-  handleNewBlankDocument: () => void; // Add handler for new blank doc
-  // Document List related props
-  documents: Document[] | null;
+  setShowAITemplateDraftModal: (show: boolean) => void;
+  documents: DocumentMetadata[] | null;
   isDocumentsLoading: boolean;
   documentsError: string | null;
-  activeDocumentId: string | null; // For highlighting the active document
+  activeDocumentId: string | null;
   onSelectDocument: (docId: string) => void;
 }
 
-// Navigation Panel - Now includes CaseSelector, Case Details, DocumentList, and User Info/Logout
+// Navigation Panel Component
 const NavigationPanel: React.FC<NavigationPanelProps> = ({ 
   setShowAIDraftModal, 
-  setAIDraftContext, 
-  setShowUploadModal,
   setShowAITemplateDraftModal,
-  handleNewBlankDocument,
-  // Destructure document list props
   documents,
   isDocumentsLoading,
   documentsError,
   activeDocumentId,
   onSelectDocument
 }) => {
-  const { user, signOut } = useAuth(); // Get user and signOut function
-  const navigate = useNavigate(); // Hook for navigation
-  const activeCaseId = useAtomValue(activeCaseIdAtom); // Get active case ID
+  const { user, signOut } = useAuth();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const activeCaseId = useAtomValue(activeCaseIdAtom);
   const activeCaseDetails = useAtomValue(activeCaseDetailsAtom);
   const isCaseDetailsLoading = useAtomValue(isCaseDetailsLoadingAtom);
   const caseDetailsError = useAtomValue(caseDetailsFetchErrorAtom);
+  const setUploadModalOpen = useSetAtom(uploadModalOpenAtom);
+  // --- Read atoms for conditional rendering and collapse --- 
+  const [isCollapsed, setIsCollapsed] = useAtom(isNavCollapsedAtom);
+  const activeEditorType = useAtomValue(activeEditorTypeAtom);
+  const setAIDraftContext = useSetAtom(aiDraftContextAtom);
+  const setShowSelectTemplateModal = useSetAtom(selectTemplateModalOpenAtom);
   
-  const detailsVariants = { // Define variants for details animation
+  const detailsVariants = { 
     hidden: { opacity: 0, height: 0 },
     visible: { opacity: 1, height: 'auto' },
   };
 
   return (
-    <div className="w-64 flex-shrink-0 border-r border-neutral-200 dark:border-surface-lighter bg-white dark:bg-surface p-3 flex flex-col h-full overflow-hidden"> {/* Added h-full overflow-hidden */}
-      <div className="flex-shrink-0"> {/* Section for non-scrolling content */}
-        <h2 className="text-base font-semibold mb-3 text-neutral-800 dark:text-text-primary px-1">Navigation</h2> {/* Added text color */}
-        <CaseSelector />
-
-        {/* Links Section */}
-        <div className="mt-3 space-y-1 px-1">
-          <Link 
-            to="/cases" 
-            className="flex items-center text-sm font-medium text-neutral-600 dark:text-text-secondary hover:text-neutral-900 dark:hover:text-text-primary hover:bg-neutral-100 dark:hover:bg-surface-lighter p-2 rounded-md"
-          >
-            <Icons.Folder className="h-4 w-4 mr-2 flex-shrink-0" /> 
-            <span className="truncate">Manage Cases</span>
+    <div className={`flex-shrink-0 border-r border-neutral-200 dark:border-surface-lighter bg-white dark:bg-surface flex flex-col h-full overflow-hidden transition-all duration-300 ease-in-out ${isCollapsed ? 'w-16' : 'w-64'}`}> 
+      
+      {/* --- Top Section (Always Visible) --- */}
+      <div className="flex-shrink-0 p-3">
+        {!isCollapsed && <h2 className="text-base font-semibold mb-3 text-neutral-800 dark:text-text-primary px-1">Navigation</h2>} 
+        {!isCollapsed && <CaseSelector />} {/* Hide CaseSelector when collapsed */}
+        {/* Main Links (Always visible, adapt appearance) */}
+        <div className={`mt-3 space-y-1 px-1 ${isCollapsed ? 'flex flex-col items-center' : ''}`}>
+           <Link to="/dashboard" title="Dashboard" className={`flex items-center text-sm font-medium p-2 rounded-md transition-colors ${isCollapsed ? 'justify-center' : ''} ${location.pathname.startsWith('/dashboard') ? 'bg-neutral-100 dark:bg-surface-lighter text-orange-500' : 'text-neutral-600 dark:text-text-secondary hover:text-neutral-900 dark:hover:text-text-primary hover:bg-neutral-100 dark:hover:bg-surface-lighter'}`}> 
+            <Icons.Square className={`h-4 w-4 flex-shrink-0 ${isCollapsed ? '' : 'mr-2'}`} /> 
+             {!isCollapsed && <span className="truncate">Dashboard</span>}
           </Link>
-          <Link 
-            to="/documents" 
-            className="flex items-center text-sm font-medium text-neutral-600 dark:text-text-secondary hover:text-neutral-900 dark:hover:text-text-primary hover:bg-neutral-100 dark:hover:bg-surface-lighter p-2 rounded-md"
-          >
-            <Icons.Document className="h-4 w-4 mr-2 flex-shrink-0" />
-            <span className="truncate">Manage Documents</span>
+          <Link to="/cases" title="Manage Cases" className={`flex items-center text-sm font-medium p-2 rounded-md transition-colors ${isCollapsed ? 'justify-center' : ''} ${location.pathname.startsWith('/cases') ? 'bg-neutral-100 dark:bg-surface-lighter text-orange-500' : 'text-neutral-600 dark:text-text-secondary hover:text-neutral-900 dark:hover:text-text-primary hover:bg-neutral-100 dark:hover:bg-surface-lighter'}`}> 
+            <Icons.Folder className={`h-4 w-4 flex-shrink-0 ${isCollapsed ? '' : 'mr-2'}`} /> 
+             {!isCollapsed && <span className="truncate">Manage Cases</span>} 
           </Link>
-          <Link 
-            to="/templates" 
-            className="flex items-center text-sm font-medium text-neutral-600 dark:text-text-secondary hover:text-neutral-900 dark:hover:text-text-primary hover:bg-neutral-100 dark:hover:bg-surface-lighter p-2 rounded-md"
-          >
-            <Icons.FileText className="h-4 w-4 mr-2 flex-shrink-0" />
-            <span className="truncate">Manage Templates</span>
+          <Link to="/documents" title="Manage Documents" className={`flex items-center text-sm font-medium p-2 rounded-md transition-colors ${isCollapsed ? 'justify-center' : ''} ${location.pathname.startsWith('/documents') ? 'bg-neutral-100 dark:bg-surface-lighter text-orange-500' : 'text-neutral-600 dark:text-text-secondary hover:text-neutral-900 dark:hover:text-text-primary hover:bg-neutral-100 dark:hover:bg-surface-lighter'}`}> 
+            <Icons.Document className={`h-4 w-4 flex-shrink-0 ${isCollapsed ? '' : 'mr-2'}`} />
+             {!isCollapsed && <span className="truncate">Manage Documents</span>}
+          </Link>
+          <Link to="/templates" title="Manage Templates" className={`flex items-center text-sm font-medium p-2 rounded-md transition-colors ${isCollapsed ? 'justify-center' : ''} ${location.pathname.startsWith('/templates') ? 'bg-neutral-100 dark:bg-surface-lighter text-orange-500' : 'text-neutral-600 dark:text-text-secondary hover:text-neutral-900 dark:hover:text-text-primary hover:bg-neutral-100 dark:hover:bg-surface-lighter'}`}> 
+             <Icons.FileText className={`h-4 w-4 flex-shrink-0 ${isCollapsed ? '' : 'mr-2'}`} /> 
+            {!isCollapsed && <span className="truncate">Manage Templates</span>}
           </Link>
         </div>
-
-        {/* Create Actions Section */} 
-        <div className="mt-3 pt-3 border-t border-neutral-200 dark:border-surface-lighter flex flex-col space-y-2 px-1">
-          <Button 
-            variant="outline" // Corrected variant
-            size="sm" 
-            onClick={() => setShowUploadModal(true)} 
-            className="w-full justify-start"
-          >
-            <Icons.Upload className="h-4 w-4 mr-2" />
-            Upload Document
-          </Button>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="primary" size="sm" className="w-full justify-start">
-                <Icons.Plus className="h-4 w-4 mr-2" />
-                Create New...
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent 
-              align="start" 
-              side="bottom" // Changed side to bottom for better positioning if space allows
-              className="w-56 mb-1 bg-popover text-popover-foreground border border-border shadow-md dark:bg-surface dark:text-text-primary dark:border-surface-lighter" // Added dark mode styles
-            > 
-              <DropdownMenuItem onClick={handleNewBlankDocument} className="hover:bg-neutral-100 dark:hover:bg-surface-lighter">
-                <Icons.File className="mr-2 h-4 w-4" />
-                <span>Blank Document</span>
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => {
-                setAIDraftContext('document'); // Correct context
-                setShowAIDraftModal(true); 
-              }} className="hover:bg-neutral-100 dark:hover:bg-surface-lighter">
-                <Icons.Sparkles className="mr-2 h-4 w-4" />
-                <span>AI Document Draft</span>
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setShowAITemplateDraftModal(true)} className="hover:bg-neutral-100 dark:hover:bg-surface-lighter">
-                <Icons.FileText className="mr-2 h-4 w-4" />
-                <span>AI Template Draft</span>
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => navigate('/templates', { state: { action: 'create' } })} className="hover:bg-neutral-100 dark:hover:bg-surface-lighter">
-                 <Icons.Document className="mr-2 h-4 w-4" />
-                <span>New Template (Manual)</span>
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
+        {/* Create Actions Section (Only show when expanded and not in editor mode) */}
+        {!isCollapsed && !activeEditorType && (
+            <div className="mt-4 space-y-1 px-1 flex-shrink-0 border-t border-neutral-200 dark:border-surface-lighter pt-3">
+                <Button variant="outline" size="sm" onClick={() => setUploadModalOpen(true)} className="w-full justify-start" disabled={!activeCaseId}>
+                   <Icons.Upload className="h-4 w-4 mr-2" /> Upload Document
+                 </Button>
+                 <DropdownMenu>
+                   <DropdownMenuTrigger asChild>
+                     <Button variant="primary" size="sm" className="w-full justify-start">
+                       <Icons.Plus className="h-4 w-4 mr-2" />
+                       Create New...
+                     </Button>
+                   </DropdownMenuTrigger>
+                   <DropdownMenuContent 
+                     align="start" 
+                     side="bottom"
+                     className="w-56 mb-1 bg-popover text-popover-foreground border border-border shadow-md dark:bg-surface dark:text-text-primary dark:border-surface-lighter"
+                   > 
+                     <DropdownMenuItem 
+                        onClick={() => navigate('/edit/document')} 
+                        disabled={!activeCaseId}
+                        className="hover:bg-neutral-100 dark:hover:bg-surface-lighter"
+                      > 
+                       <Icons.File className="mr-2 h-4 w-4" />
+                       <span>Blank Document</span>
+                     </DropdownMenuItem>
+                     <DropdownMenuItem 
+                        onClick={() => {
+                           setAIDraftContext('document');
+                           setShowAIDraftModal(true); 
+                        }} 
+                        disabled={!activeCaseId}
+                        className="hover:bg-neutral-100 dark:hover:bg-surface-lighter"
+                     >
+                       <Icons.Sparkles className="mr-2 h-4 w-4" />
+                       <span>AI Document Draft</span>
+                     </DropdownMenuItem>
+                     <DropdownMenuItem 
+                        onClick={() => setShowAITemplateDraftModal(true)} 
+                        className="hover:bg-neutral-100 dark:hover:bg-surface-lighter"
+                     >
+                       <Icons.FileText className="mr-2 h-4 w-4" />
+                       <span>AI Template Draft</span>
+                     </DropdownMenuItem>
+                     <DropdownMenuItem 
+                        onClick={() => navigate('/edit/template')} 
+                        className="hover:bg-neutral-100 dark:hover:bg-surface-lighter"
+                     >
+                        <Icons.Document className="mr-2 h-4 w-4" />
+                       <span>New Template (Manual)</span>
+                     </DropdownMenuItem>
+                     <DropdownMenuItem 
+                        onClick={() => {
+                          setShowSelectTemplateModal(true); 
+                        }}
+                        className="hover:bg-neutral-100 dark:hover:bg-surface-lighter"
+                     >
+                        <Icons.FileText className="mr-2 h-4 w-4" />
+                       <span>Document from Template...</span>
+                     </DropdownMenuItem>
+                   </DropdownMenuContent>
+                 </DropdownMenu>
+            </div>
+        )}
       </div>
 
-      {/* Scrolling Middle Section (Case Details & Documents) */}
-      <div className="flex-1 mt-2 pt-2 border-t border-neutral-200 dark:border-surface-lighter overflow-y-auto px-1 space-y-3"> 
-          {/* Case Details Section */}
-          <div className="overflow-hidden"> {/* Keep overflow-hidden for animation */}
-              <h3 className="text-sm font-semibold text-neutral-600 dark:text-text-secondary mb-1">Case Details</h3>
-              <AnimatePresence initial={false}> 
-                  {activeCaseId && ( 
-                  <motion.div
-                      key="case-details-content"
-                      variants={detailsVariants}
-                      initial="hidden"
-                      animate="visible"
-                      exit="hidden"
-                      transition={{ duration: 0.3 }}
-                      className="px-1" // Add padding inside animation
-                  >
-                      {isCaseDetailsLoading && (
-                      <div className="flex items-center justify-center py-1">
-                          <Spinner size="xs" />
-                          <span className="ml-2 text-xs text-neutral-500 dark:text-text-secondary">Loading...</span>
-                      </div>
+      {/* --- Middle Section (Conditionally Rendered, Scrolling) --- */}
+      <div className="flex-grow overflow-y-auto border-t border-neutral-200 dark:border-surface-lighter">
+        {
+          activeEditorType === 'document' ? (
+            // Render Document Sidebar Area ONLY if NOT collapsed
+            !isCollapsed && (
+                <div className="p-4 text-sm text-neutral-500 italic">Document Sidebar Area</div>
+            )
+          ) : (
+            // Render Standard Middle Content only when NOT in editor and NOT collapsed
+            !isCollapsed && (
+                <div className="px-1 py-2 space-y-3"> 
+                  <div>
+                      <h3 className="text-sm font-semibold text-neutral-600 dark:text-text-secondary mb-1 px-2">Case Details</h3>
+                      <AnimatePresence>
+                          {activeCaseId && (
+                              <motion.div
+                                  key={activeCaseId}
+                                  initial="hidden"
+                                  animate="visible"
+                                  exit="hidden"
+                                  variants={detailsVariants}
+                                  transition={{ duration: 0.3, ease: "easeInOut" }}
+                                  className="text-xs px-1"
+                              >
+                                  {isCaseDetailsLoading && <p className="text-neutral-500 dark:text-text-secondary italic">Loading details...</p>}
+                                  {caseDetailsError && <p className="text-error dark:text-error">Error: {caseDetailsError}</p>}
+                                  {activeCaseDetails && (
+                                      <>
+                                          <p className="text-neutral-700 dark:text-text-primary font-medium truncate">{activeCaseDetails.name}</p>
+                                          <p className="text-neutral-500 dark:text-text-secondary truncate">Client: {activeCaseDetails.client_name || 'N/A'}</p>
+                                          <p className="text-neutral-500 dark:text-text-secondary truncate">Number: {activeCaseDetails.case_number || 'N/A'}</p>
+                                      </>
+                                  )}
+                              </motion.div>
+                          )}
+                      </AnimatePresence>
+                      {!activeCaseId && (
+                          <p className="text-xs text-neutral-500 dark:text-text-secondary italic px-1">Select a case.</p>
                       )}
-                      {caseDetailsError && (
-                      <p className="text-xs text-error dark:text-error">Error: {caseDetailsError}</p>
+                  </div>
+                  <div>
+                      <h3 className="text-sm font-semibold text-neutral-600 dark:text-text-secondary mb-1 px-2">Documents in Case</h3>
+                      {activeCaseId ? (
+                        <DocumentList documents={documents || []} isLoading={isDocumentsLoading} error={documentsError} activeDocumentId={activeDocumentId} onSelectDocument={onSelectDocument} />
+                      ) : (
+                        <p className="text-xs text-neutral-500 dark:text-text-secondary italic px-1">Select a case.</p>
                       )}
-                      {!isCaseDetailsLoading && !caseDetailsError && activeCaseDetails && (
-                      <div className="space-y-1 text-xs text-neutral-700 dark:text-text-primary">
-                          <p><span className="font-medium">Client:</span> {activeCaseDetails.client_name || 'N/A'}</p>
-                          <p><span className="font-medium">Opposing:</span> {activeCaseDetails.opposing_party || 'N/A'}</p>
-                          <p><span className="font-medium">Case No:</span> {activeCaseDetails.case_number || 'N/A'}</p>
-                          {/* Add more details if needed */}
-                      </div>
-                      )}
-                      {!isCaseDetailsLoading && !caseDetailsError && !activeCaseDetails && (
-                      <p className="text-xs text-neutral-500 dark:text-text-secondary italic">Details unavailable.</p>
-                      )}
-                  </motion.div>
-                  )}
-              </AnimatePresence>
-              {!activeCaseId && (
-                  <p className="text-xs text-neutral-500 dark:text-text-secondary italic px-1">Select a case.</p>
-              )}
-          </div>
-
-          {/* Document List Section - Pass props down */}
-          <div>
-              <h3 className="text-sm font-semibold text-neutral-600 dark:text-text-secondary mb-1">Documents in Case</h3>
-              {/* Pass required props to DocumentList */} 
-              {activeCaseId ? (
-                <DocumentList 
-                  documents={documents || []} // Pass fetched documents or empty array
-                  isLoading={isDocumentsLoading}
-                  error={documentsError}
-                  activeDocumentId={activeDocumentId} // Pass active ID for highlighting
-                  onSelectDocument={onSelectDocument} // Pass selection handler
-                />
-              ) : (
-                <p className="text-xs text-neutral-500 dark:text-text-secondary italic px-1">Select a case.</p>
-              )}
-          </div>
+                  </div>
+                </div>
+            )
+          )
+        }
       </div>
 
-
-      {/* User Info and Logout Section (Bottom, Fixed) */}
-      {user && (
-        <div className="flex-shrink-0 mt-auto pt-3 border-t border-neutral-200 dark:border-surface-lighter px-1"> {/* Added px-1 */}
-          <div className="flex items-center justify-between text-xs">
-            <span className="text-neutral-600 dark:text-text-secondary truncate" title={user.email}> 
-              {user.email} 
-            </span>
-            <button
-              onClick={signOut}
-              className="ml-2 px-2 py-1 text-neutral-500 dark:text-text-secondary hover:text-neutral-700 dark:hover:text-text-primary hover:bg-neutral-100 dark:hover:bg-surface-lighter rounded"
-              aria-label="Logout" // Added aria-label
-            >
-              <Icons.Logout className="h-4 w-4" /> {/* Added Logout Icon */}
+      {/* --- Footer Area (Always Visible) --- */}
+      <div className="flex-shrink-0 border-t border-neutral-200 dark:border-surface-lighter p-2">
+        {/* User Info (Only show when expanded) */} 
+        {user && !isCollapsed && (
+          <div className={`flex items-center justify-between text-xs mb-1`}> 
+            <span className="text-neutral-600 dark:text-text-secondary truncate" title={user.email}>{user.email}</span>
+            <button onClick={signOut} className={`p-2 text-neutral-500 dark:text-text-secondary hover:text-neutral-700 dark:hover:text-text-primary hover:bg-neutral-100 dark:hover:bg-surface-lighter rounded ml-2`} aria-label="Logout">
+              <Icons.Logout className="h-4 w-4" />
             </button>
           </div>
-        </div>
-      )}
-
+        )}
+        {/* Toggle Button (Always visible) */} 
+         <button 
+           onClick={() => setIsCollapsed(!isCollapsed)} 
+           className="w-full flex justify-center p-1 text-xs text-neutral-500 dark:text-text-secondary hover:bg-neutral-100 dark:hover:bg-surface-lighter rounded"
+           title={isCollapsed ? "Expand Navigation" : "Collapse Navigation"}
+         >
+           {isCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />} 
+         </button>
+       </div>
     </div>
   );
 };
 
-// Props for MainWorkAreaPanel including the ref callback
-interface MainWorkAreaPanelProps {
-  editorRef: React.RefObject<DocumentEditorRef>;
-}
+// Props for MainWorkAreaPanel 
+// Removed empty interface MainWorkAreaPanelProps
 
-// Main Work Area Panel - Renders Outlet OR DocumentEditor based on activeEditorItem
-const MainWorkAreaPanel: React.FC<MainWorkAreaPanelProps> = ({ editorRef }) => {
-  const activeEditorItem = useAtomValue(activeEditorItemAtom); // Use Jotai atom
-  const [content, setContent] = useState<string>('<p></p>'); // Initialize with empty paragraph for Tiptap
-  const [itemType, setItemType] = useState<'document' | 'draft' | null>(null); // Track type for editor key
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+// Main Work Area Panel - Now always renders Outlet
+const MainWorkAreaPanel: React.FC = (/* { editorRef } */) => {
+  // Remove state and effect related to loading editor content here
+  // const activeEditorItem = useAtomValue(activeEditorItemAtom); 
+  // const [content, setContent] = useState<string>('<p></p>');
+  // const [itemType, setItemType] = useState<'document' | 'draft' | null>(null);
+  // const [isLoading, setIsLoading] = useState(false);
+  // const [error, setError] = useState<string | null>(null);
+  // useEffect(() => { ... fetchItemContent ... }, [activeEditorItem]);
 
-  useEffect(() => {
-    if (!activeEditorItem) {
-      setContent('<p></p>'); // Reset to empty paragraph
-      setError(null);
-      setIsLoading(false);
-      setItemType(null);
-      return;
-    }
-
-    const fetchItemContent = async () => {
-      setIsLoading(true);
-      setError(null);
-      setItemType(activeEditorItem.type); // Set item type for key prop
-      try {
-        let fetchedContent: string | undefined;
-        if (activeEditorItem.type === 'document') {
-          const { data, error: fetchError } = await documentService.getDocumentById(activeEditorItem.id);
-          if (fetchError) throw fetchError;
-          fetchedContent = data?.extractedText ?? '<p>Error loading document content.</p>'; // Corrected property name
-        } else if (activeEditorItem.type === 'draft') {
-          // Placeholder for draft loading
-          fetchedContent = '<p>Draft content loading not implemented yet.</p>'; 
-        } else {
-            console.warn("Unknown active editor item type:", activeEditorItem.type);
-            fetchedContent = '<p>Unknown item type.</p>';
-        }
-        setContent(fetchedContent || '<p></p>'); // Ensure string is passed
-      } catch (err: unknown) { // Changed to unknown
-        console.error("Error fetching item content:", err);
-        let message = 'Failed to load content';
-        if (err instanceof Error) {
-            message = err.message;
-        } else if (typeof err === 'string') {
-            message = err;
-        }
-        setError(message);
-        setContent('<p>Error loading content.</p>'); 
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    fetchItemContent();
-  }, [activeEditorItem]); // Dependency array includes activeEditorItem
-
+  // Always render the Outlet to let the router handle content
   return (
-    <div className="flex-1 bg-neutral-50 dark:bg-background p-4 md:p-6 overflow-auto"> {/* Added overflow-auto */}
-      {isLoading && (
-        <div className="flex items-center justify-center h-full">
-          <Spinner size="md" /> {/* Corrected size */}
-          <span className="ml-2 text-neutral-500 dark:text-text-secondary">Loading Editor...</span>
-        </div>
-      )}
-      {error && !isLoading && (
-        <div className="text-error dark:text-error p-4 bg-red-100 dark:bg-red-900/20 rounded border border-red-300 dark:border-red-600">
-            Error loading content: {error}
-        </div>
-      )}
-      {!isLoading && !error && (
-        activeEditorItem ? (
-          <DocumentEditor 
-            key={`${itemType}-${activeEditorItem.id}`} // Ensure re-render on item change
-            initialContent={content} 
-            editorItem={activeEditorItem} // Pass editorItem prop
-            ref={editorRef} // Pass the ref
-           />
-        ) : (
-          <Outlet /> // Render child routes (like ChatInterface) when no document is active
-        )
-      )}
+    <div className="flex-1 bg-neutral-50 dark:bg-background p-4 md:p-6 overflow-auto">
+      <Outlet />
     </div>
   );
 };
@@ -348,94 +301,150 @@ const AssistantPanel: React.FC<AssistantPanelProps> = ({ onInsertContent }) => {
   );
 };
 
+// Main App Layout Component
 const AppLayout: React.FC = () => {
-  // Create the ref for the editor
-  const editorRef = useRef<DocumentEditorRef>(null);
-  
-  // Modal states
+  const editorRef = useRef<DocumentEditorRef>(null); 
   const [showAIDraftModal, setShowAIDraftModal] = useState(false);
-  const [aiDraftContext, setAIDraftContext] = useState<'template' | 'document'>('document');
-  const [showUploadModal, setShowUploadModal] = useState(false);
-  const [showAITemplateDraftModal, setShowAITemplateDraftModal] = useState(false); // Add state for new modal
-  
-  // Get document list state from atoms
+  const [showAITemplateDraftModal, setShowAITemplateDraftModal] = useState(false);
+  const [isUploadModalOpen, setIsUploadModalOpen] = useAtom(uploadModalOpenAtom);
+  // --- State for template usage modals --- 
+  const [showSelectTemplateModal, setShowSelectTemplateModal] = useAtom(selectTemplateModalOpenAtom);
+  const [fillTemplateTriggerData, setFillTemplateTriggerData] = useAtom(fillTemplateModalTriggerAtom);
+  const navigate = useNavigate();
+  const activeCaseId = useAtomValue(activeCaseIdAtom);
+  const { user } = useAuth(); // Get user from auth hook
+
+  // --- Document List State/Logic (Keep these) --- 
   const documents = useAtomValue(caseDocumentsAtom);
   const isDocumentsLoading = useAtomValue(isCaseDocumentsLoadingAtom);
   const documentsError = useAtomValue(caseDocumentsFetchErrorAtom);
-  // Get editor state
+  const triggerLoadDocuments = useSetAtom(loadCaseDocumentsAtom);
   const activeEditorItem = useAtomValue(activeEditorItemAtom);
-  const setActiveEditorItem = useSetAtom(activeEditorItemAtom);
-  // Get active case ID
-  const activeCaseId = useAtomValue(activeCaseIdAtom); 
-  
-  // Calculate activeDocumentId based on activeEditorItem
   const activeDocumentId = activeEditorItem?.type === 'document' ? activeEditorItem.id : null;
 
-  const handleInsertContent = useCallback((content: string) => {
-    editorRef.current?.insertContent(content);
-  }, []); 
+  useEffect(() => {
+      if(activeCaseId) {
+          triggerLoadDocuments(activeCaseId);
+      }
+  }, [activeCaseId, triggerLoadDocuments]);
   
-  // Updated handler for creating a new blank document
-  const handleNewBlankDocument = useCallback(async () => {
-    console.log("Creating new blank document...");
-    // TODO: Add user feedback for loading/error states
-    try {
-      const { data: newDraft, error } = await templateService.createBlankDraft(activeCaseId);
-      if (error) {
-        throw error;
-      }
-      if (newDraft) {
-        console.log("Blank draft created, setting active editor item:", newDraft.id);
-        // Set the new blank draft as the active item in the editor
-        setActiveEditorItem({ type: 'draft', id: newDraft.id });
-      } else {
-        // This case should ideally be handled by the error check, but just in case
-        throw new Error("Failed to create blank draft: No data returned.");
-      }
-    } catch (err) {
-      console.error('Error creating blank document:', err);
-      // TODO: Show user-facing error message (e.g., toast notification)
-      alert(`Error creating blank document: ${err instanceof Error ? err.message : 'Unknown error'}`);
-    }
-  }, [activeCaseId, setActiveEditorItem]); // Add dependencies
+  // --- Document Selection Handler (Keep this one) --- 
+  const handleSelectDocument = useCallback((docId: string) => {
+      navigate(`/view/document/${docId}`);
+  }, [navigate]); 
 
+  // --- Other Handlers (Keep these) ---
   const handleUploadModalClose = (refreshNeeded?: boolean) => {
-    setShowUploadModal(false);
-    if (refreshNeeded) {
-        console.log("Refresh document list needed (placeholder)");
-        // TODO: Add logic to manually trigger `loadCaseDocumentsAtom` if needed after upload
-        // Example: Might need a dedicated atom/setter `refreshCaseDocumentsAtom` 
-        //          that `loadCaseDocumentsAtom` can also listen to, or pass `setLoadDocs` down.
-    }
+      setIsUploadModalOpen(false);
+      if (refreshNeeded && activeCaseId) {
+          triggerLoadDocuments(activeCaseId);
+      }
   };
 
-  // Handler for selecting a document from the list
-  const handleSelectDocument = useCallback((docId: string) => {
-    // Check if it's already selected to avoid unnecessary updates
-    if (activeEditorItem?.type !== 'document' || activeEditorItem?.id !== docId) {
-      setActiveEditorItem({ type: 'document', id: docId });
-    }
-  }, [activeEditorItem, setActiveEditorItem]);
+  const handleInsertContent = (content: string) => {
+    editorRef.current?.insertContent(content);
+  };
+
+  const handleDraftCreatedFromModal = (draftId: string) => {
+    console.log(`AI Draft created with ID: ${draftId}, navigating to editor.`);
+    navigate(`/edit/document/${draftId}`); 
+  };
+
+  const handleAITemplateDraftCreated = (templateId: string) => {
+      console.log(`AI Template Draft created with ID: ${templateId}, navigating to editor.`);
+      navigate(`/edit/template/${templateId}`);
+  };
+
+  // --- Template Usage Handlers --- 
+  const handleTemplateSelected = async (templateId: string) => {
+      console.log('[AppLayout] Template selected:', templateId);
+      setShowSelectTemplateModal(false); // Close selection modal first
+      // TODO: Add loading state indicator?
+      try {
+          const { data: template, error } = await templateService.getTemplateById(templateId);
+          if (error) throw error;
+          if (!template || !template.content) {
+              throw new Error('Selected template content not found.');
+          }
+          // Store template data needed for the next step
+          setFillTemplateTriggerData({ id: template.id, name: template.name, content: template.content }); 
+      } catch (err) {
+          console.error("Error fetching selected template:", err);
+          // TODO: Show error notification to user (e.g., using a toast library)
+          alert("Error loading template details."); // Simple alert for now
+      }
+  };
+
+  const handleGenerateDocumentFromTemplate = async (placeholderValues: Record<string, string>) => {
+      console.log('[AppLayout] Generating document with values:', placeholderValues);
+      if (!fillTemplateTriggerData || !activeCaseId || !user) {
+          console.error("Missing template data, active case ID, or user for generation.");
+          alert("Cannot generate document: Missing required information.");
+          setFillTemplateTriggerData(null); 
+          return;
+      }
+      
+      const currentTemplateData = fillTemplateTriggerData;
+
+      try {
+          let generatedContent = currentTemplateData.content;
+          generatedContent = generatedContent.replaceAll(PLACEHOLDER_REGEX, (match: string, prompt: string) => {
+              const trimmedPrompt = prompt?.trim();
+              return trimmedPrompt && placeholderValues[trimmedPrompt] !== undefined 
+                  ? placeholderValues[trimmedPrompt] 
+                  : match; 
+          });
+
+          // --- Create New Document Payload (matching service function) --- 
+          const initialDocData = {
+              filename: `${currentTemplateData.name} - ${new Date().toLocaleTimeString()}.txt`, // Use filename, add extension
+              content: generatedContent,
+              // Note: Metadata like sourceTemplateId cannot be passed directly here
+              // It would need to be added via an updateDocument call later if needed
+          };
+
+          console.log("Creating document with data for user:", user.id, "case:", activeCaseId, initialDocData);
+          
+          // Call with correct signature
+          const { data: newDocumentRef, error: createError } = await documentService.createDocument(
+              user.id, // Pass userId
+              activeCaseId, 
+              initialDocData // Pass initialData object
+          );
+
+          if (createError) throw createError;
+          if (!newDocumentRef || !newDocumentRef.id) { // Check for returned ID
+            throw new Error('Failed to create document, no ID returned.');
+          }
+
+          console.log("Document created with ID:", newDocumentRef.id);
+          navigate(`/edit/document/${newDocumentRef.id}`);
+
+      } catch (err) {
+          console.error("Error generating document from template:", err);
+          alert("Error generating document.");
+      } finally {
+          setFillTemplateTriggerData(null); 
+      }
+  };
+  // --------
+
+  const aiDraftContextValue = useAtomValue(aiDraftContextAtom); // Read the atom value
 
   return (
-    <div className="flex h-screen bg-neutral-100 dark:bg-background text-neutral-900 dark:text-text-primary overflow-hidden">
-      {/* Pass modal setters and action handlers down */}
+    <div className={`flex h-screen bg-neutral-100 dark:bg-background text-neutral-900 dark:text-text-primary overflow-hidden transition-all duration-300 ease-in-out`}>
       <NavigationPanel 
         setShowAIDraftModal={setShowAIDraftModal}
-        setAIDraftContext={setAIDraftContext} 
-        setShowUploadModal={setShowUploadModal}
         setShowAITemplateDraftModal={setShowAITemplateDraftModal}
-        handleNewBlankDocument={handleNewBlankDocument} // Pass handler
-        // Pass document list props
         documents={documents}
         isDocumentsLoading={isDocumentsLoading}
         documentsError={documentsError}
-        activeDocumentId={activeDocumentId}
-        onSelectDocument={handleSelectDocument}
+        activeDocumentId={activeDocumentId} 
+        onSelectDocument={handleSelectDocument} 
       />
       <PanelGroup direction="horizontal" className="flex-1"> {/* Wrap panels */} 
         <Panel defaultSize={65} minSize={30}> {/* Main Work Area */} 
-          <MainWorkAreaPanel editorRef={editorRef} />
+          <MainWorkAreaPanel /* editorRef={editorRef} */ />
         </Panel>
         <PanelResizeHandle className="w-1 bg-neutral-200 dark:bg-surface-lighter hover:bg-primary dark:hover:bg-primary transition-colors duration-200 cursor-col-resize" />
         <Panel defaultSize={35} minSize={20} maxSize={50}> {/* Assistant Panel - Added maxSize */} 
@@ -447,23 +456,35 @@ const AppLayout: React.FC = () => {
       <AIDraftModal
         isOpen={showAIDraftModal}
         onClose={() => setShowAIDraftModal(false)}
-        context={aiDraftContext}
-        // TODO: Define a proper onExport for global context
-        onExport={(content: string) => { 
-          console.log('AI Draft exported globally:', content); 
-          setShowAIDraftModal(false); // Close modal after export
-        }}
+        context={aiDraftContextValue} // Pass the atom value
+        onDraftCreated={handleDraftCreatedFromModal}
       />
       
-      {/* Render Upload Modal globally */} 
+      {/* Control Upload Modal with atom state */}
       <UploadModal 
-          isOpen={showUploadModal} 
+          isOpen={isUploadModalOpen} // <-- Use atom value
           onClose={handleUploadModalClose}
       />
       <NewAITemplateDraftModal 
         isOpen={showAITemplateDraftModal}
         onClose={() => setShowAITemplateDraftModal(false)}
+        onSuccess={handleAITemplateDraftCreated} // Pass the new success handler
       />
+      <SelectTemplateModal 
+         isOpen={showSelectTemplateModal}
+         onClose={() => setShowSelectTemplateModal(false)}
+         onSelect={handleTemplateSelected}
+      />
+      {fillTemplateTriggerData && (
+          <FillTemplateModal
+              isOpen={true}
+              onClose={() => {
+                  setFillTemplateTriggerData(null);
+              }}
+              templateContent={fillTemplateTriggerData.content}
+              onGenerate={handleGenerateDocumentFromTemplate}
+          />
+      )}
     </div>
   );
 };

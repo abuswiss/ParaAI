@@ -981,3 +981,121 @@ Based *only* on the provided Case Document Context, find and summarize the infor
     return { success: false, error: error instanceof Error ? error : new Error(errorMessage) };
   }
 };
+
+// TODO: SECURITY - Move OpenAI call to a secure backend API route for production
+/**
+ * Handles rewriting selected text using OpenAI stream.
+ */
+export const handleRewriteStream = async (
+  selectedText: string,
+  onChunk: (chunk: string) => void,
+  surroundingContext?: string, // Optional context around the selection
+  instructions?: string // Optional specific instructions (e.g., "make it more formal")
+): Promise<{ success: boolean; error: Error | null; answer?: string }> => {
+  console.log(`Starting handleRewriteStream`);
+  let fullResponse = '';
+  try {
+    const systemPrompt = `You are an expert legal assistant AI. Rewrite the following text as instructed. Maintain the original meaning and context unless specified otherwise.`;
+
+    let userMessageContent = `Rewrite the following text:
+--- TEXT START ---
+${selectedText}
+--- TEXT END ---`;
+
+    if (instructions) {
+      userMessageContent += `\n\nInstructions: ${instructions}`;
+    }
+
+    if (surroundingContext) {
+        userMessageContent += `\n\nFor context, here is the text surrounding the selection:
+--- CONTEXT START ---
+${surroundingContext}
+--- CONTEXT END ---`;
+    }
+
+    const stream = await openai.chat.completions.create({
+      model: 'gpt-4', // Or your preferred model
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userMessageContent },
+      ],
+      stream: true,
+      temperature: 0.5, // Adjust temperature as needed for creativity vs. fidelity
+    });
+
+    for await (const part of stream) {
+      const chunk = part.choices[0]?.delta?.content || '';
+      fullResponse += chunk;
+      onChunk(chunk);
+    }
+
+    console.log('Rewrite stream finished successfully.');
+    return { success: true, error: null, answer: fullResponse };
+
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error during rewrite stream';
+    console.error('Error in handleRewriteStream:', message);
+    // Pass a generic or specific error message back if needed
+    onChunk(`\n\n--- ERROR ---\n${message}`); 
+    return { success: false, error: error instanceof Error ? error : new Error(message) };
+  }
+};
+
+// TODO: SECURITY - Move OpenAI call to a secure backend API route for production
+/**
+ * Handles summarizing selected text using OpenAI stream.
+ */
+export const handleSummarizeStream = async (
+  selectedText: string,
+  onChunk: (chunk: string) => void,
+  surroundingContext?: string, // Optional context around the selection
+  instructions?: string // Optional specific instructions (e.g., "summarize in one sentence")
+): Promise<{ success: boolean; error: Error | null; answer?: string }> => {
+  console.log(`Starting handleSummarizeStream`);
+  let fullResponse = '';
+  try {
+    const systemPrompt = `You are an expert legal assistant AI. Summarize the following text concisely and accurately. Capture the main points and key information.`;
+
+    let userMessageContent = `Summarize the following text:
+--- TEXT START ---
+${selectedText}
+--- TEXT END ---`;
+
+    if (instructions) {
+      userMessageContent += `\n\nInstructions: ${instructions}`;
+    }
+    
+    if (surroundingContext) {
+        userMessageContent += `\n\nFor context, here is the text surrounding the selection:
+--- CONTEXT START ---
+${surroundingContext}
+--- CONTEXT END ---`;
+    }
+
+    const stream = await openai.chat.completions.create({
+      model: 'gpt-4', // Or your preferred model
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userMessageContent },
+      ],
+      stream: true,
+      temperature: 0.3, // Lower temperature for more focused summaries
+    });
+
+    for await (const part of stream) {
+      const chunk = part.choices[0]?.delta?.content || '';
+      fullResponse += chunk;
+      onChunk(chunk);
+    }
+
+    console.log('Summarize stream finished successfully.');
+    return { success: true, error: null, answer: fullResponse };
+
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error during summarize stream';
+    console.error('Error in handleSummarizeStream:', message);
+    // Pass a generic or specific error message back if needed
+    onChunk(`\n\n--- ERROR ---\n${message}`); 
+    return { success: false, error: error instanceof Error ? error : new Error(message) };
+  }
+};

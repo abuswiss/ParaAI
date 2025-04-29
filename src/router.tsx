@@ -1,7 +1,7 @@
 // React is implicitly used in the JSX
 import { createBrowserRouter, Navigate } from 'react-router-dom';
 import Auth from './pages/Auth';
-import Dashboard from './pages/Dashboard';
+import DashboardPage from './pages/DashboardPage';
 import Documents from './pages/Documents';
 import Cases from './pages/Cases';
 import CaseDetail from './pages/CaseDetail';
@@ -10,6 +10,10 @@ import AppLayout from './components/layout/AppLayout';
 import DatabaseDiagnostic from './utils/DatabaseDiagnostic';
 import TemplateManager from './pages/TemplateManager';
 import ProtectedRoute from './components/auth/ProtectedRoute';
+import EditPage from './pages/EditPage';
+// Placeholder imports for new viewer pages
+import DocumentViewPage from './pages/DocumentViewPage';
+import TemplateViewPage from './pages/TemplateViewPage';
 
 const router = createBrowserRouter([
   {
@@ -26,7 +30,7 @@ const router = createBrowserRouter([
           { index: true, element: <Navigate to="/dashboard" replace /> },
           {
             path: 'dashboard',
-            element: <Dashboard />,
+            element: <DashboardPage />,
           },
           {
             path: 'documents',
@@ -51,6 +55,19 @@ const router = createBrowserRouter([
           {
             path: 'templates',
             element: <TemplateManager />,
+          },
+          {
+            path: 'edit/:type/:id?',
+            element: <EditPage />,
+          },
+          // --- New Viewer Routes ---
+          {
+            path: 'view/document/:id',
+            element: <DocumentViewPage />,
+          },
+          {
+            path: 'view/template/:id',
+            element: <TemplateViewPage />,
           },
         ],
       },

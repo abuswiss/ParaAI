@@ -3,13 +3,17 @@ import { getDocumentById, getDocumentUrl, processDocument } from '../../services
 import { Document as DocumentType } from '../../types/document';
 import DocumentAnalyzer from './DocumentAnalyzer';
 import { useNavigate } from 'react-router-dom';
+import { Button } from '@/components/ui/Button';
+import { Spinner } from '@/components/ui/Spinner';
+import { Edit } from 'lucide-react';
 
 interface DocumentViewerProps {
   documentId: string;
   onClose?: () => void;
+  onEdit?: (docId: string) => void;
 }
 
-const DocumentViewer: React.FC<DocumentViewerProps> = ({ documentId, onClose }) => {
+const DocumentViewer: React.FC<DocumentViewerProps> = ({ documentId, onClose, onEdit }) => {
   const navigate = useNavigate();
   const [document, setDocument] = useState<DocumentType | null>(null);
   const [documentUrl, setDocumentUrl] = useState<string | null>(null);
@@ -32,8 +36,17 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ documentId, onClose }) 
 
         setDocument(data);
 
-        // Get download URL
-        if (data.storagePath) {
+        // Determine initial view mode based on content type
+        if (data.contentType?.startsWith('text/') || 
+            data.contentType === 'application/json' || 
+            data.extractedText) { // Prefer text view if already extracted
+             setViewMode('text');
+        } else {
+            setViewMode('preview');
+        }
+
+        // Get download URL only if needed for preview
+        if (data.storagePath && viewMode === 'preview') { 
           const urlResponse = await getDocumentUrl(data.storagePath);
           if (urlResponse.error) throw urlResponse.error;
           setDocumentUrl(urlResponse.data);
@@ -47,7 +60,26 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ documentId, onClose }) 
     };
 
     fetchDocument();
-  }, [documentId]);
+    // Reset analyzer when document changes
+    setShowAnalyzer(false);
+  }, [documentId]); // Removed viewMode dependency to avoid re-fetching url on toggle
+
+  // Fetch URL specifically when switching TO preview mode if not already fetched
+  useEffect(() => {
+    if (viewMode === 'preview' && !documentUrl && document?.storagePath && !loading) {
+        const fetchUrlForPreview = async () => {
+            try {
+                 const urlResponse = await getDocumentUrl(document.storagePath!);
+                 if (urlResponse.error) throw urlResponse.error;
+                 setDocumentUrl(urlResponse.data);
+            } catch (err) {
+                 console.error('Error fetching document URL for preview:', err);
+                 setError('Failed to load document preview URL.');
+            }
+        };
+        fetchUrlForPreview();
+    }
+  }, [viewMode, documentUrl, document, loading]);
 
   const handleProcessDocument = async () => {
     if (!document) return;
@@ -68,7 +100,7 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ documentId, onClose }) 
       if (!data) throw new Error('Document not found');
       
       setDocument(data);
-      setViewMode('text');
+      setViewMode('text'); // Switch to text view after processing
     } catch (err) {
       console.error('Error processing document:', err);
       setError('Failed to extract text from document. Please try again.');
@@ -78,7 +110,12 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ documentId, onClose }) 
   };
 
   const renderFilePreview = () => {
-    if (!document || !documentUrl) return null;
+    if (!document || !documentUrl) return (
+        <div className="flex justify-center items-center h-full">
+            <Spinner />
+            <span className="ml-2 text-text-secondary">Loading preview...</span>
+        </div>
+    );
     
     const fileType = document.contentType;
     
@@ -86,33 +123,36 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ documentId, onClose }) 
       return (
         <iframe 
           src={documentUrl} 
-          className="w-full h-[70vh] rounded-md border border-gray-600"
+          className="w-full h-full rounded-b-lg border-t border-gray-600" // Adjusted for header
           title={document.filename}
         />
       );
     } else if (fileType.includes('image')) {
       return (
-        <img 
-          src={documentUrl} 
-          alt={document.filename} 
-          className="max-w-full max-h-[70vh] object-contain mx-auto"
-        />
+         <div className="w-full h-full flex justify-center items-center p-4">
+             <img 
+               src={documentUrl} 
+               alt={document.filename} 
+               className="max-w-full max-h-full object-contain"
+             />
+         </div>
       );
     } else if (fileType.includes('text') || fileType.includes('application/json')) {
+      // This might be redundant if text view is preferred, but keep as fallback
       return (
         <iframe 
           src={documentUrl} 
-          className="w-full h-[70vh] rounded-md border border-gray-600 bg-white"
+          className="w-full h-full rounded-b-lg border-t border-gray-600 bg-white" // Adjusted
           title={document.filename}
         />
       );
     } else {
       return (
-        <div className="text-center p-8 bg-gray-800 rounded-md">
+        <div className="text-center p-8 flex flex-col justify-center items-center h-full">
           <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12 text-gray-400 mx-auto mb-4" viewBox="0 0 20 20" fill="currentColor">
             <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clipRule="evenodd" />
           </svg>
-          <p className="text-text-secondary mb-4">Preview not available for this file type</p>
+          <p className="text-text-secondary mb-4">Preview not available for this file type ({fileType})</p>
           <a 
             href={documentUrl} 
             target="_blank" 
@@ -132,343 +172,186 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ documentId, onClose }) 
   const renderTextContent = () => {
     if (!document?.extractedText) {
       return (
-        <div className="text-center p-8 bg-gray-800 rounded-md">
-          <p className="text-text-secondary mb-4">No extracted text available</p>
-          <button
+        <div className="text-center p-8 flex flex-col justify-center items-center h-full">
+          <p className="text-text-secondary mb-4">No extracted text available.</p>
+          <Button
             onClick={handleProcessDocument}
             disabled={processing}
-            className="bg-primary hover:bg-primary-hover text-white font-medium py-2 px-4 rounded-md transition inline-flex items-center"
+            variant="primary"
+            size="sm"
           >
             {processing ? (
               <>
-                <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
+                <Spinner size="xs" className="mr-2" />
                 Processing...
               </>
             ) : (
               <>
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-2" viewBox="0 0 20 20" fill="currentColor">
                   <path fillRule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 100-2h5a1 1 0 011 1v5a1 1 0 100-2v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clipRule="evenodd" />
                 </svg>
                 Extract Text
               </>
             )}
-          </button>
+          </Button>
         </div>
       );
     }
 
     return (
-      <div className="bg-gray-800 rounded-md p-6 h-[70vh] overflow-y-auto">
-        <div className="whitespace-pre-wrap text-text-primary p-4 font-mono text-sm">
-          {document.extractedText}
+      <div className="p-4 h-full overflow-y-auto">
+        <div className="prose prose-sm dark:prose-invert max-w-none">
+          <pre className="whitespace-pre-wrap text-sm font-mono p-4 bg-neutral-100 dark:bg-gray-800 rounded-md">
+              {document.extractedText}
+          </pre>
+        </div>
           
-          {/* Text analysis actions */}
-          <div className="mt-6 border-t border-gray-700 pt-4">
-            <h3 className="text-lg font-medium text-text-primary mb-2">Document Analysis Options</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <button 
-                className="flex items-center space-x-2 p-3 bg-gray-800 rounded-md hover:bg-gray-700 transition"
-                onClick={() => setShowAnalyzer(true)}
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-primary" viewBox="0 0 20 20" fill="currentColor">
-                  <path d="M9 9a2 2 0 114 0 2 2 0 01-4 0z" />
-                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-13a4 4 0 00-3.446 6.032l-2.261 2.26a1 1 0 101.414 1.415l2.261-2.261A4 4 0 1011 5z" clipRule="evenodd" />
-                </svg>
-                <span className="text-text-primary">Comprehensive Analysis</span>
-              </button>
-              <button 
-                className="flex items-center space-x-2 p-3 bg-gray-800 rounded-md hover:bg-gray-700 transition"
-                onClick={() => {
-                  setShowAnalyzer(true);
-                  // This would be wired up to select the 'summary' tab directly
-                }}
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-primary" viewBox="0 0 20 20" fill="currentColor">
-                  <path d="M5 3a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2V5a2 2 0 00-2-2H5zM5 11a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2v-2a2 2 0 00-2-2H5zM11 5a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V5zM14 11a1 1 0 011 1v1h1a1 1 0 110 2h-1v1a1 1 0 11-2 0v-1h-1a1 1 0 110-2h1v-1a1 1 0 011-1z" />
-                </svg>
-                <span className="text-text-primary">Quick Summary</span>
-              </button>
-              <button 
-                className="flex items-center space-x-2 p-3 bg-gray-800 rounded-md hover:bg-gray-700 transition"
-                onClick={() => {
-                  setShowAnalyzer(true);
-                  // This would be wired up to select the 'risks' tab directly
-                }}
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-primary" viewBox="0 0 20 20" fill="currentColor">
-                  <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-                </svg>
-                <span className="text-text-primary">Risk Analysis</span>
-              </button>
-              <button 
-                className="flex items-center space-x-2 p-3 bg-gray-800 rounded-md hover:bg-gray-700 transition"
-                onClick={() => {
-                  // This would be wired up to extract timeline events
-                  setShowAnalyzer(true);
-                  // Select appropriate tab
-                }}
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-primary" viewBox="0 0 20 20" fill="currentColor">
-                  <path fillRule="evenodd" d="M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zm0 5a1 1 0 000 2h8a1 1 0 100-2H6z" clipRule="evenodd" />
-                </svg>
-                <span className="text-text-primary">Extract Timeline</span>
-              </button>
+          {/* Text analysis actions - keep as is */}
+          <div className="mt-6 border-t border-neutral-200 dark:border-gray-700 pt-4">
+            <h3 className="text-lg font-medium text-neutral-800 dark:text-text-primary mb-2">Document Analysis Options</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+              {/* Comprehensive Analysis */}
+              <Button 
+                 variant="outline"
+                 size="sm"
+                 onClick={() => setShowAnalyzer(true)}
+                 className="justify-start"
+               >
+                 <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-2" viewBox="0 0 20 20" fill="currentColor">
+                   <path d="M9 9a2 2 0 114 0 2 2 0 01-4 0z" />
+                   <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-13a4 4 0 00-3.446 6.032l-2.261 2.26a1 1 0 101.414 1.415l2.261-2.261A4 4 0 1011 5z" clipRule="evenodd" />
+                 </svg>
+                 Analyze Document
+              </Button>
+              {/* Quick Summary */}
+               <Button 
+                 variant="outline"
+                 size="sm"
+                 onClick={() => { /* TODO: Trigger quick summary */ console.log("Quick Summary Clicked"); }}
+                 className="justify-start"
+               >
+                 <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-2" viewBox="0 0 20 20" fill="currentColor">
+                   <path d="M5 3a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2V5a2 2 0 00-2-2H5zM5 11a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2v-2a2 2 0 00-2-2H5zM11 5a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V5zM14 11a1 1 0 011 1v1h1a1 1 0 110 2h-1v1a1 1 0 11-2 0v-1h-1a1 1 0 110-2h1v-1a1 1 0 011-1z" />
+                 </svg>
+                 Quick Summary
+               </Button>
+               {/* Add more actions like 'Identify Risks' if needed */}
             </div>
           </div>
         </div>
-      </div>
     );
   };
 
-  // Conditional rendering for loading state
   if (loading) {
     return (
-      <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
-        <div className="bg-gray-900 rounded-lg p-8 max-w-4xl w-full mx-4">
-          <div className="flex justify-center items-center h-64">
-            <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary"></div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-  
-  // Conditional rendering for error state or document not found
-  if (error || !document) {
-    return (
-      <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
-        <div className="bg-gray-900 rounded-lg p-8 max-w-4xl w-full mx-4">
-          <div className="text-red-500 bg-red-100 dark:bg-red-900/20 p-4 rounded-md">
-            {error || 'Document not found'}
-          </div>
-          <div className="mt-6 flex justify-end">
-            <button
-              onClick={onClose}
-              className="bg-gray-600 hover:bg-gray-700 text-white font-medium py-2 px-4 rounded-md transition"
-            >
-              Close
-            </button>
-          </div>
-        </div>
+      <div className="flex justify-center items-center h-full">
+        <Spinner size="large" />
       </div>
     );
   }
 
-  // Render document analyzer in a more compact overlay
-  if (showAnalyzer && document) {
+  if (error) {
     return (
-      <div className="fixed inset-0 bg-black bg-opacity-75 flex items-start sm:items-center justify-center z-50 p-4 overflow-y-auto">
-        <div className="bg-background rounded-lg shadow-lg w-full max-w-4xl max-h-[90vh] flex flex-col my-8 sm:my-0">
-          <div className="sticky top-0 p-3 border-b border-gray-800 flex justify-between items-center bg-gray-900 rounded-t-lg">
-            <h2 className="text-lg font-medium text-text-primary">Document Analysis</h2>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => {
-                  // This would be connected to a state that minimizes the analyzer
-                  // For now just a visual element
-                }}
-                className="text-gray-400 hover:text-text-primary p-1 rounded hover:bg-gray-800"
-                title="Minimize"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                  <path fillRule="evenodd" d="M5 10a1 1 0 011-1h8a1 1 0 110 2H6a1 1 0 01-1-1z" clipRule="evenodd" />
-                </svg>
-              </button>
-              <button 
-                onClick={() => setShowAnalyzer(false)}
-                className="text-gray-400 hover:text-text-primary p-1 rounded hover:bg-gray-800"
-                title="Close"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                  <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
-                </svg>
-              </button>
-            </div>
-          </div>
-          <div className="flex-1 overflow-auto p-4">
-            <DocumentAnalyzer documentData={document} onClose={() => setShowAnalyzer(false)} />
-          </div>
-        </div>
+      <div className="flex flex-col justify-center items-center h-full text-center p-4">
+        <p className="text-error dark:text-error mb-4">{error}</p>
+        {/* Optional: Add a retry button */}
       </div>
     );
   }
-  
-  // Main document viewer UI
+
+  if (!document) {
+    return (
+      <div className="flex justify-center items-center h-full">
+        <p className="text-text-secondary">Document not found.</p>
+      </div>
+    );
+  }
+
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
-      <div className="bg-gray-900 rounded-lg p-6 max-w-4xl w-full mx-4 max-h-[90vh] overflow-hidden flex flex-col">
-        {/* Compact header with close button, document info and expandable options */}
-        <div className="bg-background border-b border-gray-800 p-3 md:p-4 relative flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
-          <div className="flex-grow overflow-hidden">
-            <h2 className="text-lg font-medium text-text-primary truncate">{document?.filename}</h2>
-            <p className="text-xs text-text-secondary">
-              {document?.contentType} • {document?.size && typeof document.size === 'number' ? 
-                `${Math.round(document.size / 1024)} KB` : 'Unknown size'}
-            </p>
-          </div>
-          <div className="flex items-center gap-2 self-end sm:self-auto">
-            <button
-              onClick={() => setShowAnalyzer(!showAnalyzer)}
-              className="text-sm bg-gradient-to-r from-purple-600 to-blue-500 text-white py-2 px-4 rounded-lg flex items-center shadow-lg hover:from-purple-700 hover:to-blue-600 transition-all duration-200"
-              title="AI Analysis"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" viewBox="0 0 20 20" fill="currentColor">
-                <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
-              </svg>
-              AI Analysis
-            </button>
-            {onClose && (
-              <button 
-                onClick={onClose}
-                className="text-gray-400 hover:text-text-primary transition p-1 rounded-md hover:bg-gray-800"
-                title="Close"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            )}
-          </div>
-        </div>
-        
-        {/* View mode selector */}
-        <div className="flex py-2 px-3 md:px-4 border-b border-gray-700 overflow-x-auto bg-gray-900 justify-between items-center">
-          <div className="flex">
-            <button
-              className={`px-3 py-1.5 text-sm font-medium ${viewMode === 'preview' ? 'text-primary border-b-2 border-primary' : 'text-text-secondary hover:text-text-primary'}`}
-              onClick={() => setViewMode('preview')}
-            >
-              Preview
-            </button>
-            <button
-              className={`px-3 py-1.5 text-sm font-medium ${viewMode === 'text' ? 'text-primary border-b-2 border-primary' : 'text-text-secondary hover:text-text-primary'}`}
-              onClick={() => setViewMode('text')}
-            >
-              Extracted Text
-            </button>
-          </div>
-          <div className="flex items-center text-text-secondary text-sm">
-            <span className="hidden sm:inline">Uploaded: </span>
-            <span className="text-xs">{document?.uploadedAt ? new Date(document.uploadedAt).toLocaleDateString() : 'Unknown'}</span>
-          </div>
-        </div>
-
-        {/* Document content area with resize handles */}
-        <div className="flex-1 overflow-auto relative">
-          {/* Document content */}
-          <div className="h-full overflow-auto p-1 md:p-3">
-            {viewMode === 'preview' ? renderFilePreview() : renderTextContent()}
-          </div>
-          
-          {/* Resize handles (visual indicators only) */}
-          <div className="absolute bottom-3 right-3 text-gray-500 cursor-nwse-resize opacity-50 hover:opacity-100 transition-opacity">
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-            </svg>
-          </div>
-        </div>
-
-        {/* Footer with actions - more compact and responsive */}
-        <div className="p-3 border-t border-gray-800 flex flex-col sm:flex-row gap-2 sm:justify-between sm:items-center bg-gray-900">
-          {/* Mobile view: Stacked buttons */}
-          <div className="flex justify-between sm:hidden w-full">
-            <div className="flex gap-1">
-              {documentUrl && (
-                <a
-                  href={documentUrl}
-                  download={document.filename}
-                  className="bg-gray-700 hover:bg-gray-600 text-white text-xs font-medium py-1.5 px-2 rounded transition flex items-center"
-                  title="Download Document"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
-                    <path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clipRule="evenodd" />
-                  </svg>
-                  <span className="ml-1">Download</span>
-                </a>
+    <div className="document-viewer h-full flex flex-col bg-white dark:bg-surface-darker text-neutral-900 dark:text-text-primary">
+        {/* Header Bar */} 
+        <div className="flex justify-between items-center p-3 border-b border-neutral-200 dark:border-gray-700 flex-shrink-0">
+           <div className="flex items-center min-w-0">
+             <h2 className="text-base font-semibold truncate mr-4" title={document.filename}>
+               {document.filename}
+             </h2>
+             {/* View Mode Toggle */} 
+             <div className="flex items-center border border-gray-300 dark:border-gray-600 rounded-md">
+                 <Button 
+                     variant={viewMode === 'preview' ? 'secondary' : 'ghost'}
+                     size="xs"
+                     onClick={() => setViewMode('preview')}
+                     className="p-1 rounded-r-none border-r border-gray-300 dark:border-gray-600"
+                     title="Preview Mode"
+                     disabled={!document.storagePath} // Disable if no file to preview
+                 >
+                     {/* Placeholder for Eye icon */}
+                     <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                 </Button>
+                 <Button 
+                     variant={viewMode === 'text' ? 'secondary' : 'ghost'}
+                     size="xs"
+                     onClick={() => setViewMode('text')}
+                     className="p-1 rounded-l-none"
+                     title="Text Mode"
+                     disabled={!document.extractedText && !document.storagePath} // Disable if no text and no way to extract
+                 >
+                    {/* Placeholder for FileText icon */}
+                     <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                 </Button>
+             </div>
+           </div>
+           
+           {/* Action Buttons */} 
+           <div className="flex items-center gap-2">
+              {/* Add Edit Button */}
+              {onEdit && (
+                  <Button 
+                      variant="outline"
+                      size="sm"
+                      onClick={() => onEdit(documentId)}
+                      title="Edit Document"
+                  >
+                      <Edit className="h-4 w-4" />
+                  </Button>
               )}
-            </div>
-            <button
-              onClick={() => {
-                // Add document to conversation context
-                if (document) {
-                  // Store the document in localStorage to be used in the chat
-                  localStorage.setItem('activeDocumentForChat', JSON.stringify({
-                    id: document.id,
-                    filename: document.filename,
-                    extractedText: document.extractedText,
-                    timestamp: new Date().toISOString()
-                  }));
-
-                  // Navigate to chat page
-                  navigate('/chat');
-                }
-              }}
-              className="bg-primary hover:bg-primary-dark text-white text-xs font-medium py-1.5 px-2 rounded transition flex items-center"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 mr-1" viewBox="0 0 20 20" fill="currentColor">
-                <path fillRule="evenodd" d="M18 5v8a2 2 0 01-2 2h-5l-5 4v-4H4a2 2 0 01-2-2V5a2 2 0 012-2h12a2 2 0 012 2zM7 8H5v2h2V8zm2 0h2v2H9V8zm6 0h-2v2h2V8z" clipRule="evenodd" />
-              </svg>
-              <span className="ml-1">Use in Chat</span>
-            </button>
-          </div>
-          
-          {/* Desktop view: Horizontal layout */}
-          <div className="hidden sm:flex items-center gap-4">
-            <div className="text-xs text-gray-400 flex items-center">
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 mr-1" viewBox="0 0 20 20" fill="currentColor">
-                <path fillRule="evenodd" d="M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zm0 5a1 1 0 000 2h8a1 1 0 100-2H6z" clipRule="evenodd" />
-              </svg>
-              {new Date(document.uploadedAt).toLocaleDateString()}
-            </div>
-            <div className="text-xs text-gray-400">
-              {document.processingStatus === 'completed' ? 'Processing completed' : 
-               document.processingStatus === 'processing' ? 'Processing in progress' : 
-               document.processingStatus === 'pending' ? 'Processing pending' : 'Processing failed'}
-            </div>
-          </div>
-          
-          <div className="hidden sm:flex gap-2">
-            {documentUrl && (
-              <a
-                href={documentUrl}
-                download={document.filename}
-                className="bg-gray-700 hover:bg-gray-600 text-white text-xs font-medium py-1.5 px-2 rounded transition flex items-center"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 mr-1" viewBox="0 0 20 20" fill="currentColor">
-                  <path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clipRule="evenodd" />
-                </svg>
-                Download
-              </a>
-            )}
-            <button
-              onClick={() => {
-                // Add document to conversation context
-                if (document) {
-                  // Store the document in localStorage to be used in the chat
-                  localStorage.setItem('activeDocumentForChat', JSON.stringify({
-                    id: document.id,
-                    filename: document.filename,
-                    extractedText: document.extractedText,
-                    timestamp: new Date().toISOString()
-                  }));
-
-                  // Navigate to chat page
-                  navigate('/chat');
-                }
-              }}
-              className="bg-primary hover:bg-primary-dark text-white text-xs font-medium py-1.5 px-2 rounded transition flex items-center"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 mr-1" viewBox="0 0 20 20" fill="currentColor">
-                <path fillRule="evenodd" d="M18 5v8a2 2 0 01-2 2h-5l-5 4v-4H4a2 2 0 01-2-2V5a2 2 0 012-2h12a2 2 0 012 2zM7 8H5v2h2V8zm2 0h2v2H9V8zm6 0h-2v2h2V8z" clipRule="evenodd" />
-              </svg>
-              Use in Chat
-            </button>
-          </div>
+              {/* Add Download Button if URL exists */}
+              {documentUrl && (
+                  <a 
+                    href={documentUrl} 
+                    download={document.filename} 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                  >
+                      <Button variant="outline" size="sm" title="Download Document">
+                           {/* Placeholder for Download icon */} 
+                           <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                      </Button>
+                  </a>
+              )}
+              {/* Close Button if handler provided */}
+              {onClose && (
+                   <Button variant="ghost" size="icon" onClick={onClose} title="Close Viewer">
+                       {/* Placeholder for X icon */} 
+                       <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                   </Button>
+              )}
+           </div>
         </div>
-      </div>
+
+        {/* Main Content Area */} 
+        <div className="flex-grow overflow-auto">
+           {viewMode === 'preview' ? renderFilePreview() : renderTextContent()}
+        </div>
+
+      {/* Analyzer Modal/Drawer */} 
+      {showAnalyzer && document?.extractedText && (
+        <DocumentAnalyzer 
+          documentText={document.extractedText} 
+          isOpen={showAnalyzer} 
+          onClose={() => setShowAnalyzer(false)} 
+        />
+      )}
     </div>
   );
 };

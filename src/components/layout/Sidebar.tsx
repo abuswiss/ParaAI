@@ -99,7 +99,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, toggleSidebar }) => {
                   rounded-lg 
                   transition-all duration-200
                   ${location.pathname === item.path 
-                    ? 'bg-primary-light text-primary' 
+                    ? 'bg-primary-light text-primary'
                     : 'text-text-secondary hover:text-text-primary hover:bg-surface-lighter'}
                 `}
               >

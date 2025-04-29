@@ -1,25 +1,20 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-// Remove unused imports from jotai
-// import { useAtomValue, useSetAtom, useAtom } from 'jotai'; 
+import { useNavigate } from 'react-router-dom';
+import { useAtomValue } from 'jotai';
 import { 
-  // Remove unused atom imports
-  // activeCaseIdAtom, 
-  // activeEditorItemAtom, 
-  // editorTextToQueryAtom, 
-  ActiveEditorItem
+  ActiveEditorItem,
+  resetChatTriggerAtom
 } from '@/atoms/appAtoms';
 import { getConversationMessages, createConversation } from '../../services/chatService';
 import { DocumentAnalysisResult } from '../../services/documentAnalysisService';
-// import { motion } from 'framer-motion'; // Unused
-// import ReactMarkdown from 'react-markdown'; // Unused
 import { supabase } from '../../lib/supabaseClient';
 import { v4 as uuidv4 } from 'uuid';
 import { parseCommand } from '../../lib/commandParser';
 import { handleUserTurn, DispatcherResponse } from '../../lib/taskDispatcher';
-// import { exportAsTxt, exportAsDocx, exportAsPdf } from '../../utils/exportUtils'; // Unused
-import HowToUsePanel from './HowToUsePanel';
 import AIDraftModal from '../ai/AIDraftModal';
 import TemplatePopulationModal from '@/components/templates/TemplatePopulationModal';
+import { BarChart2, Globe, Search, MessageCircle, Wand2, HelpCircle } from 'lucide-react';
+import { Modal, ModalOverlay, ModalContent, ModalHeader, ModalBody, ModalCloseButton } from '../ui/Modal';
 
 // Import the separate components
 import ChatInput from './ChatInput';
@@ -48,13 +43,15 @@ interface Message {
 
 interface ChatInterfaceProps {
   conversationId?: string;
-  onInsertContent?: (content: string) => void; // <-- Add prop
+  onInsertContent?: (content: string) => void;
+  initialInputValue?: string;
 }
 
 // Define component using function declaration instead of arrow function
 function ChatInterface({ 
   conversationId: initialConversationId, 
-  onInsertContent // <-- Destructure prop
+  onInsertContent, 
+  initialInputValue // <-- Destructure new prop
 }: ChatInterfaceProps) {
   // State management
   const [messages, setMessages] = useState<Message[]>([]);
@@ -66,15 +63,19 @@ function ChatInterface({
   const [isDraggingFile, setIsDraggingFile] = useState(false);
   const [isSendingMessage, setIsSendingMessage] = useState(false);
   const [isUIDisabled, setIsUIDisabled] = useState(false);
-  const [howToUseCollapsed, setHowToUseCollapsed] = useState(true);
   const [showAIDraftModal, setShowAIDraftModal] = useState(false);
   const [aiDraftContent, setAIDraftContent] = useState<string | null>(null);
-  // State for Template Population Modal
   const [showTemplateModal, setShowTemplateModal] = useState(false);
   const [modalTemplateId, setModalTemplateId] = useState<string | null>(null);
+  const [showTipsModal, setShowTipsModal] = useState(false);
 
   // Refs
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const navigate = useNavigate();
+
+  // Get the trigger value
+  const resetTriggerValue = useAtomValue(resetChatTriggerAtom);
+  const isInitialMount = useRef(true); // Ref to track initial mount
 
   // State to store the active conversation ID (possibly created on demand)
   // FIXME: Replace dummy implementation for activeCaseId and setActiveEditorItem
@@ -87,6 +88,60 @@ function ChatInterface({
   // State for Perplexity sources - Use the defined interface
   // eslint-disable-next-line @typescript-eslint/no-unused-vars 
   const [perplexitySources, setPerplexitySources] = useState<{ [messageId: string]: PerplexitySource[] }>({});
+
+  // Content for Tips modal (copied from HowToUsePanel)
+  const howToUseTips = [
+    {
+      icon: <MessageCircle className="h-6 w-6 text-primary" />,
+      title: 'Ask a Legal Question',
+      desc: 'Type any legal question or prompt and get instant answers.',
+      example: 'What are the key elements of a valid contract?'
+    },
+    {
+      icon: <Wand2 className="h-6 w-6 text-purple-400" />,
+      title: 'Use AI Legal Tools',
+      desc: 'Type / to access powerful document and legal tools (agents).',
+      example: '/timeline from [doc_id]'
+    },
+    {
+      icon: <Search className="h-6 w-6 text-blue-400" />,
+      title: 'Advanced Legal Research',
+      desc: 'Type /research to search case law and legal sources with AI (e.g., Perplexity).',
+      example: '/research Miranda rights'
+    }
+  ];
+
+  // --- NEW: Function to reset chat state --- 
+  const resetChat = () => {
+    console.log('Resetting chat state...');
+    setMessages([]);
+    setError(null);
+    setActiveDocumentName(null);
+    setActiveContext(null);
+    setIsProcessingDocument(false);
+    setDocumentProcessingProgress(0);
+    setIsSendingMessage(false);
+    setIsUIDisabled(false);
+    setActiveConversationId(undefined); // Ensure conversation ID is cleared
+    setPerplexitySources({}); // Clear sources
+    // We don't necessarily navigate, just reset the state of this component.
+    // If navigation is truly desired, it should be handled by the parent 
+    // or a different button.
+  };
+
+  // --- NEW: Effect to reset chat when trigger atom changes --- 
+  useEffect(() => {
+    // Skip the effect on the initial render
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+      return;
+    }
+    // Only reset if the trigger value actually changed (which it always will if incremented)
+    if (resetTriggerValue > 0) { // Check > 0 to ensure it was triggered
+      console.log('Reset chat triggered by atom change.');
+      resetChat();
+    }
+  }, [resetTriggerValue]); // Depend only on the trigger value
 
   // Function to fetch messages for a specific conversation
   const fetchMessages = useCallback(async (conversationId: string) => {
@@ -117,40 +172,31 @@ function ChatInterface({
     }
   }, []);
 
-  // Effect to load conversation messages when active conversation changes
+  // Effect to load conversation messages or reset for 'new'
   useEffect(() => {
     console.log('Conversation ID changed:', initialConversationId);
     
     if (!initialConversationId) {
-      // No conversation ID provided
-      console.log('No conversation ID, clearing messages');
-      setActiveConversationId(undefined);
-      setMessages([]);
+      resetChat(); // Use reset function
     } else if (initialConversationId === 'new') {
-      // New conversation requested
-      console.log('New conversation requested');
-      setActiveConversationId(undefined); // Start with undefined to ensure new creation
-      setMessages([]); // Clear any existing messages
+      resetChat(); // Use reset function
     } else {
       // Existing conversation, fetch messages
       console.log('Loading existing conversation:', initialConversationId);
       setActiveConversationId(initialConversationId);
       fetchMessages(initialConversationId);
+      // Clear local state like errors/context when loading existing
+      setError(null);
+      setActiveContext(null);
+      setActiveDocumentName(null);
     }
     
     // Scroll to bottom when conversation changes
     if (messagesEndRef.current) {
       messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [initialConversationId, fetchMessages]);
-
-  // Reset state and add initial system message when conversationId changes
-  useEffect(() => {
-    // Reset the state
-    setActiveContext(null);
-    setActiveDocumentName(null);
-    setError(null);
-  }, [initialConversationId]);
+    // Dependencies updated to include resetChat
+  }, [initialConversationId, fetchMessages /* Removed resetChat from deps, causes loop */]);
 
   // Scroll to bottom effect for messages
   useEffect(() => {
@@ -173,16 +219,6 @@ function ChatInterface({
     };
     setMessages(prevMessages => [...prevMessages, messageWithTimestamp]);
   };
-
-  // Loading messages that rotate while waiting for AI response
-  const loadingMessages = [
-    "Your AI is thinking...",
-    "Processing your request...",
-    "Analyzing legal context...",
-    "Researching relevant information...",
-    "Formulating a response...",
-    "Connecting the dots..."
-  ];
 
   // Function to handle sending a new message
   const handleSendMessage = async (
@@ -211,10 +247,14 @@ function ChatInterface({
       // TODO: Refine this logic - maybe add a property to Task definition
       const requiresConversationId = (task?.type === 'agent' && task.agent !== 'help') || task?.type === 'research'; 
 
-      // If it's a new chat and the task requires an ID, create the conversation first
+      // If it's a new chat (activeConversationId is undefined) AND the task requires one,
+      // create the conversation *before* sending the message.
       if (!currentConversationId && requiresConversationId) {
         console.log('Task requires conversation ID, creating new conversation first...');
-        const { data: newConversation, error: createError } = await createConversation('New Chat'); // Use the imported function
+        // Reset chat first ONLY IF the user explicitly hit the reset button?
+        // No, createConversation should handle starting fresh.
+        // resetChat(); // Maybe not needed here? Test this.
+        const { data: newConversation, error: createError } = await createConversation('New Chat'); 
         if (createError || !newConversation) {
           console.error('Failed to create conversation before sending message:', createError);
           setError('Failed to start the conversation. Please try again.');
@@ -231,23 +271,20 @@ function ChatInterface({
 
       // Create a placeholder message ID for streaming updates
       const placeholderId = uuidv4();
-      let loadingIndex = 0; // Restore loadingIndex declaration here
-      let loadingInterval: NodeJS.Timeout | null = null; // Keep interval reference
 
       if (showImmediateFeedback) {
-        // Add user message and assistant placeholder only if needed
         const userMessage: Message = {
           id: uuidv4(),
           role: 'user',
           content: content,
-          timestamp: new Date().toISOString() // Ensure timestamp is string
+          timestamp: new Date().toISOString()
         };
-        const initialLoadingMessage = loadingMessages[Math.floor(Math.random() * loadingMessages.length)];
+        // Use a simpler placeholder content
         const assistantMessage: Message = {
           id: placeholderId,
           role: 'assistant',
-          content: initialLoadingMessage,
-          timestamp: new Date().toISOString(), // Ensure timestamp is string
+          content: '', // Set initial content to empty or just '...'
+          timestamp: new Date().toISOString(),
           isStreaming: true,
           conversation_id: currentConversationId ?? undefined
         };
@@ -256,21 +293,6 @@ function ChatInterface({
         } else {
           setMessages(prevMessages => [...prevMessages, assistantMessage]);
         }
-        // Set up loading interval
-        loadingInterval = setInterval(() => {
-          loadingIndex = (loadingIndex + 1) % loadingMessages.length; // Use loadingIndex
-          setMessages(prevMessages => {
-            const newMessages = [...prevMessages];
-            const messageIndex = newMessages.findIndex(m => m.id === placeholderId);
-            if (messageIndex !== -1 && newMessages[messageIndex].isStreaming) {
-              newMessages[messageIndex] = {
-                ...newMessages[messageIndex],
-                content: loadingMessages[loadingIndex] // Use loadingIndex
-              };
-            }
-            return newMessages;
-          });
-        }, 2000);
       } else {
          // If not showing immediate feedback (e.g., /use template), maybe add just the user message?
          // Or add nothing yet, wait for the dispatcher response.
@@ -296,22 +318,18 @@ function ChatInterface({
         task,
         message: content,
         onChunk: (chunk) => {
-          if (loadingInterval && chunks.length === 0) {
-            clearInterval(loadingInterval); // Clear interval on first chunk
-            loadingInterval = null;
-          }
           chunks.push(chunk);
           setMessages(prevMessages => {
-             // ... existing message update logic for streaming ...
              const newMessages = [...prevMessages];
              const messageIndex = newMessages.findIndex(m => m.id === placeholderId);
              if (messageIndex !== -1) {
+                 // Ensure content starts empty and appends chunks
                  newMessages[messageIndex] = { 
                    ...newMessages[messageIndex], 
-                   content: chunks.join(''), 
+                   content: chunks.join(''), // Build content from chunks
                    isStreaming: true, 
                    conversation_id: currentConversationId ?? undefined,
-                   timestamp: newMessages[messageIndex].timestamp || new Date().toISOString() // Ensure timestamp persists
+                   timestamp: newMessages[messageIndex].timestamp || new Date().toISOString()
                  };
              }
              return newMessages;
@@ -323,9 +341,6 @@ function ChatInterface({
         analysisContext: analysisContext ? JSON.stringify(analysisContext) : undefined,
         params: { wsContext: (chunk: string) => console.log('WS Chunk:', chunk) }
       });
-
-      // Clear the loading interval if it's still running
-      if (loadingInterval) clearInterval(loadingInterval);
 
       console.log('Dispatcher response:', response);
 
@@ -504,9 +519,6 @@ function ChatInterface({
     };
   }, []);
 
-  // Function to retry a previous message if needed
-  // We'll keep this for future functionality but it's not used yet
-
   // Handle file upload and processing
   const handleFiles = async (files: File[]) => {
     if (!files.length) return;
@@ -622,187 +634,140 @@ function ChatInterface({
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
-      {/* HowToUsePanel fixed at the top, collapsible, not scrolling with chat */}
-      {showWelcome && !howToUseCollapsed && (
-        <div className="sticky top-0 z-20 bg-gray-900 pt-4 pb-2">
-          <HowToUsePanel />
-          <div className="w-full flex justify-center mb-4">
-            <div className="text-gray-400 text-sm bg-gray-800 rounded-lg px-4 py-2 max-w-lg">
-              <span>You can also upload a document to analyze, extract timelines, or use as context for your questions and agent tools.</span>
-            </div>
-          </div>
-          <div className="flex justify-center mb-2">
-            <button
-              className="text-xs text-gray-400 hover:text-primary bg-gray-800 rounded px-2 py-1 transition-colors"
-              onClick={() => setHowToUseCollapsed(true)}
-              aria-label="Collapse how to use section"
-            >
-              Hide this section
-            </button>
-          </div>
-          {/* Pinned example action buttons below the panel, only visible when expanded */}
-          <div className="flex justify-center gap-4 mt-2 pb-2">
-            <button
-              className="p-3 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg text-base text-left transition-colors text-white focus:outline-none focus:ring-2 focus:ring-primary min-w-[260px]"
-              onClick={() => handleSendMessage('What are the key elements of a valid contract?')}
-            >
-              What are the key elements of a valid contract?
-            </button>
-            <button
-              className="p-3 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg text-base text-left transition-colors text-white focus:outline-none focus:ring-2 focus:ring-primary min-w-[200px]"
-              onClick={() => {
-                // Focus the input and type a slash
-                const textarea = document.querySelector('textarea');
-                if (textarea) {
-                  textarea.focus();
-                  setTimeout(() => {
-                    const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
-                    nativeInputValueSetter?.call(textarea, '/');
-                    textarea.dispatchEvent(new Event('input', { bubbles: true }));
-                  }, 0);
-                }
-              }}
-            >
-              <span className="font-mono text-primary">/</span> Use AI Legal Tools
-            </button>
-            <button
-              className="p-3 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg text-base text-left transition-colors text-white focus:outline-none focus:ring-2 focus:ring-primary min-w-[220px]"
-              onClick={() => {
-                // Fill the input bar with /research prompt but do not submit
-                const textarea = document.querySelector('textarea');
-                if (textarea) {
-                  textarea.focus();
-                  setTimeout(() => {
-                    const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
-                    nativeInputValueSetter?.call(textarea, '/research Miranda rights');
-                    textarea.dispatchEvent(new Event('input', { bubbles: true }));
-                  }, 0);
-                }
-              }}
-            >
-              <span className="font-mono text-primary">/research</span> Miranda rights
-            </button>
-          </div>
-        </div>
-      )}
-      {showWelcome && howToUseCollapsed && (
-        <div className="sticky top-0 z-20 bg-gray-900 pt-2 pb-2 flex justify-center">
+      {/* Header Area (Buttons, Indicators) - Should not grow */}
+      <div className="flex-shrink-0">
+        {/* Header Buttons Container - Positioned absolutely, so doesn't affect flex layout directly */}
+        <div className="absolute top-4 right-4 z-30 flex items-center space-x-2">
+          {/* Tips Button */}
           <button
-            className="text-xs text-gray-400 hover:text-primary bg-gray-800 rounded px-2 py-1 transition-colors"
-            onClick={() => setHowToUseCollapsed(false)}
-            aria-label="Expand how to use section"
+            onClick={() => setShowTipsModal(true)}
+            className="
+              p-2 rounded-full 
+              text-text-secondary hover:text-text-primary
+              hover:bg-surface-lighter
+              transition-all duration-200
+              focus:outline-none focus:ring-2 focus:ring-primary focus:ring-opacity-50
+            "
+            aria-label="Show usage tips"
           >
-            Show how to use
+            <HelpCircle className="h-5 w-5" />
           </button>
-        </div>
-      )}
-      
-      {/* Document processing indicator */}
-      {isProcessingDocument && (
-        <div className="px-4 py-2 bg-gray-800 flex items-center space-x-3 text-sm border-b border-gray-700 text-text-secondary">
-          <div className="w-5 h-5 relative">
-            <div className="absolute inset-0 rounded-full border-2 border-primary border-t-transparent animate-spin"></div>
-          </div>
-          <div className="flex-1">
-            <div className="flex justify-between items-center mb-1">
-              <span>Processing document...</span>
-              <span className="text-xs">{documentProcessingProgress}%</span>
-            </div>
-            <div className="h-1 bg-gray-700 rounded-full overflow-hidden">
-              <div 
-                className="h-full bg-primary transition-all duration-300 ease-out rounded-full" 
-                style={{ width: `${documentProcessingProgress}%` }}
-              ></div>
-            </div>
-          </div>
-        </div>
-      )}
-      
-      {/* Error message display */}
-      {error && (
-        <div className="px-4 py-2 bg-gray-800 flex items-center space-x-2 text-sm border-b border-gray-700">
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-red-400" viewBox="0 0 20 20" fill="currentColor">
-            <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-          </svg>
-          <span>{error}</span>
-          <button 
-            onClick={() => setError(null)}
-            className="ml-auto text-gray-400 hover:text-white"
-            aria-label="Dismiss error"
+
+          {/* New Chat Button - Updated onClick */}
+          <button
+            onClick={resetChat} // <-- Call resetChat directly
+            className="
+              bg-primary hover:bg-primary-hover text-white
+              rounded-lg py-1.5 px-3 
+              flex items-center space-x-2
+              transition-all duration-200
+              shadow-sm
+              font-medium text-sm
+            "
+            aria-label="Start new chat"
           >
             <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-              <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+              <path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd" />
             </svg>
+            <span>New Chat</span>
           </button>
         </div>
-      )}
-
-      {/* Document context indicator */}
-      {activeContext && activeDocumentName && !isProcessingDocument && (
-        <div className="px-4 py-2 bg-gray-800 flex items-center space-x-2 text-sm border-b border-gray-700">
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-primary" viewBox="0 0 20 20" fill="currentColor">
-            <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clipRule="evenodd" />
-          </svg>
-          <span>Using document context: {activeDocumentName}</span>
-          <button 
-            onClick={() => { setActiveContext(null); setActiveDocumentName(null); }}
-            className="ml-auto text-gray-400 hover:text-white"
-            aria-label="Remove document context"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-              <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+        
+        {/* Conditionally Rendered Indicators (Processing, Error, Context) */}
+        {isProcessingDocument && (
+          <div className="px-4 py-2 bg-gray-800 flex items-center space-x-3 text-sm border-b border-gray-700 text-text-secondary">
+            <div className="w-5 h-5 relative">
+              <div className="absolute inset-0 rounded-full border-2 border-primary border-t-transparent animate-spin"></div>
+            </div>
+            <div className="flex-1">
+              <div className="flex justify-between items-center mb-1">
+                <span>Processing document...</span>
+                <span className="text-xs">{documentProcessingProgress}%</span>
+              </div>
+              <div className="h-1 bg-gray-700 rounded-full overflow-hidden">
+                <div 
+                  className="h-full bg-primary transition-all duration-300 ease-out rounded-full" 
+                  style={{ width: `${documentProcessingProgress}%` }}
+                ></div>
+              </div>
+            </div>
+          </div>
+        )}
+        {error && (
+          <div className="px-4 py-2 bg-gray-800 flex items-center space-x-2 text-sm border-b border-gray-700">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-red-400" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
             </svg>
-          </button>
-        </div>
-      )}
+            <span>{error}</span>
+            <button 
+              onClick={() => setError(null)}
+              className="ml-auto text-gray-400 hover:text-white"
+              aria-label="Dismiss error"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+              </svg>
+            </button>
+          </div>
+        )}
+        {activeContext && activeDocumentName && !isProcessingDocument && (
+          <div className="px-4 py-2 bg-gray-800 flex items-center space-x-2 text-sm border-b border-gray-700">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-primary" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clipRule="evenodd" />
+            </svg>
+            <span>Using document context: {activeDocumentName}</span>
+            <button 
+              onClick={() => { setActiveContext(null); setActiveDocumentName(null); }}
+              className="ml-auto text-gray-400 hover:text-white"
+              aria-label="Remove document context"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+              </svg>
+            </button>
+          </div>
+        )}
+      </div>
 
-      {/* Main messages container */}
-      <div className="flex-grow overflow-y-auto p-4 space-y-4">
-        {/* Welcome screen for new chats */}
+      {/* Main messages container - Should grow and scroll */}
+      {/* Apply flex-grow and overflow-y-auto here */}
+      <div className="flex-grow overflow-y-auto px-4 pt-4 pb-2 space-y-4">
+        {/* Welcome screen or Messages */}
         {showWelcome ? (
           <div className="flex flex-col items-center justify-center h-full text-center py-8">
             {/* HowToUsePanel and upload message and buttons are now sticky above, so nothing here */}
           </div>
         ) : (
-          <div className="w-full h-full">
-            {/* Messages container with improved styling */}
-            <div className="px-4 pt-6 pb-20 h-full flex flex-col overflow-y-auto space-y-6">
-              {/* Map and render each message using ChatMessage component */}
-              {messages.map((message) => (
-                 <ChatMessage
-                   key={message.id}
-                   message={message}
-                   isStreaming={message.isStreaming}
-                   // Pass down relevant handlers, including onInsertContent
-                   onInsertContent={onInsertContent} // <-- Pass prop here
-                   // Add other handlers as needed (onEditMessage, onRegenerateResponse, etc.)
-                   onCopyContent={(content) => navigator.clipboard.writeText(content)}
-                   onRegenerateResponse={(messageId) => {
-                     // Find the user message that preceded this AI message
-                     const messageIndex = messages.findIndex(m => m.id === messageId);
-                     if (messageIndex > 0) {
-                       const userMessage = messages[messageIndex - 1];
-                       if (userMessage.role === 'user') {
-                         // Remove the AI message
-                         setMessages(prevMessages => {
-                           const newMessages = [...prevMessages];
-                           newMessages.splice(messageIndex, 1);
-                           return newMessages;
-                         });
-                         // Regenerate using the same user message, but suppress adding a new user message
-                         handleSendMessage(userMessage.content, undefined, undefined, true);
-                       }
-                     }
-                   }}
-                   // onEditMessage={(messageId, newContent) => handleEditMessage(messageId, newContent)} // Example if needed
-                 />
-              ))}
-
-              {/* Old direct rendering logic - commented out or removed */} 
-              {/* {messages.map((message, idx) => { ... })} */}
-
-            </div>
-          </div>
+          // Map and render each message using ChatMessage component
+          messages.map((message) => (
+              <ChatMessage
+                key={message.id}
+                message={message}
+                isStreaming={message.isStreaming}
+                // Pass down relevant handlers, including onInsertContent
+                onInsertContent={onInsertContent} // <-- Pass prop here
+                // Add other handlers as needed (onEditMessage, onRegenerateResponse, etc.)
+                onCopyContent={(content) => navigator.clipboard.writeText(content)}
+                onRegenerateResponse={(messageId) => {
+                  // Find the user message that preceded this AI message
+                  const messageIndex = messages.findIndex(m => m.id === messageId);
+                  if (messageIndex > 0) {
+                    const userMessage = messages[messageIndex - 1];
+                    if (userMessage.role === 'user') {
+                      // Remove the AI message
+                      setMessages(prevMessages => {
+                        const newMessages = [...prevMessages];
+                        newMessages.splice(messageIndex, 1);
+                        return newMessages;
+                      });
+                      // Regenerate using the same user message, but suppress adding a new user message
+                      handleSendMessage(userMessage.content, undefined, undefined, true);
+                    }
+                  }
+                }}
+                // onEditMessage={(messageId, newContent) => handleEditMessage(messageId, newContent)} // Example if needed
+              />
+          ))
         )}
         
         {/* Invisible element to scroll to */}
@@ -825,14 +790,16 @@ function ChatInterface({
         </div>
       )}
 
-      {/* Input area at the bottom - add flex-shrink-0 */}
-      <div className="px-4 py-2 bg-transparent sticky bottom-0 flex-shrink-0">
+      {/* Input area at the bottom - flex-shrink-0 ensures it doesn't shrink */}
+      {/* Added bg-background to match the theme */}
+      <div className="flex-shrink-0 px-4 py-2 bg-background sticky bottom-0">
         <ChatInput 
           onSendMessage={handleSendMessage} 
           disabled={isUIDisabled} 
           onFileUpload={handleFiles}
           isNewChat={showWelcome}
           messagesCount={messages.length}
+          initialValue={initialInputValue}
         />
       </div>
 
@@ -858,6 +825,31 @@ function ChatInterface({
         context="document"
         initialContent={aiDraftContent || ''}
       />
+
+      {/* Tips Modal */}
+      <Modal isOpen={showTipsModal} onClose={() => setShowTipsModal(false)} size="2xl">
+        <ModalOverlay />
+        <ModalContent>
+          <ModalHeader>Tips for Using the Assistant</ModalHeader>
+          <ModalCloseButton onClick={() => setShowTipsModal(false)} />
+          <ModalBody>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 py-4">
+              {howToUseTips.map((item, idx) => (
+                <div key={idx} className="flex flex-col items-center text-center p-4 bg-surface-lighter rounded-lg h-full border border-gray-700">
+                  <div className="mb-3 p-2 bg-surface rounded-full">{item.icon}</div>
+                  <div className="font-medium text-text-primary mb-1.5">{item.title}</div>
+                  <div className="text-text-secondary text-sm mb-3 flex-grow">{item.desc}</div>
+                  <div className="bg-surface-darker text-primary text-xs px-2 py-1 rounded font-mono select-all w-full truncate">{item.example}</div>
+                </div>
+              ))}
+            </div>
+            {/* Add the placeholder text hints here */}
+            <div className="mt-4 pt-4 border-t border-gray-700 text-center text-text-secondary text-sm">
+              Shift+Enter = new line • / = Commands • Attach files with document button
+            </div>
+          </ModalBody>
+        </ModalContent>
+      </Modal>
 
     </div>
   );

@@ -1,678 +1,275 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import DocumentUpload from '../components/documents/DocumentUpload';
-import DocumentList from '../components/documents/DocumentList';
-import DocumentGrid from '../components/documents/DocumentGrid';
-import TemplateList from '../components/templates/TemplateList';
-import TemplateGrid from '../components/templates/TemplateGrid';
-import { Document } from '../types/document';
-import DraftManagement from '../components/documents/drafting/DraftManagement';
-import { DocumentTemplate, getAvailableTemplates, duplicateTemplate as duplicateTemplateService } from '@/services/templateService';
-import AIDraftModal from '../components/ai/AIDraftModal';
-import * as documentService from '@/services/documentService';
+import React, { useEffect, useCallback, useState, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useAtomValue, useSetAtom } from 'jotai';
+import { activeCaseIdAtom, caseDocumentsAtom, isCaseDocumentsLoadingAtom, caseDocumentsFetchErrorAtom, loadCaseDocumentsAtom } from '@/atoms/appAtoms';
+import DocumentList from '@/components/documents/DocumentList';
+import DocumentGrid from '@/components/documents/DocumentGrid';
+import UploadModal from '@/components/documents/UploadModal';
+import NewAIDraftModal from '@/components/documents/NewAIDraftModal';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
-import { Icons } from '@/components/ui/Icons';
-import { Spinner } from '@/components/ui/Spinner';
+import { Search, ArrowUpDown, Upload, Sparkles, PlusIcon, List, LayoutGrid } from 'lucide-react';
 
-type SortKey = 'filename' | 'uploadedAt' | 'templateName' | 'templateCategory'; 
+const PLACEHOLDER_SELECT_CASE = "Select a case to view documents.";
+// const PLACEHOLDER_SELECT_DOCUMENT = "Select a document from the list to view its details."; // Removed as preview pane is gone
+const PLACEHOLDER_NO_DOCUMENTS = "No documents found in this case.";
+
+// Define types for sorting documents
+type DocumentSortKey = 'filename' | 'uploadedAt' | 'contentType'; // Example keys
 type SortOrder = 'asc' | 'desc';
+// Define type for view mode
 type ViewMode = 'list' | 'grid';
 
-const Documents: React.FC = () => {
-  const { caseId } = useParams<{ caseId?: string }>();
+const DocumentsPage: React.FC = () => {
   const navigate = useNavigate();
+  const activeCaseId = useAtomValue(activeCaseIdAtom);
+  const documents = useAtomValue(caseDocumentsAtom);
+  const isDocumentsLoading = useAtomValue(isCaseDocumentsLoadingAtom);
+  const documentsError = useAtomValue(caseDocumentsFetchErrorAtom);
+  const triggerLoadDocuments = useSetAtom(loadCaseDocumentsAtom);
 
-  // View/UI State
-  const [activeTab, setActiveTab] = useState<'documents' | 'templates'>('documents');
-  const [showUploadModal, setShowUploadModal] = useState(false);
-  const [showDraftEditor, setShowDraftEditor] = useState(false);
-  const [showAIDraftModal, setShowAIDraftModal] = useState(false);
-  const [aiDraftContext, setAIDraftContext] = useState<'template' | 'document'>('template');
-  const [viewMode, setViewMode] = useState<ViewMode>('list');
-  const [viewModeTemplates, setViewModeTemplates] = useState<ViewMode>('list');
-  
-  // Data State (Documents)
-  const [documents, setDocuments] = useState<Document[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
-  
-  // Data State (Templates)
-  const [templates, setTemplates] = useState<DocumentTemplate[]>([]);
-  const [isLoadingTemplates, setIsLoadingTemplates] = useState(false);
-  const [errorTemplates, setErrorTemplates] = useState<string | null>(null);
-  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
-  
-  // Filtering/Sorting State (Documents)
-  const [filterQuery, setFilterQuery] = useState('');
-  const [sortKey, setSortKey] = useState<SortKey>('filename');
-  const [sortOrder, setSortOrder] = useState<SortOrder>('asc');
-  
-  // Filtering/Sorting State (Templates)
-  const [filterQueryTemplates, setFilterQueryTemplates] = useState('');
-  const [sortKeyTemplates, setSortKeyTemplates] = useState<SortKey>('templateName');
-  const [sortOrderTemplates, setSortOrderTemplates] = useState<SortOrder>('asc');
+  // State for filtering and sorting documents
+  const [filterQueryDocuments, setFilterQueryDocuments] = useState('');
+  const [sortKeyDocuments, setSortKeyDocuments] = useState<DocumentSortKey>('filename');
+  const [sortOrderDocuments, setSortOrderDocuments] = useState<SortOrder>('asc');
 
-  const [refreshTrigger, setRefreshTrigger] = useState(0);
+  // State for view mode
+  const [viewModeDocuments, setViewModeDocuments] = useState<ViewMode>('list');
 
-  // Refresh trigger specifically for templates
-  const [refreshTemplatesTrigger, setRefreshTemplatesTrigger] = useState(0);
+  // State for modals
+  const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
+  const [isAIDraftModalOpen, setIsAIDraftModalOpen] = useState(false);
 
-  // Fetch documents 
   useEffect(() => {
-    if (!caseId) {
-      setDocuments([]);
-      setError(null);
-      setIsLoading(false);
-      setSelectedDocumentId(null);
-      return;
+    if (activeCaseId) {
+      triggerLoadDocuments(activeCaseId);
     }
-    const fetchDocuments = async () => {
-      setIsLoading(true);
-      setError(null);
-      setSelectedDocumentId(null);
-      try {
-        const { data: fetchedDocuments, error: fetchError } = await documentService.getUserDocuments(caseId);
-        if (fetchError) throw fetchError;
-        setDocuments(fetchedDocuments || []);
-      } catch (err) {
-        console.error("Error fetching documents:", err);
-        setError("Failed to load documents.");
-      } finally {
-        setIsLoading(false);
-      }
-    };
-    fetchDocuments();
-  }, [caseId, refreshTrigger]);
+  }, [activeCaseId, triggerLoadDocuments]);
 
-  // Fetch templates
-  useEffect(() => {
-    if (activeTab === 'templates') {
-      const fetchTemplates = async () => {
-        setIsLoadingTemplates(true);
-        setErrorTemplates(null);
-        // Don't clear selectedTemplateId here, keep it selected after refresh
-        try {
-          const { data: fetchedTemplates, error: fetchError } = await getAvailableTemplates(); 
-          if (fetchError) throw fetchError;
-          setTemplates(fetchedTemplates || []);
-        } catch (err) {
-          console.error("Error fetching templates:", err);
-          setErrorTemplates("Failed to load templates.");
-        } finally {
-          setIsLoadingTemplates(false);
-        }
-      };
-      fetchTemplates();
-    } 
-  }, [activeTab, refreshTemplatesTrigger]);
+  // Handle selecting a document from the list/grid (navigate to viewer)
+  const handleSelectDocument = useCallback((docId: string) => {
+    navigate(`/view/document/${docId}`); // Navigate to the viewer page
+  }, [navigate]); // Add navigate to dependency array
 
-  // Memoized processed documents
+  // Get the ID of the document currently selected for viewing (REMOVED - viewer is now separate page)
+  // const activeDocumentId = activeEditorItem?.type === 'document' ? activeEditorItem.id : null;
+  const activeDocumentId = null; // Keep prop for list/grid but it's not used for viewer display here
+
+  // --- Filtering and Sorting Logic for Documents ---
   const processedDocuments = useMemo(() => {
-    let processed = [...documents];
-    if (filterQuery) {
-      processed = processed.filter(doc => 
-        doc.filename?.toLowerCase().includes(filterQuery.toLowerCase())
-      );
-    }
-    processed.sort((a, b) => {
-      let valA: string | Date | number | null = null;
-      let valB: string | Date | number | null = null;
-      if (sortKey === 'filename') {
-        valA = a.filename?.toLowerCase() || '';
-        valB = b.filename?.toLowerCase() || '';
-      } else if (sortKey === 'uploadedAt') {
-        valA = a.uploadedAt ? new Date(a.uploadedAt).getTime() : null;
-        valB = b.uploadedAt ? new Date(b.uploadedAt).getTime() : null;
-      }
-      let comparison = 0;
-      if (valA !== null && valB !== null) {
-        if (valA < valB) comparison = -1;
-        if (valA > valB) comparison = 1;
-      } else if (valA !== null) {
-        comparison = -1;
-      } else if (valB !== null) {
-        comparison = 1;
-      }
-      return sortOrder === 'asc' ? comparison : comparison * -1;
-    });
-    return processed;
-  }, [documents, filterQuery, sortKey, sortOrder]);
+    let processed = [...(documents || [])]; // Use documents atom value
 
-  // Memoized processedTemplates
-  const processedTemplates = useMemo(() => {
-    let processed = [...templates];
-    if (filterQueryTemplates) {
-      processed = processed.filter(tmpl => 
-        tmpl.name?.toLowerCase().includes(filterQueryTemplates.toLowerCase()) ||
-        tmpl.description?.toLowerCase().includes(filterQueryTemplates.toLowerCase()) ||
-        tmpl.category?.toLowerCase().includes(filterQueryTemplates.toLowerCase())
+    // Filter
+    if (filterQueryDocuments) {
+      const query = filterQueryDocuments.toLowerCase();
+      processed = processed.filter(doc => 
+        doc.filename?.toLowerCase().includes(query) ||
+        doc.contentType?.toLowerCase().includes(query)
+        // Add more fields to filter if needed (e.g., tags, extracted text snippet?)
       );
     }
+
+    // Sort
     processed.sort((a, b) => {
       let valA: string | number | null = null;
       let valB: string | number | null = null;
-      if (sortKeyTemplates === 'templateName') {
-        valA = a.name?.toLowerCase() || '';
-        valB = b.name?.toLowerCase() || '';
-      } else if (sortKeyTemplates === 'templateCategory') {
-        valA = a.category?.toLowerCase() || '';
-        valB = b.category?.toLowerCase() || '';
+
+      switch (sortKeyDocuments) {
+          case 'filename':
+              valA = a.filename?.toLowerCase() || '';
+              valB = b.filename?.toLowerCase() || '';
+              break;
+          case 'contentType':
+              valA = a.contentType?.toLowerCase() || '';
+              valB = b.contentType?.toLowerCase() || '';
+              break;
+          case 'uploadedAt':
+              // Ensure uploadedAt is treated consistently (string -> Date -> number)
+              valA = a.uploadedAt ? new Date(a.uploadedAt).getTime() : 0;
+              valB = b.uploadedAt ? new Date(b.uploadedAt).getTime() : 0;
+              break;
       }
+      
       let comparison = 0;
       if (valA !== null && valB !== null) {
         if (valA < valB) comparison = -1;
         if (valA > valB) comparison = 1;
       } else if (valA !== null) {
-        comparison = -1;
+        comparison = -1; 
       } else if (valB !== null) {
         comparison = 1;
       }
-      return sortOrderTemplates === 'asc' ? comparison : comparison * -1;
+
+      return sortOrderDocuments === 'asc' ? comparison : comparison * -1;
     });
+
     return processed;
-  }, [templates, filterQueryTemplates, sortKeyTemplates, sortOrderTemplates]);
+  }, [documents, filterQueryDocuments, sortKeyDocuments, sortOrderDocuments]);
 
-  // Handlers
-  const handleUploadComplete = (success: boolean) => {
-    if (success) {
-      setRefreshTrigger(prev => prev + 1);
-      setTimeout(() => { setShowUploadModal(false); }, 1500);
-    }
-  };
-
-  const handleDocumentSelected = useCallback((docId: string) => {
-    setSelectedDocumentId(docId);
-  }, []);
-
-  const handleSelectTemplate = useCallback((templateId: string) => {
-    setSelectedTemplateId(templateId);
-  }, []);
-
-  const handleDocumentDeleted = () => {
-    setSelectedDocumentId(null);
-    setRefreshTrigger(prev => prev + 1);
-  };
-
-  const handleDeleteDocument = async () => {
-    if (!selectedDocumentId) return;
-    const documentToDelete = documents.find(doc => doc.id === selectedDocumentId);
-    if (!documentToDelete) return;
-    if (window.confirm(`Are you sure you want to delete "${documentToDelete.filename}"?`)) {
-      setIsLoading(true);
-      try {
-        const { error: deleteError } = await documentService.deleteDocument(selectedDocumentId);
-        if (deleteError) throw deleteError;
-        console.log(`Document deleted`);
-        handleDocumentDeleted();
-      } catch (err) {
-        console.error("Error deleting document:", err);
-        alert(`Failed to delete document.`);
-        setError("Failed to delete document.");
-      } finally {
-        setIsLoading(false);
-      }
-    }
-  };
-
-  const handleDownloadDocument = async () => {
-    if (!selectedDocumentId) return;
-    console.log('Download functionality TBD');
-  };
-
-  // New handler for deleting templates
-  const handleDeleteTemplate = async () => {
-    if (!selectedTemplateId) return;
-    
-    const templateToDelete = templates.find(tmpl => tmpl.id === selectedTemplateId);
-    if (!templateToDelete) return;
-
-    if (window.confirm(`Are you sure you want to delete template "${templateToDelete.name}"? This action cannot be undone.`)) {
-      setIsLoadingTemplates(true); // Use template loading state
-      try {
-        // --- This service function needs to be created --- 
-        const { deleteTemplate } = await import('@/services/templateService'); 
-        const { error: deleteError } = await deleteTemplate(selectedTemplateId);
-        // -------------------------------------------------
-        
-        if (deleteError) throw deleteError;
-
-        console.log(`Template "${templateToDelete.name}" deleted successfully.`);
-        setSelectedTemplateId(null); // Clear selection
-        // Refresh the list by filtering out the deleted one manually
-        // Or trigger a re-fetch if preferred (less immediate)
-        // setTemplates(prev => prev.filter(tmpl => tmpl.id !== selectedTemplateId)); 
-        setRefreshTemplatesTrigger(prev => prev + 1); // Use specific trigger
-
-      } catch (err) {
-        console.error("Error deleting template:", err);
-        const message = err instanceof Error ? err.message : 'Unknown error';
-        alert(`Failed to delete template: ${message}`);
-        setErrorTemplates("Failed to delete template."); // Use template error state
-      } finally {
-        setIsLoadingTemplates(false);
-      }
-    }
-  };
-
-  // Handler for duplicating templates
-  const handleDuplicateTemplate = async () => {
-    if (!selectedTemplateId) return;
-
-    const templateToDuplicate = templates.find(tmpl => tmpl.id === selectedTemplateId);
-    if (!templateToDuplicate) return;
-
-    if (window.confirm(`Are you sure you want to duplicate template "${templateToDuplicate.name}"?`)) {
-      setIsLoadingTemplates(true);
-      try {
-        const { data: newTemplate, error: duplicateError } = await duplicateTemplateService(selectedTemplateId);
-        
-        if (duplicateError) throw duplicateError;
-
-        console.log(`Template "${templateToDuplicate.name}" duplicated successfully as "${newTemplate?.name}".`);
-        setRefreshTemplatesTrigger(prev => prev + 1); // Refresh list
-        // Optionally select the new template after refresh
-        // setSelectedTemplateId(newTemplate?.id || null); 
-
-      } catch (err) {
-        console.error("Error duplicating template:", err);
-        const message = err instanceof Error ? err.message : 'Unknown error';
-        alert(`Failed to duplicate template: ${message}`);
-        setErrorTemplates("Failed to duplicate template.");
-      } finally {
-        setIsLoadingTemplates(false);
-      }
-    }
-  };
-
-  // Sort toggle for Documents
-  const handleSortToggle = useCallback(() => {
-    setSortOrder(prevOrder => {
-      if (prevOrder === 'desc') {
-        setSortKey(prevKey => prevKey === 'filename' ? 'uploadedAt' : 'filename');
-        return 'asc'; 
+  // Handler for sorting documents
+  const handleSortDocuments = (key: DocumentSortKey) => {
+      if (key === sortKeyDocuments) {
+          setSortOrderDocuments(prev => prev === 'asc' ? 'desc' : 'asc');
       } else {
-        return 'desc';
+          setSortKeyDocuments(key);
+          setSortOrderDocuments('asc');
       }
-    });
-  }, []);
+  };
 
-  // Sort toggle for Templates
-  const handleSortToggleTemplates = useCallback(() => {
-    setSortOrderTemplates(prevOrder => {
-      if (prevOrder === 'desc') {
-        setSortKeyTemplates(prevKey => prevKey === 'templateName' ? 'templateCategory' : 'templateName');
-        return 'asc'; 
-      } else {
-        return 'desc';
+  // Upload Document handler (opens modal)
+  const handleUploadDocument = () => {
+    if (!activeCaseId) return;
+    setIsUploadModalOpen(true);
+  };
+
+  // Handler for clicking "Create New Document" (navigates to editor)
+  const handleCreateNewDocument = () => {
+    if (!activeCaseId) return; // Need a case context
+    navigate('/edit/document'); // Navigate to the new document editor page
+  };
+
+  // Handler for clicking "Create AI Document Draft"
+  const handleCreateAIDocumentDraft = () => {
+    if (!activeCaseId) return;
+    setIsAIDraftModalOpen(true);
+  };
+
+  // Close handler for AI Draft modal 
+  const handleAIDraftModalClose = () => {
+      setIsAIDraftModalOpen(false);
+      // Refresh might happen in onSuccess now
+  };
+
+   // Success handler for AI Draft modal
+   const handleAIDraftSuccess = (newDraftId?: string) => { 
+      setIsAIDraftModalOpen(false);
+      console.log('AI Draft created:', newDraftId); 
+      if(activeCaseId) triggerLoadDocuments(activeCaseId); // Refresh list on success
+      // Navigate to edit the new draft if ID is returned
+      if(newDraftId) {
+         navigate(`/edit/document/${newDraftId}`);
       }
-    });
-  }, []);
-  
-  // Derived state for selected objects
-  const selectedDocument = useMemo(() => {
-      return documents.find(doc => doc.id === selectedDocumentId) || null;
-  }, [documents, selectedDocumentId]);
-
-  const selectedTemplateObject = useMemo(() => {
-      return templates.find(tmpl => tmpl.id === selectedTemplateId) || null;
-  }, [templates, selectedTemplateId]);
-
-  // Derived state for button titles
-  const sortButtonTitle = useMemo(() => {
-      const keyText = sortKey === 'filename' ? 'Name' : 'Date';
-      const orderText = sortOrder === 'asc' ? 'Asc' : 'Desc';
-      return `Sort by ${keyText} (${orderText})`;
-  }, [sortKey, sortOrder]);
-
-  const sortButtonTitleTemplates = useMemo(() => {
-      const keyText = sortKeyTemplates === 'templateName' ? 'Name' : 'Category';
-      const orderText = sortOrderTemplates === 'asc' ? 'Asc' : 'Desc';
-      return `Sort by ${keyText} (${orderText})`;
-  }, [sortKeyTemplates, sortOrderTemplates]);
+    };
 
   return (
-    <div className="h-full flex flex-col p-4">
-      <div className="flex justify-between items-center mb-4 flex-shrink-0">
-        <h1 className="text-xl font-semibold text-text-primary">
-          {activeTab === 'documents' ? 'Documents' : 'Templates'}
-          {caseId && activeTab === 'documents' && 
-             <span className='text-sm font-normal text-text-secondary ml-2'>(Case ID: {caseId})</span>
-           }
-        </h1>
-      </div>
-
-      <div className="mb-4 flex flex-col sm:flex-row justify-between items-start gap-4 flex-shrink-0">
-        <div className="flex border-b border-gray-700">
-          <button
-            className={`px-4 pb-2 pt-1 font-medium ${activeTab === 'documents' ? 'text-primary border-b-2 border-primary' : 'text-text-secondary hover:text-text-primary'}`}
-            onClick={() => setActiveTab('documents')}
-          >
-            Documents
-          </button>
-          <button
-            className={`px-4 pb-2 pt-1 font-medium ${activeTab === 'templates' ? 'text-primary border-b-2 border-primary' : 'text-text-secondary hover:text-text-primary'}`}
-            onClick={() => setActiveTab('templates')}
-          >
-            Templates
-          </button>
-        </div>
-        <div className="flex gap-2 mt-1 sm:mt-0">
-          <Button
-            variant="primary"
-            size="sm"
-            onClick={() => {
-              setAIDraftContext(activeTab === 'documents' ? 'document' : 'template');
-              setShowAIDraftModal(true);
-            }}
-           >
-             <Icons.Sparkles className="h-4 w-4 mr-2" />
-             AI Draft
-           </Button>
-           {activeTab === 'documents' && (
-             <Button
-               variant="secondary"
-               size="sm"
-               onClick={() => setShowUploadModal(true)}
-             >
-               <Icons.Upload className="h-4 w-4 mr-2" />
-               Upload
-             </Button>
-           )}
+    <div className="h-full flex flex-col bg-neutral-100 dark:bg-background">
+      <div className="flex justify-between items-center flex-shrink-0 p-4 md:p-6 border-b border-neutral-200 dark:border-gray-700">
+        <h1 className="text-2xl font-semibold text-neutral-900 dark:text-text-primary">Documents</h1>
+        <div className="flex items-center gap-2">
+          <Button onClick={handleUploadDocument} variant="outline" size="sm" disabled={!activeCaseId}> 
+            <Upload className="h-4 w-4 mr-2" />
+            Upload Document
+          </Button>
+          <Button onClick={handleCreateAIDocumentDraft} variant="outline" size="sm" disabled={!activeCaseId}>
+             <Sparkles className="h-4 w-4 mr-2" />
+             Create AI Document Draft
+          </Button>
+          <Button onClick={handleCreateNewDocument} size="sm" disabled={!activeCaseId}>
+             <PlusIcon className="h-4 w-4 mr-2" />
+             Create New Document
+          </Button>
         </div>
       </div>
 
-      {activeTab === 'documents' ? (
-        <div className="flex-1 flex flex-col md:flex-row gap-4 overflow-hidden">
-          <div className="w-full md:w-2/5 lg:w-1/3 flex-shrink-0 overflow-hidden flex flex-col border border-gray-700 rounded-lg bg-surface">
-            <div className="flex items-center gap-2 p-2 border-b border-gray-700 flex-shrink-0">
-              <Input
-                type="text" placeholder="Filter Documents..." value={filterQuery}
-                onChange={(e) => setFilterQuery(e.target.value)} className="flex-grow text-xs h-8"
-              />
-              <div className="flex items-center border border-neutral-600 rounded-md flex-shrink-0">
-                 <Button
-                   variant="ghost" size="sm" onClick={handleSortToggle} 
-                   className="px-2 py-1 h-8 text-xs rounded-r-none border-r border-neutral-600"
-                   title={sortButtonTitle}
-                 >
-                   {sortOrder === 'asc' ? <Icons.ChevronUp className="h-4 w-4" /> : <Icons.ChevronDown className="h-4 w-4" />}
-                 </Button>
-                 <Button
-                   variant={viewMode === 'list' ? "secondary" : "ghost"} size="sm" onClick={() => setViewMode('list')} 
-                   className="px-2 py-1 h-8 text-xs rounded-none border-r border-neutral-600" title="List View"
-                 >
-                   <Icons.List className="h-4 w-4" />
-                 </Button>
-                 <Button
-                   variant={viewMode === 'grid' ? "secondary" : "ghost"} size="sm" onClick={() => setViewMode('grid')} 
-                   className="px-2 py-1 h-8 text-xs rounded-l-none" title="Grid View"
-                 >
-                   <Icons.File className="h-4 w-4" />
-                 </Button>
-               </div>
-            </div>
-            <div className="flex-1 overflow-y-auto">
-              {viewMode === 'list' ? (
-                <DocumentList 
-                  documents={processedDocuments} 
-                  isLoading={isLoading} 
-                  error={error} 
-                  activeDocumentId={selectedDocumentId} 
-                  onSelectDocument={handleDocumentSelected}
+      <div className="flex-grow grid grid-cols-1 md:grid-cols-3 gap-6 overflow-hidden p-4 md:p-6 pt-4">
+        <div className="md:col-span-3 bg-white dark:bg-surface-darker shadow rounded-lg flex flex-col overflow-hidden border border-neutral-200 dark:border-gray-700">
+          <div className="p-4 border-b border-gray-200 dark:border-gray-700">
+            <h2 className="text-lg font-semibold mb-3 text-neutral-900 dark:text-text-primary">Case Documents</h2>
+            <div className="flex items-center gap-2">
+              <div className="relative flex-grow">
+                <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                <Input 
+                  type="text"
+                  placeholder="Filter documents..."
+                  value={filterQueryDocuments}
+                  onChange={(e) => setFilterQueryDocuments(e.target.value)}
+                  className="pl-8 pr-2 py-1.5 text-sm w-full dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                  disabled={!activeCaseId}
                 />
-              ) : (
-                <DocumentGrid 
-                  documents={processedDocuments} 
-                  isLoading={isLoading} 
-                  error={error} 
-                  activeDocumentId={selectedDocumentId} 
-                  onSelectDocument={handleDocumentSelected}
-                />
-              )}
-            </div>
-          </div>
-
-          <div className="w-full md:w-3/5 lg:w-2/3 flex-grow overflow-auto bg-surface rounded-lg border border-gray-700">
-             <div className="h-full flex flex-col">
-               {selectedDocument ? (
-                 <>
-                   <div className="p-3 border-b border-gray-700 flex justify-between items-start flex-shrink-0">
-                     <div>
-                       <h2 className="text-base font-medium text-text-primary truncate" title={selectedDocument.filename}>
-                         {selectedDocument.filename}
-                       </h2>
-                       <p className="text-xs text-text-secondary mt-1">
-                         Uploaded: {selectedDocument.uploadedAt ? new Date(selectedDocument.uploadedAt).toLocaleDateString() : 'N/A'}
-                       </p>
-                     </div>
-                     <div className="flex items-center gap-1 flex-shrink-0 ml-2">
-                       <Button variant="ghost" size="sm" onClick={handleDownloadDocument} title="Download" className="p-1 h-auto">
-                         <Icons.ChevronDown className="h-4 w-4" />
-                       </Button>
-                       <Button variant="ghost" size="sm" onClick={handleDeleteDocument} title="Delete" 
-                         className="p-1 h-auto text-red-500 hover:bg-red-500/10 hover:text-red-400" disabled={isLoading} >
-                         <Icons.Trash className="h-4 w-4" />
-                       </Button>
-                     </div>
-                   </div>
-                   <div className="flex-1 overflow-auto p-4">
-                     {selectedDocument.extractedText ? (
-                       <div className="whitespace-pre-wrap text-text-primary text-sm">
-                         {selectedDocument.extractedText}
-                       </div>
-                     ) : (
-                       <div className="h-full flex items-center justify-center">
-                         <div className="text-center">
-                            <p className="text-text-secondary mb-2">
-                              {isLoading ? <Spinner size="sm" /> : 
-                               selectedDocument.processingStatus === 'pending' || selectedDocument.processingStatus === 'processing' ? 'Processing...' :
-                               selectedDocument.processingStatus === 'failed' ? 'Extraction failed.' : 'No text extracted.'}
-                           </p>
-                         </div>
-                       </div>
-                     )}
-                   </div>
-                 </>
-               ) : (
-                 <div className="flex flex-col items-center justify-center h-full p-8 text-center bg-gradient-to-br from-surface to-surface-hover rounded-lg">
-                   <Icons.FileText className="h-16 w-16 text-gray-600 mb-4 opacity-50" />
-                   <h3 className="text-lg font-medium text-text-secondary">No Document Selected</h3>
-                   <p className="text-text-tertiary mt-2 max-w-xs">
-                     Select a document from the list on the left to view its details and available actions.
-                   </p>
-                 </div>
-               )}
-             </div>
-           </div>
-        </div>
-      ) : (
-        <div className="flex-1 flex flex-col md:flex-row gap-4 overflow-hidden">
-          <div className="w-full md:w-2/5 lg:w-1/3 flex-shrink-0 overflow-hidden flex flex-col border border-gray-700 rounded-lg bg-surface">
-            <div className="flex items-center gap-2 p-2 border-b border-gray-700 flex-shrink-0">
-              <Input
-                type="text" placeholder="Filter Templates..." value={filterQueryTemplates}
-                onChange={(e) => setFilterQueryTemplates(e.target.value)} className="flex-grow text-xs h-8"
-              />
-              <div className="flex items-center border border-neutral-600 rounded-md flex-shrink-0">
-                <Button
-                  variant="ghost" size="sm" onClick={handleSortToggleTemplates}
-                  className="px-2 py-1 h-8 text-xs rounded-r-none border-r border-neutral-600"
-                  title={sortButtonTitleTemplates}
+              </div>
+              <div className="flex items-center border border-gray-300 dark:border-gray-600 rounded-md">
+                <Button 
+                  variant={viewModeDocuments === 'list' ? 'secondary' : 'ghost'}
+                  size="sm"
+                  onClick={() => setViewModeDocuments('list')}
+                  className="p-1.5 rounded-r-none border-r border-gray-300 dark:border-gray-600"
+                  title="List View"
+                  disabled={!activeCaseId}
                 >
-                  {sortOrderTemplates === 'asc' ? <Icons.ChevronUp className="h-4 w-4" /> : <Icons.ChevronDown className="h-4 w-4" />}
+                  <List className="h-4 w-4" />
                 </Button>
-                <Button
-                  variant={viewModeTemplates === 'list' ? "secondary" : "ghost"} size="sm" onClick={() => setViewModeTemplates('list')}
-                  className="px-2 py-1 h-8 text-xs rounded-none border-r border-neutral-600" title="List View"
+                <Button 
+                  variant={viewModeDocuments === 'grid' ? 'secondary' : 'ghost'}
+                  size="sm"
+                  onClick={() => setViewModeDocuments('grid')}
+                  className="p-1.5 rounded-l-none"
+                  title="Grid View"
+                  disabled={!activeCaseId}
                 >
-                  <Icons.List className="h-4 w-4" />
-                </Button>
-                <Button
-                  variant={viewModeTemplates === 'grid' ? "secondary" : "ghost"} size="sm" onClick={() => setViewModeTemplates('grid')}
-                  className="px-2 py-1 h-8 text-xs rounded-l-none" title="Grid View"
-                >
-                  <Icons.File className="h-4 w-4" />
+                  <LayoutGrid className="h-4 w-4" />
                 </Button>
               </div>
-            </div>
-            <div className="flex-1 overflow-y-auto">
-              {viewModeTemplates === 'list' ? (
-                <TemplateList 
-                  templates={processedTemplates} 
-                  isLoading={isLoadingTemplates} 
-                  error={errorTemplates}
-                  activeTemplateId={selectedTemplateId} 
-                  onSelectTemplate={handleSelectTemplate}
-                />
-              ) : (
-                <TemplateGrid 
-                  templates={processedTemplates} 
-                  isLoading={isLoadingTemplates} 
-                  error={errorTemplates}
-                  activeTemplateId={selectedTemplateId} 
-                  onSelectTemplate={handleSelectTemplate}
-                />
-              )}
+              <Button 
+                variant="outline"
+                size="sm"
+                onClick={() => handleSortDocuments('filename')}
+                title={`Sort by Filename (${sortKeyDocuments === 'filename' ? sortOrderDocuments : ' '})`}
+                disabled={!activeCaseId}
+              >
+                <ArrowUpDown className="h-4 w-4" />
+              </Button>
             </div>
           </div>
-
-          <div className="w-full md:w-3/5 lg:w-2/3 flex-grow overflow-auto bg-surface rounded-lg border border-gray-700">
-             <div className="h-full flex flex-col">
-                {selectedTemplateObject ? (
-                  <>
-                    <div className="p-3 border-b border-gray-700 flex justify-between items-start flex-shrink-0">
-                       <div>
-                         <h2 className="text-base font-medium text-text-primary truncate" title={selectedTemplateObject.name}>
-                           {selectedTemplateObject.name}
-                         </h2>
-                         <p className="text-xs text-text-secondary mt-1 capitalize">
-                           Category: {selectedTemplateObject.category || 'N/A'}
-                         </p>
-                       </div>
-                       <div className="flex items-center gap-2 flex-shrink-0 ml-2">
-                         <Button 
-                           variant="ghost" size="sm" 
-                           onClick={() => navigate(`/templates/edit/${selectedTemplateObject.id}`)}
-                           title="Edit Template"
-                           className="p-1.5 h-auto"
-                         >
-                           <Icons.Edit className="h-4 w-4" />
-                         </Button>
-                         <Button 
-                           variant="ghost" size="sm" 
-                           onClick={handleDuplicateTemplate}
-                           title="Duplicate Template"
-                           className="p-1.5 h-auto"
-                           disabled={isLoadingTemplates}
-                         >
-                           <Icons.Copy className="h-4 w-4" />
-                         </Button>
-                         <Button 
-                           variant="ghost" size="sm" 
-                           onClick={handleDeleteTemplate}
-                           title="Delete Template"
-                           className="p-1.5 h-auto text-red-500 hover:bg-red-500/10 hover:text-red-400"
-                           disabled={isLoadingTemplates}
-                         >
-                           <Icons.Trash className="h-4 w-4" />
-                         </Button>
-                         <Button variant="secondary" size="sm" 
-                           onClick={() => { setShowDraftEditor(true); }} 
-                           className="h-auto py-1.5 px-3 ml-2"
-                           title="Use this template to start a new document"
-                         >
-                           Use Template
-                         </Button>
-                       </div>
-                     </div>
-                     <div className="flex-1 overflow-auto p-4 space-y-4">
-                       <div>
-                         <h4 className="text-sm font-medium text-text-secondary mb-1">Description</h4>
-                         <p className="text-sm text-text-primary">
-                           {selectedTemplateObject.description || <span className="italic text-text-tertiary">No description provided.</span>}
-                         </p>
-                       </div>
-
-                       {selectedTemplateObject.variables && selectedTemplateObject.variables.length > 0 && (
-                         <div>
-                           <h4 className="text-sm font-medium text-text-secondary mb-2">Variables</h4>
-                           <div className="flex flex-wrap gap-2">
-                             {selectedTemplateObject.variables.map(variable => (
-                               <span key={variable} className="inline-block bg-primary/10 text-primary text-xs font-medium px-2.5 py-0.5 rounded-full">
-                                 {`{{${variable}}}`}
-                               </span>
-                             ))}
-                           </div>
-                         </div>
-                       )}
-
-                       <div>
-                         <h4 className="text-sm font-medium text-text-secondary mb-1">Content Preview</h4>
-                         <pre className="text-xs p-3 bg-surface-hover rounded border border-gray-600 overflow-x-auto whitespace-pre-wrap break-words">
-                           {selectedTemplateObject.content.substring(0, 1500)}{selectedTemplateObject.content.length > 1500 ? '\n\n[Preview truncated]' : ''}
-                         </pre>
-                       </div>
-                     </div>
-                  </>
-                ) : (
-                 <div className="flex flex-col items-center justify-center h-full p-8 text-center bg-gradient-to-br from-surface to-surface-hover rounded-lg">
-                   <Icons.File className="h-16 w-16 text-gray-600 mb-4 opacity-50" />
-                   <h3 className="text-lg font-medium text-text-secondary">No Template Selected</h3>
-                   <p className="text-text-tertiary mt-2 max-w-xs">
-                     Select a template from the list on the left to view its details or create a new document from it.
-                   </p>
-                 </div>
-               )}
-             </div> 
-           </div>
-        </div>
-      )}
-
-      {showUploadModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4">
-          <div className="bg-gray-900 rounded-lg shadow-xl p-6 max-w-lg w-full relative border border-gray-700">
-            <button onClick={() => setShowUploadModal(false)} className="absolute top-3 right-3 text-gray-400 hover:text-white">
-              <Icons.Close className="h-5 w-5" />
-            </button>
-            <h2 className="text-xl font-semibold text-text-primary mb-4">Upload Documents</h2>
-            <DocumentUpload onUploadComplete={handleUploadComplete} />
+          <div className="flex-1 overflow-y-auto p-4">
+            {!activeCaseId ? (
+              <div className="flex-1 flex items-center justify-center h-full">
+                <p className="text-neutral-500 dark:text-text-secondary text-center">{PLACEHOLDER_SELECT_CASE}</p>
+              </div>
+            ) : isDocumentsLoading ? (
+              <div className="flex-1 flex items-center justify-center h-full">
+                <p className="text-neutral-500 dark:text-text-secondary text-center">Loading documents...</p>
+              </div>
+            ) : documentsError ? (
+              <div className="flex-1 flex items-center justify-center h-full">
+                <p className="text-error dark:text-error text-center">Error loading documents.</p>
+              </div>
+            ) : processedDocuments.length === 0 ? (
+              <div className="flex-1 flex items-center justify-center h-full">
+                <p className="text-neutral-500 dark:text-text-secondary text-center">{PLACEHOLDER_NO_DOCUMENTS}</p>
+              </div>
+            ) : viewModeDocuments === 'list' ? (
+              <DocumentList
+                documents={processedDocuments}
+                isLoading={isDocumentsLoading}
+                error={documentsError}
+                activeDocumentId={activeDocumentId}
+                onSelectDocument={handleSelectDocument}
+              />
+            ) : (
+              <DocumentGrid
+                documents={processedDocuments}
+                isLoading={isDocumentsLoading}
+                error={documentsError}
+                activeDocumentId={activeDocumentId}
+                onSelectDocument={handleSelectDocument}
+              />
+            )}
           </div>
         </div>
-      )}
+      </div>
 
-      <AIDraftModal
-        isOpen={showAIDraftModal}
-        onClose={() => setShowAIDraftModal(false)}
-        context={aiDraftContext}
-        onExport={(content: string) => { console.log('AI Draft exported for potential use:', content); }}
+      <UploadModal
+        isOpen={isUploadModalOpen}
+        onClose={() => setIsUploadModalOpen(false)}
       />
 
-      {showDraftEditor && selectedTemplateObject && (
-        <div className="fixed inset-0 bg-black bg-opacity-80 z-40 flex items-center justify-center p-4">
-          <div className="bg-gray-900 rounded-lg shadow-xl w-full max-w-4xl h-[90vh] flex flex-col relative border border-gray-700">
-             <div className="p-4 border-b border-gray-700 flex justify-between items-center flex-shrink-0">
-                <h2 className="text-lg font-medium text-text-primary">Create Document from Template: {selectedTemplateObject.name}</h2>
-                <button 
-                  onClick={() => setShowDraftEditor(false)} 
-                  className="text-gray-400 hover:text-white p-1 rounded hover:bg-gray-700"
-                  title="Close Editor"
-                >
-                  <Icons.Close className="h-5 w-5" />
-                </button>
-             </div>
-             <div className="flex-1 overflow-auto p-4">
-               <DraftManagement 
-                 documentContext={selectedTemplateObject.content}
-                 caseId={caseId}
-               />
-             </div>
-           </div>
-        </div>
-      )}
+      <NewAIDraftModal
+        isOpen={isAIDraftModalOpen}
+        onClose={handleAIDraftModalClose}
+        onSuccess={handleAIDraftSuccess}
+      />
     </div>
   );
 };
 
-export default Documents;
+export default DocumentsPage;

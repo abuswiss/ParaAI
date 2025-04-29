@@ -11,17 +11,18 @@ const US_STATES = [
   'Wisconsin', 'Wyoming'
 ];
 
-interface AIDraftModalProps {
+export interface AIDraftModalProps {
   isOpen: boolean;
   onClose: () => void;
-  context: 'template' | 'document';
+  context?: 'document' | 'template' | 'general' | null;
   onExport?: (content: string) => void;
   initialContent?: string;
+  onDraftCreated: (draftId: string) => void;
 }
 
 type DocumentType = 'contract' | 'letter' | 'pleading' | 'memorandum' | 'agreement' | 'other';
 
-const AIDraftModal: React.FC<AIDraftModalProps> = ({ isOpen, onClose, context, onExport, initialContent }) => {
+const AIDraftModal: React.FC<AIDraftModalProps> = ({ isOpen, onClose, context, onExport, initialContent, onDraftCreated }) => {
   const [step, setStep] = useState<'input' | 'draft' | 'refine'>('input');
   const [requirements, setRequirements] = useState('');
   const [docType, setDocType] = useState<DocumentType>('contract');
@@ -112,6 +113,10 @@ const AIDraftModal: React.FC<AIDraftModalProps> = ({ isOpen, onClose, context, o
         });
         if (error || !data) throw error || new Error('Failed to save template');
         setNotification('Template saved successfully!');
+        setTimeout(() => {
+          setNotification(null);
+          onClose();
+        }, 1200);
       } else if (saveMode === 'document') {
         const { data, error } = await createAIDraft(
           draftName || 'Untitled Document',
@@ -119,12 +124,12 @@ const AIDraftModal: React.FC<AIDraftModalProps> = ({ isOpen, onClose, context, o
         );
         if (error || !data) throw error || new Error('Failed to save document draft');
         setNotification('Document draft saved successfully!');
+        if (onDraftCreated) {
+          onDraftCreated(data.id);
+        }
+        onClose();
       }
       setIsLoading(false);
-      setTimeout(() => {
-        setNotification(null);
-        onClose();
-      }, 1200);
     } catch (e: unknown) {
       const errMsg = typeof e === 'object' && e && 'message' in e ? (e as { message?: string }).message : 'Failed to save.';
       setError(errMsg || 'Failed to save.');

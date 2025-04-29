@@ -12,7 +12,7 @@ export interface DocumentMetadata {
   size: number;
   uploadedAt: string;
   caseId?: string;
-  storagePath: string;
+  storagePath: string | null;
   processingStatus: 'pending' | 'processing' | 'completed' | 'failed';
   extractedText?: string;
 }
@@ -218,17 +218,26 @@ export const getDocumentById = async (
   documentId: string
 ): Promise<{ data: DocumentMetadata | null; error: Error | null }> => {
   try {
+    // Assuming RLS is in place, we just need the ID
     const { data, error } = await supabase
       .from('documents')
-      .select('*')
+      .select('*') // Fetch all columns
       .eq('id', documentId)
-      .single();
+      .single(); // Expecting one result
 
     if (error) {
+      if (error.code === 'PGRST116') { // Code for "Not found"
+        return { data: null, error: new Error('Document not found.') };
+      }
       throw error;
     }
 
-    const documentMetadata: DocumentMetadata = {
+    if (!data) {
+        return { data: null, error: new Error('Document not found.') };
+    }
+
+    // Transform to DocumentMetadata interface
+    const document: DocumentMetadata = {
       id: data.id,
       filename: data.filename,
       contentType: data.content_type,
@@ -237,14 +246,14 @@ export const getDocumentById = async (
       caseId: data.case_id,
       storagePath: data.storage_path,
       processingStatus: data.processing_status,
-      extractedText: data.extracted_text,
+      extractedText: data.extracted_text, // Ensure this matches your DB column name
     };
 
-    return { data: documentMetadata, error: null };
+    return { data: document, error: null };
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : 'Unknown error getting document by ID';
+    const message = error instanceof Error ? error.message : 'Unknown error fetching document by ID';
     console.error('Error getting document by ID:', message);
-    return { data: null, error: error instanceof Error ? error : new Error(message) };
+    return { data: null, error: new Error(message) };
   }
 };
 
@@ -721,5 +730,61 @@ export const uploadAndProcessDocument = async (
     // Ensure the caught error is typed correctly
     const typedError = error instanceof PostgrestError ? error : error instanceof Error ? error : new Error(message);
     return { data: null, error: typedError };
+  }
+};
+
+/**
+ * Creates a new document record in the database, typically for manually created documents.
+ */
+export const createDocument = async (
+  userId: string,
+  caseId: string | null, // Case ID can be null if creating outside a case context?
+  initialData: {
+    filename?: string; // Optional initial filename
+    content?: string; // Optional initial content
+  }
+): Promise<{ data: { id: string } | null; error: PostgrestError | Error | null }> => {
+  try {
+    if (!userId) {
+      throw new Error('User ID is required to create a document.');
+    }
+
+    const newDocument = {
+      owner_id: userId,
+      case_id: caseId,
+      filename: initialData.filename || 'Untitled Document', // Default filename
+      storage_path: null, // No initial storage path for created docs
+      content_type: 'text/html', // Assume HTML content from editor
+      file_type: 'html',
+      size: initialData.content?.length || 0, // Estimate size based on content length
+      file_size: initialData.content?.length || 0,
+      processing_status: 'completed' as const, // Starts as completed since no processing needed
+      is_deleted: false,
+      uploaded_at: new Date().toISOString(),
+      extracted_text: initialData.content || '<p></p>', // Store initial content directly
+    };
+
+    const { data, error } = await supabase
+      .from('documents')
+      .insert(newDocument)
+      .select('id') // Select only the ID
+      .single(); // Expecting a single row back
+
+    if (error) {
+      console.error('Error creating document record:', error);
+      return { data: null, error };
+    }
+
+    if (!data) {
+        throw new Error('Failed to create document: No ID returned.')
+    }
+
+    console.log(`Document record created successfully with ID: ${data.id}`);
+    return { data: { id: data.id }, error: null };
+
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error creating document';
+    console.error('Create Document Error:', message);
+    return { data: null, error: error instanceof Error ? error : new Error(message) };
   }
 };

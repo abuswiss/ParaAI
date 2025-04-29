@@ -1,19 +1,22 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useSetAtom } from 'jotai';
 import TemplateList from '@/components/templates/TemplateList';
-import TemplateEditor from '@/components/templates/TemplateEditor';
 import { 
     PlusIcon, 
 } from '@/components/ui/Icons';
-import { Upload, Sparkles, List, LayoutGrid, ArrowUpDown, Search } from 'lucide-react';
-import { getAvailableTemplates, DocumentTemplate, importTemplate } from '@/services/templateService';
+import { Upload, Sparkles, List, LayoutGrid, ArrowUpDown, Search, Plus, FileText, Play, Edit } from 'lucide-react';
+import { getAvailableTemplates, getTemplateById, DocumentTemplate } from '@/services/templateService';
 import { Button } from '@/components/ui/Button';
 import TemplateImportModal from '@/components/templates/TemplateImportModal';
 import NewAITemplateDraftModal from '@/components/templates/NewAITemplateDraftModal';
 import UseTemplateModal from '@/components/templates/UseTemplateModal';
-import TemplatePreviewPlaceholder from '@/components/templates/TemplatePreviewPlaceholder'; 
-import TemplatePreview from '@/components/templates/TemplatePreview';
 import { Input } from '@/components/ui/Input';
 import TemplateGrid from '@/components/templates/TemplateGrid';
+import { fillTemplateModalTriggerAtom } from '@/atoms/appAtoms';
+import { Spinner } from '@/components/ui/Spinner';
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/Alert";
+import { AlertTriangle } from 'lucide-react';
 
 // Define types for sorting and view mode
 type TemplateSortKey = 'name' | 'category' | 'createdAt' | 'updatedAt'; // Example keys
@@ -21,10 +24,13 @@ type SortOrder = 'asc' | 'desc';
 type ViewMode = 'list' | 'grid';
 
 const TemplateManager: React.FC = () => {
-  // State for selected template (for preview or edit)
-  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null | undefined>(undefined);
-  // State to track if editor should be shown vs preview
-  const [isEditingTemplate, setIsEditingTemplate] = useState<boolean>(false);
+  const navigate = useNavigate();
+  const [templates, setTemplates] = useState<DocumentTemplate[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [searchTerm, setSearchTerm] = useState('');
+  const triggerFillTemplateModal = useSetAtom(fillTemplateModalTriggerAtom);
+  const [isFetchingContent, setIsFetchingContent] = useState<string | null>(null);
 
   // State for import modal
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
@@ -34,64 +40,43 @@ const TemplateManager: React.FC = () => {
   const [isUseModalOpen, setIsUseModalOpen] = useState(false);
   const [templateToUseId, setTemplateToUseId] = useState<string | null>(null);
 
-  // State for template data
-  const [templates, setTemplates] = useState<DocumentTemplate[]>([]);
-  const [isLoadingTemplates, setIsLoadingTemplates] = useState(true);
-  const [errorTemplates, setErrorTemplates] = useState<string | null>(null);
-  const [refreshTrigger, setRefreshTrigger] = useState(0); // Trigger for re-fetching
-
   // Add state for filtering, sorting, and view mode for templates
   const [viewModeTemplates, setViewModeTemplates] = useState<ViewMode>('list');
   const [filterQueryTemplates, setFilterQueryTemplates] = useState('');
   const [sortKeyTemplates, setSortKeyTemplates] = useState<TemplateSortKey>('name');
   const [sortOrderTemplates, setSortOrderTemplates] = useState<SortOrder>('asc');
 
-  // Fetch templates when component mounts or refreshTrigger changes
   useEffect(() => {
-    setIsLoadingTemplates(true);
-    setErrorTemplates(null);
-    getAvailableTemplates()
-      .then(({ data, error }) => {
-        if (error) throw error;
-        setTemplates(data || []);
-      })
-      .catch(err => {
-        console.error("Error fetching templates:", err);
-        setErrorTemplates("Failed to load templates.");
-      })
-      .finally(() => setIsLoadingTemplates(false));
-  }, [refreshTrigger]);
+    fetchTemplates();
+  }, []);
 
-  // Handler for selecting a template from the list (shows preview)
+  const fetchTemplates = async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const { data, error: fetchError } = await getAvailableTemplates();
+      if (fetchError) throw fetchError;
+      setTemplates(data || []);
+    } catch (err) {
+      console.error("Error fetching templates:", err);
+      setError("Failed to load templates.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Handler for selecting a template from the list (navigate to viewer)
   const handleSelectTemplate = (templateId: string | null) => {
-    setSelectedTemplateId(templateId); // Set the selected ID
-    setIsEditingTemplate(false);     // Show preview, not editor
+    if (templateId) {
+      navigate(`/view/template/${templateId}`); // Navigate to viewer
+    } else {
+      // Handle case where selection is cleared if necessary, though clicking should always have an ID
+    }
   };
 
-  // Handler for clicking the "Create New Template" button (shows editor)
+  // Handler for clicking the "Create New Template" button (navigates to editor)
   const handleCreateNewTemplate = () => {
-      setSelectedTemplateId(null); // Indicate new template
-      setIsEditingTemplate(true);  // Open editor directly
-  };
-  
-  // Handler for clicking the "Edit" button in the preview (shows editor)
-  const handleEditTemplate = (templateId: string) => {
-      // ID should already be selected, just switch to edit mode
-      setSelectedTemplateId(templateId); // Ensure ID is set (might be redundant but safe)
-      setIsEditingTemplate(true);
-  };
-
-  // Handler for returning from editor (Save/Cancel)
-  const handleBackToList = (needsRefresh = false) => {
-    // Keep selectedTemplateId to show preview of just saved/edited item
-    // Or set to undefined if cancelling a *new* template creation
-    if (selectedTemplateId === null) {
-        setSelectedTemplateId(undefined);
-    }
-    setIsEditingTemplate(false); // Switch back to preview/placeholder view
-    if (needsRefresh) {
-        setRefreshTrigger(prev => prev + 1); // Trigger refresh if save was successful
-    }
+      navigate('/edit/template'); // Navigate to the new editor page
   };
   
   // Handler to open the Use Template modal
@@ -104,11 +89,9 @@ const TemplateManager: React.FC = () => {
   const handleCloseUseModal = () => {
       setIsUseModalOpen(false);
       setTemplateToUseId(null);
-      // Optionally trigger refresh if a draft was created?
-      // setRefreshTrigger(prev => prev + 1);
   };
 
-  // --- Filtering and Sorting Logic (Add this) ---
+  // --- Filtering and Sorting Logic (Remains the same) --- 
   const processedTemplates = useMemo(() => {
     let processed = [...templates];
     // Filter
@@ -170,6 +153,38 @@ const TemplateManager: React.FC = () => {
       }
   };
 
+  // Simple close handler for AI Draft modal that refreshes
+  const handleAIDraftModalClose = (refreshNeeded = false) => {
+      setIsAIDraftModalOpen(false);
+      if (refreshNeeded) {
+        fetchTemplates();
+      }
+  };
+
+  // --- Handler for clicking the "Use" (Play) button --- 
+  const handleUseTemplateClick = async (templateId: string) => {
+      if (isFetchingContent === templateId) return; 
+      
+      console.log('[TemplateManager] Use button clicked for:', templateId);
+      setIsFetchingContent(templateId);
+      try {
+          // Fetch the specific template using getTemplateById
+          const { data: template, error } = await getTemplateById(templateId);
+          if (error) throw error;
+          if (!template || !template.content) {
+              throw new Error('Selected template content not found.');
+          }
+          // Set the trigger atom to open the Fill modal
+          triggerFillTemplateModal({ id: template.id, name: template.name, content: template.content }); 
+      } catch (err) {
+          console.error("Error fetching template content for use:", err);
+          alert("Error loading template details to use it."); 
+      } finally {
+          setIsFetchingContent(null); 
+      }
+  };
+  // --------
+
   return (
     <div className="p-4 md:p-6 h-full flex flex-col">
       {/* --- Header Section --- */}
@@ -178,7 +193,7 @@ const TemplateManager: React.FC = () => {
           Template Management
         </h1>
         <div className="flex items-center gap-2">
-          {/* Buttons always visible now, editor is shown in right panel */}
+          {/* Buttons remain the same */}
           <Button onClick={() => setIsImportModalOpen(true)} variant="outline" size="sm">
               <Upload className="h-4 w-4 mr-2" />
               Import Template
@@ -194,11 +209,11 @@ const TemplateManager: React.FC = () => {
         </div>
       </div>
       
-      {/* --- Two-Column Layout --- */}
+      {/* --- Two-Column Layout Adjusted to Single Column --- */}
       <div className="flex-grow grid grid-cols-1 md:grid-cols-3 gap-6 overflow-hidden">
         
-        {/* Left Column (Template List/Grid) */}
-        <div className="md:col-span-1 bg-white dark:bg-gray-800 shadow rounded-lg flex flex-col overflow-hidden">
+        {/* Template List/Grid - Now spans full width */}
+        <div className="md:col-span-3 bg-white dark:bg-gray-800 shadow rounded-lg flex flex-col overflow-hidden">
            {/* --- Left Column Header with Controls --- */}
            <div className="p-4 border-b border-gray-200 dark:border-gray-700">
               <h2 className="text-lg font-semibold mb-3">Templates</h2>
@@ -235,8 +250,7 @@ const TemplateManager: React.FC = () => {
                        <LayoutGrid className="h-4 w-4" />
                     </Button>
                   </div>
-                  {/* Add Sort Button/Dropdown Here if needed */}
-                  {/* Example Sort Toggle Button */}
+                  {/* Sort Button */}
                    <Button 
                      variant="outline"
                      size="sm"
@@ -252,49 +266,23 @@ const TemplateManager: React.FC = () => {
              {viewModeTemplates === 'list' ? (
                 <TemplateList 
                   templates={processedTemplates} 
-                  isLoading={isLoadingTemplates}
-                  error={errorTemplates}
-                  activeTemplateId={selectedTemplateId}
-                  onSelectTemplate={handleSelectTemplate}
+                  isLoading={isLoading}
+                  error={error}
+                  activeTemplateId={null}
+                  onSelectTemplate={handleSelectTemplate} // Selection now only controls preview highlight
                   onUseTemplate={handleUseTemplate}
                 />
              ) : (
-                 // Render TemplateGrid when viewMode is 'grid'
                  <TemplateGrid 
                     templates={processedTemplates} 
-                    isLoading={isLoadingTemplates}
-                    error={errorTemplates}
-                    activeTemplateId={selectedTemplateId}
-                    onSelectTemplate={handleSelectTemplate} // Select still shows preview
+                    isLoading={isLoading}
+                    error={error}
+                    activeTemplateId={null}
+                    onSelectTemplate={handleSelectTemplate} // Selection now only controls preview highlight
                     onUseTemplate={handleUseTemplate}
                  />
              )}
            </div>
-        </div>
-
-        {/* Right Column (Preview, Editor, or Placeholder) */}
-        <div className="md:col-span-2 bg-white dark:bg-gray-800 shadow rounded-lg flex flex-col overflow-hidden">
-          {selectedTemplateId !== undefined ? ( // If a template is selected (or null for new)
-            isEditingTemplate ? (
-              // Show Editor when editing or creating new
-              <div className="flex-grow p-4 md:p-6 overflow-y-auto">
-                <TemplateEditor
-                  templateId={selectedTemplateId} // Pass null for new
-                  onSaveSuccess={() => handleBackToList(true)}
-                  onCancel={() => handleBackToList(false)}
-                />
-              </div>
-            ) : (
-              // Show Preview when a template is selected but not editing
-              <TemplatePreview 
-                  templateId={selectedTemplateId!} // Assert non-null because isEditing is false
-                  onEdit={handleEditTemplate} 
-              />
-            )
-          ) : (
-            // Show Placeholder when no template is selected
-            <TemplatePreviewPlaceholder /> 
-          )}
         </div>
       </div>
       
@@ -304,16 +292,12 @@ const TemplateManager: React.FC = () => {
         onClose={() => setIsImportModalOpen(false)} 
         onImportSuccess={() => { 
           setIsImportModalOpen(false);
-          setRefreshTrigger(prev => prev + 1);
+          fetchTemplates();
         }}
       />
       <NewAITemplateDraftModal
         isOpen={isAIDraftModalOpen}
-        onClose={() => {
-            setIsAIDraftModalOpen(false);
-            // Optionally trigger refresh if needed
-            // setRefreshTrigger(prev => prev + 1);
-        }}
+        onClose={handleAIDraftModalClose}
       />
       
       {/* Render UseTemplateModal conditionally */}

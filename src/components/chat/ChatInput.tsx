@@ -14,6 +14,7 @@ interface ChatInputProps {
   disabled?: boolean;
   isNewChat?: boolean;
   messagesCount?: number;
+  initialValue?: string;
 }
 
 const ChatInput: React.FC<ChatInputProps> = ({ 
@@ -21,9 +22,10 @@ const ChatInput: React.FC<ChatInputProps> = ({
   onFileUpload, 
   disabled = false, 
   isNewChat = false,
-  messagesCount = 0
+  messagesCount = 0,
+  initialValue
 }) => {
-  const [message, setMessage] = useState('');
+  const [message, setMessage] = useState(initialValue || '');
 
   const [activeDocuments, setActiveDocuments] = useState<Document[]>([]);
   const [showDocumentPicker, setShowDocumentPicker] = useState(false);
@@ -159,6 +161,18 @@ const ChatInput: React.FC<ChatInputProps> = ({
       }, 0);
     }
   }, [textToQuery, setTextToQuery]);
+
+  useEffect(() => {
+    if (initialValue) {
+      setMessage(initialValue);
+      textareaRef.current?.focus();
+      setTimeout(() => {
+         if (textareaRef.current) {
+            textareaRef.current.selectionStart = textareaRef.current.selectionEnd = initialValue.length;
+         }
+      }, 0);
+    }
+  }, [initialValue]);
 
   const handleSubmit = () => {
     const trimmedMessage = message.trim();
@@ -562,7 +576,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
               initial={{ opacity: 0, y: -10 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
-              className="absolute bottom-full left-0 right-0 mb-1 z-10 max-h-60 overflow-y-auto rounded-md bg-gray-700 dark:bg-gray-800 shadow-lg border border-gray-600 dark:border-gray-700"
+              className="absolute bottom-[50px] left-0 right-0 mb-1 z-10 max-h-60 overflow-y-auto rounded-md bg-gray-700 dark:bg-gray-800 shadow-lg border border-gray-600 dark:border-gray-700"
             >
               {filteredCommands.map((cmd) => (
                 <button
@@ -581,6 +595,11 @@ const ChatInput: React.FC<ChatInputProps> = ({
                   </div>
                 </button>
               ))}
+              {filteredCommands.length > 4 && (
+                <div className="px-3 py-1.5 text-center text-xs text-gray-400 italic bg-gray-700 dark:bg-gray-800 border-t border-gray-600 dark:border-gray-700 sticky bottom-0">
+                  Scroll for more commands
+                </div>
+              )}
             </motion.div>
           )}
         </AnimatePresence>
@@ -725,7 +744,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
             value={message}
             onChange={handleInputChange}
             onKeyDown={handleKeyDown}
-            placeholder={ showCommandHint ? 'Type a command, e.g. /research Miranda rights' : isCentered ? 'Ask me anything about legal documents, or try /agent perplexity [query]...' : 'Type your message or try /agent perplexity [query]...' }
+            placeholder={"Type anything, / for agent..."}
             rows={1}
             className={`w-full bg-transparent text-text-primary px-3 py-3 pr-12 pb-14 resize-none focus:outline-none rounded-lg transition-all duration-200 ${showCommandHint ? 'ring-2 ring-primary' : ''}`}
             disabled={disabled}
@@ -793,10 +812,6 @@ const ChatInput: React.FC<ChatInputProps> = ({
             {`Selected document${activeDocuments.length > 1 ? 's' : ''} will be used for this agent.`}
           </div>
         )}
-      </motion.div>
-      
-      <motion.div className="text-xs text-gray-500 px-4 py-1 border-t border-gray-800" initial={{ opacity: 0 }} animate={{ opacity: 0.7 }} transition={{ delay: 0.5 }} >
-        <span>Shift+Enter = new line • / = Commands • Attach files with document button</span>
       </motion.div>
     </div>
   );

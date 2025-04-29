@@ -1,6 +1,9 @@
 import { atom } from 'jotai';
 import { Case, getCaseById } from '@/services/caseService';
 import { Document, getUserDocuments } from '@/services/documentService';
+import { DocumentMetadata } from '@/services/documentService';
+import { getUserCases } from '@/services/caseService';
+import { getCaseDocuments } from '@/services/documentService';
 
 // Define type for the item being viewed/edited in the main panel
 export type ActiveEditorItem = { type: 'document' | 'draft'; id: string } | null;
@@ -100,7 +103,7 @@ const caseDocumentsLoadingAtom = atom<boolean>(false);
 const caseDocumentsErrorAtom = atom<string | null>(null);
 
 // Atom for storing the fetched list of documents for the active case.
-const caseDocumentsDataAtom = atom<Document[] | null>(null);
+const caseDocumentsDataAtom = atom<DocumentMetadata[] | null>(null);
 
 // Read-only atom for the documents loading state.
 export const isCaseDocumentsLoadingAtom = atom((get) => get(caseDocumentsLoadingAtom));
@@ -171,4 +174,44 @@ export const activeCaseAtom = atom(
     // 3. Trigger the document list fetch
     set(loadCaseDocumentsAtom, caseId);
   }
-); 
+);
+
+// Atom to control the visibility of the Upload Modal
+export const uploadModalOpenAtom = atom<boolean>(false);
+
+// Atom to trigger a reset/clear action in the ChatInterface
+export const resetChatTriggerAtom = atom(0); // Increment value to trigger 
+
+// --- NEW Atoms for Collapsible Nav and Editor Sidebar --- 
+
+export const isNavCollapsedAtom = atom(false);
+
+// Track if an editor (template or document) is the primary active view
+export type EditorType = 'template' | 'document';
+export const activeEditorTypeAtom = atom<EditorType | null>(null);
+
+// State for template editor to store its current variables for the sidebar
+// export const templateEditorVariablesAtom = atom<string[]>([]); // REMOVE
+
+// --- NEW Atom for AI Draft Modal Context --- 
+export type AIDraftContextType = 'document' | 'general' | 'template' | null;
+export const aiDraftContextAtom = atom<AIDraftContextType>('general'); // Default to general? 
+
+// --- REMOVE Atoms for Template Editor Actions --- 
+/*
+// Atom to trigger deletion. Set with the name of the variable to delete.
+export const deleteTemplateVariableActionAtom = atom<string | null>(null); 
+
+// Atom to trigger renaming. Set with an object containing old and new names.
+export const renameTemplateVariableActionAtom = atom<{ oldName: string; newName: string } | null>(null);
+*/
+
+// --- REMOVE Atom for Create Variable Modal --- 
+// export const createVariableModalOpenAtom = atom<boolean>(false);
+
+// --- NEW: Atom for Select Template Modal --- 
+export const selectTemplateModalOpenAtom = atom<boolean>(false);
+
+// --- NEW: Atom to trigger Fill Template Modal --- 
+// Set with the data needed by FillTemplateModal
+export const fillTemplateModalTriggerAtom = atom<{ id: string; name: string; content: string } | null>(null);
