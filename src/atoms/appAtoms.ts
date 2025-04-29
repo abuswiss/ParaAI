@@ -215,3 +215,6 @@ export const selectTemplateModalOpenAtom = atom<boolean>(false);
 // --- NEW: Atom to trigger Fill Template Modal --- 
 // Set with the data needed by FillTemplateModal
 export const fillTemplateModalTriggerAtom = atom<{ id: string; name: string; content: string } | null>(null);
+
+// --- NEW: Atom for AI Template Draft Modal ---
+export const newAITemplateDraftModalOpenAtom = atom<boolean>(false);

@@ -9,9 +9,9 @@ import { Textarea } from '@/components/ui/Textarea';
 import { Spinner } from '@/components/ui/Spinner';
 import { Icons } from '@/components/ui/Icons';
 import * as templateService from '@/services/templateService';
-// Assuming a similar type structure for templates
-// import { TemplateDraft } from '@/services/templateService'; 
-import { Modal } from '@/components/ui/Modal'; // Import Modal
+import { DocumentTemplate } from '@/services/templateService'; // Import template type
+// Import Modal sub-components
+import { Modal, ModalOverlay, ModalContent, ModalHeader, ModalBody, ModalFooter, ModalCloseButton } from '@/components/ui/Modal'; 
 
 // Define common legal template types
 const LEGAL_TEMPLATE_TYPES = [
@@ -146,65 +146,74 @@ const NewAITemplateDraftModal: React.FC<NewAITemplateDraftModalProps> = ({ isOpe
   if (!isOpen) return null;
 
   return (
-    <Modal isOpen={isOpen} onClose={() => handleClose(false)} title="Create New AI Template Draft">
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <div>
-          <Label htmlFor="templateName">Template Name</Label>
-          <Input
-            id="templateName"
-            type="text"
-            value={templateName}
-            onChange={(e) => setTemplateName(e.target.value)}
-            required
-            className="w-full dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-          />
-        </div>
+    <Modal isOpen={isOpen} onClose={() => handleClose(false)} size="lg">
+      <ModalOverlay />
+      <ModalContent>
+        <ModalHeader>Create New AI Template Draft</ModalHeader>
+        <ModalCloseButton onClick={() => handleClose(false)} disabled={isLoading} />
+        <form onSubmit={handleSubmit}>
+          <ModalBody>
+            <div className="space-y-4">
+              <div>
+                <Label htmlFor="templateName">Template Name</Label>
+                <Input
+                  id="templateName"
+                  type="text"
+                  value={templateName}
+                  onChange={(e) => setTemplateName(e.target.value)}
+                  required
+                  className="w-full dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                  disabled={isLoading}
+                />
+              </div>
 
-        {/* Template Type Dropdown */}
-        <div>
-          <Label htmlFor="templateType">Template Type</Label>
-          {/* Basic HTML Select styled with Tailwind */}
-          <select
-            id="templateType"
-            value={templateType}
-            onChange={(e) => setTemplateType(e.target.value)}
-            required
-            className="mt-1 block w-full pl-3 pr-10 py-2 text-base border border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-primary focus:border-primary sm:text-sm rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
-          >
-            {LEGAL_TEMPLATE_TYPES.map((type) => (
-              <option key={type} value={type}>{type}</option>
-            ))}
-          </select>
-        </div>
+              <div>
+                <Label htmlFor="templateType">Template Type</Label>
+                <select
+                  id="templateType"
+                  value={templateType}
+                  onChange={(e) => setTemplateType(e.target.value)}
+                  required
+                  className="mt-1 block w-full pl-3 pr-10 py-2 text-base border border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-primary focus:border-primary sm:text-sm rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
+                  disabled={isLoading}
+                >
+                  {LEGAL_TEMPLATE_TYPES.map((type) => (
+                    <option key={type} value={type}>{type}</option>
+                  ))}
+                </select>
+              </div>
 
-        <div>
-          <Label htmlFor="instructions">Template Drafting Instructions</Label>
-          <Textarea
-            id="instructions"
-            value={instructions}
-            onChange={(e) => setInstructions(e.target.value)}
-            placeholder="Describe the template you want the AI to draft (e.g., 'Draft a standard consulting agreement template...')"
-            required
-            rows={5}
-            className="w-full dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-          />
-          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-            Provide clear and specific instructions for the best results.
-          </p>
-        </div>
+              <div>
+                <Label htmlFor="instructions">Template Drafting Instructions</Label>
+                <Textarea
+                  id="instructions"
+                  value={instructions}
+                  onChange={(e) => setInstructions(e.target.value)}
+                  placeholder="Describe the template you want the AI to draft (e.g., 'Draft a standard consulting agreement template...')"
+                  required
+                  rows={5}
+                  className="w-full dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                  disabled={isLoading}
+                />
+                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  Provide clear and specific instructions for the best results.
+                </p>
+              </div>
 
-        {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
-
-        <div className="flex justify-end space-x-2 pt-4">
-          <Button type="button" variant="ghost" onClick={() => handleClose(false)} disabled={isLoading}>
-            Cancel
-          </Button>
-          <Button type="submit" disabled={isLoading}>
-            {isLoading ? <Spinner size="sm" className="mr-2" /> : <Icons.Sparkles className="mr-2 h-4 w-4" />}
-            Generate Template
-          </Button>
-        </div>
-      </form>
+              {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
+            </div>
+          </ModalBody>
+          <ModalFooter>
+            <Button type="button" variant="ghost" onClick={() => handleClose(false)} disabled={isLoading}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={isLoading}>
+              {isLoading ? <Spinner size="sm" className="mr-2" /> : <Icons.Sparkles className="mr-2 h-4 w-4" />}
+              Generate Template
+            </Button>
+          </ModalFooter>
+        </form>
+      </ModalContent>
     </Modal>
   );
 };

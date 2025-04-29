@@ -9,11 +9,10 @@ import { Upload, Sparkles, List, LayoutGrid, ArrowUpDown, Search, Plus, FileText
 import { getAvailableTemplates, getTemplateById, DocumentTemplate } from '@/services/templateService';
 import { Button } from '@/components/ui/Button';
 import TemplateImportModal from '@/components/templates/TemplateImportModal';
-import NewAITemplateDraftModal from '@/components/templates/NewAITemplateDraftModal';
 import UseTemplateModal from '@/components/templates/UseTemplateModal';
 import { Input } from '@/components/ui/Input';
 import TemplateGrid from '@/components/templates/TemplateGrid';
-import { fillTemplateModalTriggerAtom } from '@/atoms/appAtoms';
+import { fillTemplateModalTriggerAtom, newAITemplateDraftModalOpenAtom } from '@/atoms/appAtoms';
 import { Spinner } from '@/components/ui/Spinner';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/Alert";
 import { AlertTriangle } from 'lucide-react';
@@ -30,12 +29,11 @@ const TemplateManager: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const triggerFillTemplateModal = useSetAtom(fillTemplateModalTriggerAtom);
+  const setIsNewAITemplateModalOpen = useSetAtom(newAITemplateDraftModalOpenAtom);
   const [isFetchingContent, setIsFetchingContent] = useState<string | null>(null);
 
   // State for import modal
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
-  // State for AI draft modal
-  const [isAIDraftModalOpen, setIsAIDraftModalOpen] = useState(false);
   // State for Use Template modal
   const [isUseModalOpen, setIsUseModalOpen] = useState(false);
   const [templateToUseId, setTemplateToUseId] = useState<string | null>(null);
@@ -153,14 +151,6 @@ const TemplateManager: React.FC = () => {
       }
   };
 
-  // Simple close handler for AI Draft modal that refreshes
-  const handleAIDraftModalClose = (refreshNeeded = false) => {
-      setIsAIDraftModalOpen(false);
-      if (refreshNeeded) {
-        fetchTemplates();
-      }
-  };
-
   // --- Handler for clicking the "Use" (Play) button --- 
   const handleUseTemplateClick = async (templateId: string) => {
       if (isFetchingContent === templateId) return; 
@@ -198,7 +188,7 @@ const TemplateManager: React.FC = () => {
               <Upload className="h-4 w-4 mr-2" />
               Import Template
           </Button>
-          <Button onClick={() => setIsAIDraftModalOpen(true)} variant="outline" size="sm">
+          <Button onClick={() => setIsNewAITemplateModalOpen(true)} variant="outline" size="sm">
                <Sparkles className="h-4 w-4 mr-2" />
                Create AI Template Draft
           </Button>
@@ -294,10 +284,6 @@ const TemplateManager: React.FC = () => {
           setIsImportModalOpen(false);
           fetchTemplates();
         }}
-      />
-      <NewAITemplateDraftModal
-        isOpen={isAIDraftModalOpen}
-        onClose={handleAIDraftModalClose}
       />
       
       {/* Render UseTemplateModal conditionally */}
