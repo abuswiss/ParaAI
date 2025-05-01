@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { getDocumentById, getDocumentUrl } from '@/services/documentService';
-import { Document } from '@/types/document'; // Using the stricter Document type here
+import { getDocumentById, getDocumentUrl, DocumentMetadata } from '@/services/documentService';
 import { Button } from '@/components/ui/Button';
 import { Spinner } from '@/components/ui/Spinner';
 import { Edit } from 'lucide-react';
+import DocumentViewer from '@/components/documents/DocumentViewer';
 // Placeholder import for BreadcrumbNav
 // import BreadcrumbNav from '@/components/layout/BreadcrumbNav';
 import BreadcrumbNav, { BreadcrumbItem } from '@/components/layout/BreadcrumbNav';
@@ -12,7 +12,7 @@ import BreadcrumbNav, { BreadcrumbItem } from '@/components/layout/BreadcrumbNav
 const DocumentViewPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const [document, setDocument] = useState<Document | null>(null);
+  const [document, setDocument] = useState<DocumentMetadata | null>(null);
   const [documentUrl, setDocumentUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -193,7 +193,7 @@ const DocumentViewPage: React.FC = () => {
             <p className="text-error dark:text-error">{error}</p>
           </div>
         ) : (
-          renderContentView()
+          <DocumentViewer documentId={document.id} />
         )}
       </div>
     </div>

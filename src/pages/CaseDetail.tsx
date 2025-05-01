@@ -1,148 +1,127 @@
 import React, { useEffect, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import { Case, getCaseById } from '../services/caseService';
-import { createConversationSafely } from '../lib/secureDataClient';
-import CaseDocuments from '../components/cases/CaseDocuments';
-import { Button } from '../components/ui/Button';
-import { Icons } from '../components/ui/Icons';
-import { Spinner } from '../components/ui/Spinner';
-import CaseForm from '../components/cases/CaseForm';
+import { useParams, Link } from 'react-router-dom';
+import { useAtom } from 'jotai';
+import { getCaseById } from '../services/caseService';
+import { Case } from '../types/case';
+import { activeCaseAtom } from '@/atoms/appAtoms';
+import { Button } from '@/components/ui/Button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
+import { ArrowLeft } from 'lucide-react';
+import { Spinner } from '@/components/ui/Spinner';
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/Alert";
+import { AlertTriangle } from 'lucide-react';
 
 const CaseDetail: React.FC = () => {
-  const { id } = useParams<{ id: string }>();
-  const navigate = useNavigate();
-  const [caseData, setCaseData] = useState<Case | null>(null);
-
+  const { caseId } = useParams<{ caseId: string }>();
+  const [activeCase, setActiveCase] = useAtom(activeCaseAtom);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [isEditFormOpen, setIsEditFormOpen] = useState(false);
-  const [creatingConversation, setCreatingConversation] = useState(false);
 
   useEffect(() => {
-    const fetchCaseAndDocuments = async () => {
-      if (!id) return;
-      
-      try {
-        setLoading(true);
-        setError(null);
-        
-        const caseResponse = await getCaseById(id);
-        if (caseResponse.error) {
-          throw caseResponse.error;
-        }
-        
-        if (!caseResponse.data) {
-          throw new Error('Case not found');
-        }
-        
-        setCaseData(caseResponse.data);
-      } catch (err) {
-        console.error('Error fetching case details:', err);
-        setError('Failed to load case details. Please try again later.');
-      } finally {
-        setLoading(false);
-      }
-    };
-    
-    fetchCaseAndDocuments();
-  }, [id]);
-
-  const handleNewConversation = async () => {
-    if (!id) return;
-    setCreatingConversation(true);
-    try {
-      const { data: newConversation, error: createError } = await createConversationSafely(undefined, id);
-      if (createError || !newConversation) {
-        throw createError || new Error('Failed to create conversation');
-      }
-      navigate(`/chat/${newConversation.id}`);
-    } catch (err) {
-      console.error('Error creating new conversation:', err);
-      setError('Could not start a new conversation.');
-    } finally {
-      setCreatingConversation(false);
+    if (caseId && activeCase?.id !== caseId) {
+      setLoading(true);
+      setActiveCase(caseId);
     }
-  };
+    const checkCaseDetails = async () => {
+      if (!caseId) return;
+      if(activeCase?.id === caseId && activeCase?.details) {
+          setLoading(false);
+          setError(null);
+          return;
+      }
+      const timeoutId = setTimeout(() => {
+            if (activeCase?.id === caseId && !activeCase.details) {
+                setLoading(false);
+            }
+        }, 2000);
+
+       return () => clearTimeout(timeoutId);
+    };
+
+    checkCaseDetails();
+
+  }, [caseId, activeCase, setActiveCase]);
+
+  useEffect(() => {
+    if (activeCase?.id === caseId && activeCase?.details) {
+      setLoading(false);
+      setError(null);
+    } else if (activeCase?.id === caseId && !activeCase.details) {
+       setLoading(true); 
+    }
+  }, [activeCase, caseId]);
 
   if (loading) {
     return (
-      <div className="p-6 flex justify-center items-center h-64">
+      <div className="flex justify-center items-center h-64">
         <Spinner size="lg" />
       </div>
     );
   }
 
-  if (error || !caseData) {
+  if (error) {
     return (
-      <div className="p-6">
-        <div className="text-red-500 bg-red-100 dark:bg-red-900/20 p-4 rounded-md">
-          {error || 'Case not found'}
-        </div>
-        <button
-          onClick={() => navigate('/cases')}
-          className="mt-4 text-primary hover:underline flex items-center"
-        >
-          <Icons.ChevronLeft className="h-4 w-4 mr-1" />
-          Back to Cases
-        </button>
+       <div className="container mx-auto p-4">
+         <Alert variant="destructive">
+           <AlertTriangle className="h-4 w-4" />
+           <AlertTitle>Error</AlertTitle>
+           <AlertDescription>{error}</AlertDescription>
+         </Alert>
+       </div>
+    );
+  }
+
+  if (!activeCase?.details) {
+    return (
+      <div className="container mx-auto p-4 text-center">
+        <p>Case not found or details could not be loaded.</p>
+        <Link to="/cases">
+          <Button variant="link" className="mt-4">
+            Go back to Cases
+          </Button>
+        </Link>
       </div>
     );
   }
 
+  const caseDetails = activeCase.details;
+
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex justify-between items-center">
-        <Button variant="outline" size="sm" onClick={() => navigate('/cases')} className="mb-0">
-          <Icons.ChevronLeft className="h-4 w-4 mr-1" />
+    <div className="container mx-auto p-4 md:p-6">
+      <Link to="/cases" className="mb-4 inline-block">
+        <Button variant="outline" size="sm">
+          <ArrowLeft className="mr-2 h-4 w-4" />
           Back to Cases
         </Button>
-        <Button variant="secondary" size="sm" onClick={() => setIsEditFormOpen(true)}>
-          <Icons.Edit className="h-4 w-4 mr-1" />
-          Edit Case
-        </Button>
-      </div>
+      </Link>
 
-      <div className="bg-surface rounded-lg p-6 border border-border">
-        <h1 className="text-2xl font-semibold text-text-primary mb-2">{caseData.name}</h1>
-        {caseData.description && (
-          <p className="text-text-secondary mb-4 text-sm">{caseData.description}</p>
-        )}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-2 text-sm">
-          <div><span className="font-medium text-text-secondary">Client:</span> {caseData.client_name || 'N/A'}</div>
-          <div><span className="font-medium text-text-secondary">Opposing Party:</span> {caseData.opposing_party || 'N/A'}</div>
-          <div><span className="font-medium text-text-secondary">Case Number:</span> {caseData.case_number || 'N/A'}</div>
-          <div><span className="font-medium text-text-secondary">Court:</span> {caseData.court || 'N/A'}</div>
-          <div><span className="font-medium text-text-secondary">Status:</span> <span className="capitalize">{caseData.status}</span></div>
-          <div><span className="font-medium text-text-secondary">Created:</span> {new Date(caseData.createdAt).toLocaleDateString()}</div>
-        </div>
-      </div>
+      <Card className="mb-6">
+        <CardHeader>
+          <CardTitle>{caseDetails.name || 'Case Details'}</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p><strong>Case Number:</strong> {caseDetails.case_number || 'N/A'}</p>
+          <p><strong>Status:</strong> <span className="capitalize">{caseDetails.status || 'N/A'}</span></p>
+          <p><strong>Description:</strong> {caseDetails.description || 'No description available.'}</p>
+        </CardContent>
+      </Card>
 
-      <div className="bg-surface rounded-lg p-6 border border-border">
-        {id && <CaseDocuments caseId={id} />}
-      </div>
+      <h2 className="text-xl font-semibold mb-4">Documents</h2>
+      <div className="p-4 border rounded-md bg-muted/40">
+          <p className="text-sm text-muted-foreground">
+              Document management for this case is now handled in the 
+              <Link to="/files" className="text-primary underline hover:no-underline mx-1">
+                  File Manager
+              </Link>.
+              You can select the case there to view its documents.
+          </p>
+           <Link to={`/files?caseId=${caseId}`}> 
+             <Button variant="secondary" size="sm" className="mt-3">
+               Go to Case in File Manager
+            </Button>
+           </Link>
+       </div>
 
-      <div className="bg-surface rounded-lg p-6 border border-border">
-        <div className="flex justify-between items-center mb-4">
-          <h2 className="text-xl font-semibold text-text-primary">Conversations</h2>
-          <Button onClick={handleNewConversation} disabled={creatingConversation} size="sm">
-            {creatingConversation ? <Spinner size="sm" className="mr-2"/> : <Icons.Plus className="h-4 w-4 mr-1" />}
-            New Conversation
-          </Button>
-        </div>
-
-        <div className="bg-muted/50 rounded-lg p-6 text-center border border-dashed border-border">
-          <p className="text-text-secondary mb-2">No conversations for this case yet.</p>
-          <p className="text-sm text-muted-foreground">Start a new conversation about this case.</p>
-        </div>
-      </div>
-
-      {caseData && (
-        <CaseForm 
-          isOpen={isEditFormOpen} 
-          onClose={() => setIsEditFormOpen(false)} 
-          caseData={caseData} 
-        />
-      )}
     </div>
   );
 };

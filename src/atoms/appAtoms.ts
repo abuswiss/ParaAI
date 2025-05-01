@@ -1,9 +1,8 @@
 import { atom } from 'jotai';
 import { Case, getCaseById } from '@/services/caseService';
-import { Document, getUserDocuments } from '@/services/documentService';
 import { DocumentMetadata } from '@/services/documentService';
 import { getUserCases } from '@/services/caseService';
-import { getCaseDocuments } from '@/services/documentService';
+import { EditorState } from '@/types/editor'
 
 // Define type for the item being viewed/edited in the main panel
 export type ActiveEditorItem = { type: 'document' | 'draft'; id: string } | null;
@@ -14,13 +13,25 @@ export type ActiveEditorItem = { type: 'document' | 'draft'; id: string } | null
 export const activeCaseIdAtom = atom<string | null>(null);
 
 // Atom for the active item being edited (document or draft).
-export const activeEditorItemAtom = atom<ActiveEditorItem | null>(null);
+export const activeEditorItemAtom = atom<EditorState | null>(null);
+
+// --- NEW Derived Atom for Active Document ID (for Chat context) ---
+// Reads from activeEditorItemAtom and returns the ID if it's a document
+export const activeDocumentContextIdAtom = atom<string | null>(
+    (get) => {
+        const item = get(activeEditorItemAtom);
+        return (item?.type === 'document' && item?.id) ? item.id : null;
+    }
+);
 
 // Atom for holding text selected in the editor, intended to be sent to the chat query.
 export const editorTextToQueryAtom = atom<string | null>(null);
 
 // Atom to track the ID of a newly created blank draft that hasn't been saved yet.
 export const newlyCreatedDraftIdAtom = atom<string | null>(null);
+
+// --- NEW Atom to share current case documents (set by FileManager) ---
+export const currentCaseDocumentsAtom = atom<DocumentMetadata[]>([]);
 
 // --- Derived State Atoms for Case Details ---
 
@@ -94,76 +105,18 @@ export const loadCaseDetailsAtom = atom(
 // Read-only atom to access the fetched case details.
 export const activeCaseDetailsAtom = atom((get) => get(activeCaseDetailsDataAtom));
 
-// --- Derived State Atoms for Case Documents ---
-
-// Atom to track the loading state of documents for the active case.
-const caseDocumentsLoadingAtom = atom<boolean>(false);
-
-// Atom to store any error messages during document list fetching.
-const caseDocumentsErrorAtom = atom<string | null>(null);
-
-// Atom for storing the fetched list of documents for the active case.
-const caseDocumentsDataAtom = atom<DocumentMetadata[] | null>(null);
-
-// Read-only atom for the documents loading state.
-export const isCaseDocumentsLoadingAtom = atom((get) => get(caseDocumentsLoadingAtom));
-
-// Read-only atom for the documents error state.
-export const caseDocumentsFetchErrorAtom = atom((get) => get(caseDocumentsErrorAtom));
-
-// Read-only atom to access the fetched documents list.
-export const caseDocumentsAtom = atom((get) => get(caseDocumentsDataAtom));
-
-// Atom to trigger fetching the document list for the active case.
-export const loadCaseDocumentsAtom = atom(
-  null, // This atom is write-only for triggering the fetch
-  async (get, set, caseId: string | null) => {
-    if (!caseId) {
-      set(caseDocumentsDataAtom, null);
-      set(caseDocumentsLoadingAtom, false);
-      set(caseDocumentsErrorAtom, null);
-      return;
-    }
-
-    // Optional: Add logic to skip refetch if already loading or data exists for the same ID
-    // if (get(activeCaseIdAtom) === caseId && (get(caseDocumentsDataAtom) !== null || get(caseDocumentsLoadingAtom))) {
-    //   return;
-    // }
-
-    set(caseDocumentsLoadingAtom, true);
-    set(caseDocumentsErrorAtom, null);
-    set(caseDocumentsDataAtom, null); // Clear previous data
-
-    try {
-      const { data, error } = await getUserDocuments(caseId);
-      if (error) {
-        throw error;
-      }
-      set(caseDocumentsDataAtom, data || []); // Set fetched data, default to empty array if null/undefined
-    } catch (error) {
-      console.error("Error fetching case documents:", error);
-      set(caseDocumentsErrorAtom, error instanceof Error ? error.message : 'Failed to load documents');
-      set(caseDocumentsDataAtom, null); // Ensure data is null on error
-    } finally {
-      set(caseDocumentsLoadingAtom, false); // Always set loading to false
-    }
-  }
-);
-
 // --- Combined Atom for Setting Active Case ---
-
 /* 
  * This derived atom handles the combined logic of setting the activeCaseId 
- * AND triggering the fetch for its details AND triggering the fetch for its documents.
+ * AND triggering the fetch for its details.
+ * Document fetching is now handled within FileManager.
  */
 export const activeCaseAtom = atom(
   (get) => {
     return {
       id: get(activeCaseIdAtom),
       details: get(activeCaseDetailsAtom),
-      // Optionally include documents status here if needed
-      // documentsLoading: get(isCaseDocumentsLoadingAtom),
-      // documentsError: get(caseDocumentsFetchErrorAtom)
+      // Remove document status
     }
   },
   (get, set, caseId: string | null) => {
@@ -171,8 +124,8 @@ export const activeCaseAtom = atom(
     set(activeCaseIdAtom, caseId);
     // 2. Trigger the detail fetch 
     set(loadCaseDetailsAtom, caseId);
-    // 3. Trigger the document list fetch
-    set(loadCaseDocumentsAtom, caseId);
+    // 3. *** REMOVE Triggering document list fetch ***
+    // set(loadCaseDocumentsAtom, caseId);
   }
 );
 
@@ -218,3 +171,57 @@ export const fillTemplateModalTriggerAtom = atom<{ id: string; name: string; con
 
 // --- NEW: Atom for AI Template Draft Modal ---
 export const newAITemplateDraftModalOpenAtom = atom<boolean>(false);
+
+// Atom for managing the command palette visibility
+export const commandPaletteOpenAtom = atom(false);
+
+// --- NEW: Atom for Template Import Modal ---
+export const templateImportModalOpenAtom = atom<boolean>(false);
+
+// --- Background Task Management ---
+export type TaskStatus = 'pending' | 'running' | 'success' | 'error';
+
+export interface BackgroundTask {
+  id: string; // Unique identifier (e.g., document ID + task type, or a UUID)
+  description: string; // User-friendly description (e.g., "Uploading report.pdf", "Analyzing Contract A")
+  status: TaskStatus;
+  progress?: number; // Optional progress (0-100)
+  createdAt: number; // Timestamp for sorting or auto-clearing
+}
+
+export const backgroundTasksAtom = atom<BackgroundTask[]>([]);
+
+// Helper atoms/functions to manage tasks (optional but helpful)
+export const addTaskAtom = atom(null, (get, set, task: Omit<BackgroundTask, 'createdAt'>) => {
+  const newTask = { ...task, createdAt: Date.now() };
+  set(backgroundTasksAtom, (prev) => [...prev, newTask]);
+});
+
+export const updateTaskAtom = atom(null, (get, set, update: { id: string; status?: TaskStatus; progress?: number; description?: string }) => {
+  set(backgroundTasksAtom, (prev) => 
+    prev.map(task => 
+      task.id === update.id ? { ...task, ...update } : task
+    )
+  );
+});
+
+export const removeTaskAtom = atom(null, (get, set, taskId: string) => {
+  set(backgroundTasksAtom, (prev) => prev.filter(task => task.id !== taskId));
+});
+
+// Atom to automatically clear completed/failed tasks after a delay
+export const clearCompletedTasksAtom = atom(null, (get, set) => {
+    const tasks = get(backgroundTasksAtom);
+    const now = Date.now();
+    const tasksToKeep = tasks.filter(task => {
+        // Keep pending/running tasks
+        if (task.status === 'pending' || task.status === 'running') return true;
+        // Keep success/error tasks for 5 seconds
+        const timeElapsed = (now - task.createdAt) / 1000;
+        return timeElapsed < 5; 
+    });
+    // Only update if there's a change to avoid infinite loops
+    if (tasksToKeep.length !== tasks.length) {
+        set(backgroundTasksAtom, tasksToKeep);
+    }
+});

@@ -6,6 +6,7 @@ import { Label } from '../ui/Label';
 import { Textarea } from '../ui/Textarea';
 import { Spinner } from '../ui/Spinner';
 import { Icons } from '../ui/Icons';
+import { toast } from 'react-hot-toast';
 
 interface CaseFormProps {
   isOpen: boolean;
@@ -103,11 +104,11 @@ const CaseForm: React.FC<CaseFormProps> = ({ isOpen, onClose, caseData }) => {
         console.log('Case updated successfully');
       } else {
         console.log('Creating case:', updates);
-        result = await createCase(updates);
-        if (!result.data || result.error) {
-          throw result.error || new Error('Failed to create case.');
-        }
-        console.log('Case created successfully:', result.data);
+        const { data: newCase, error } = await createCase(updates);
+        if (error) throw error;
+        // console.log('Case created successfully:', newCase);
+        toast.success("Case created successfully!");
+        onClose(true);
       }
 
       setSuccess(true);

@@ -1,4 +1,3 @@
-import { openai } from '../lib/openaiClient';
 import { supabase } from '../lib/supabaseClient';
 import { 
   addMessageSafely, 
@@ -7,7 +6,10 @@ import {
   getConversationMessagesSafely 
 } from '../lib/secureDataClient';
 import { v4 as uuidv4 } from 'uuid';
-import { DocumentAnalysisResult } from './documentAnalysisService';
+import { DispatcherResponse } from '../lib/taskDispatcher'; 
+import { SourceInfo } from '@/types/sources'; 
+import { analyzeDocument as analyzeDocumentService } from './documentAnalysisService';
+import { type TaskStatus } from '@/atoms/appAtoms'; 
 
 /**
  * Interface for a chat message
@@ -36,44 +38,24 @@ export interface Conversation {
 export interface Snippet {
   title: string;
   url: string;
-  content: string;
-  // Add other relevant fields if needed
+  content?: string; 
+  date?: string;
 }
 
 /**
  * Represents a source, potentially aliasing Snippet if structure is identical.
  */
-export type Source = Snippet; // Alias for now, can be made distinct later
-
-/**
- * Placeholder interface for the task object in handleAgentCompareStream.
- * TODO: Define the actual structure based on usage.
- */
-export interface ComparisonTask {
-  // Define expected properties of the comparison task object
-  [key: string]: unknown; // Allow any properties for now
-}
-
-/**
- * Represents the expected structure of the response from the /api/research endpoint.
- */
-interface ResearchApiResponse {
-  success: boolean;
-  answer?: string;
-  snippets?: Snippet[]; // Use the existing Snippet interface
-  error?: string;
-}
+export type Source = Snippet; 
 
 /**
  * Create a new conversation
  */
 export const createConversation = async (
-  title?: string,
-  caseId?: string
+  caseId: string,
+  title?: string
 ): Promise<{ data: Conversation | null; error: Error | null }> => {
   try {
-    // Use the secure client to avoid RLS recursive policy issues
-    return await createConversationSafely(title, caseId);
+    return await createConversationSafely(caseId, title);
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Unknown error creating conversation';
     console.error('Error creating conversation:', message);
@@ -88,7 +70,6 @@ export const getConversation = async (
   conversationId: string
 ): Promise<{ data: Conversation | null; error: Error | null }> => {
   try {
-    // Use the secure client to avoid RLS recursive policy issues
     return await getConversationSafely(conversationId);
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Unknown error getting conversation';
@@ -110,11 +91,10 @@ export const getUserConversations = async (): Promise<{
       return { data: null, error: new Error('User not authenticated') };
     }
 
-    // Direct query to get conversations without triggering RLS recursion
     const { data, error } = await supabase
       .from('conversations')
       .select('*')
-      .eq('owner_id', user.user.id) // Using owner_id as per the database schema
+      .eq('owner_id', user.user.id) 
       .order('updated_at', { ascending: false });
 
     if (error) {
@@ -146,7 +126,6 @@ export const getConversationMessages = async (
   conversationId: string
 ): Promise<{ data: ChatMessage[] | null; error: Error | null }> => {
   try {
-    // Use the secure client to avoid RLS recursive policy issues
     return await getConversationMessagesSafely(conversationId);
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Unknown error getting messages';
@@ -164,7 +143,6 @@ export const addMessage = async (
   content: string
 ): Promise<{ data: ChatMessage | null; error: Error | null }> => {
   try {
-    // Use the secure client to avoid RLS recursive policy issues
     const result = await addMessageSafely(conversationId, role, content);
     return result;
   } catch (error: unknown) {
@@ -175,224 +153,146 @@ export const addMessage = async (
 };
 
 /**
- * Send a message to the OpenAI API and get a response
- * Uses streaming for better user experience
+ * Sends a message, potentially creates a conversation, and streams the AI response,
+ * using the chat-rag backend function for context retrieval if documentId is provided.
  */
 export const sendMessageStream = async (
   conversationId: string | null | undefined,
   message: string,
   onChunk: (chunk: string) => void,
-  documentContext?: string,
-  analysisContext?: string,
-  caseId?: string
+  caseId: string,
+  documentId?: string,
 ): Promise<{ success: boolean; error: Error | null; newConversationId?: string }> => {
-  console.log(`Starting sendMessageStream with conversationId: ${conversationId || 'null'}`);
+  let actualConversationId = conversationId;
+  let newConversationCreated = false;
+
   try {
-    // Check if we need to create a conversation 
-    let actualConversationId = conversationId;
-    let newConversationCreated = false;
-    
-    if (!actualConversationId || actualConversationId === 'new') {
-      // Create a new conversation
-      console.log('Creating new conversation for message');
-      const { data: newConversation, error: createError } = await createConversationSafely('New Conversation');
-      
-      if (createError) {
-        console.error('Failed to create conversation for message:', createError);
-        return { 
-          success: false, 
-          error: new Error(`Failed to create conversation: ${createError.message}`) 
-        };
-      }
-      
-      if (!newConversation) {
-        console.error('Failed to create conversation: No data returned');
-        return { 
-          success: false, 
-          error: new Error('Failed to create conversation: No data returned') 
-        };
-      }
-      
-      actualConversationId = newConversation.id;
-      newConversationCreated = true;
-      console.log('Created new conversation with ID:', actualConversationId);
-    }
-    
-    // Verify we have a valid conversation ID before continuing
     if (!actualConversationId) {
-      console.error('No valid conversation ID for message');
-      return { 
-        success: false, 
-        error: new Error('No valid conversation ID for message') 
-      };
-    }
-
-    console.log(`Adding user message to conversation: ${actualConversationId}`);
-    // Add user message to the database with the valid conversation ID
-    const userMsgResult = await addMessageSafely(
-      actualConversationId,
-      'user',
-      message
-    );
-
-    if (userMsgResult.error) {
-      console.error('Error adding user message:', userMsgResult.error);
-      return { 
-        success: false, 
-        error: userMsgResult.error 
-      };
-    }
-
-    // Get conversation history
-    // Default to empty history if there's an error
-    let history: ChatMessage[] = [];
-    
-    // Now that we have a valid conversation ID, try to get its history
-    console.log(`Fetching conversation history for: ${actualConversationId}`);
-    const { data, error } = await getConversationMessages(actualConversationId);
-    if (error) {
-      console.warn('Could not fetch conversation history:', error);
-      // Continue without history rather than throwing
-    } else if (data) {
-      history = data;
-      console.log(`Found ${data.length} messages in history`);
-    }
-
-    // Format messages for OpenAI
-    const messages = (history || []).map((msg) => ({
-      role: msg.role as 'system' | 'user' | 'assistant',
-      content: msg.content,
-    }));
-    
-    // Add initial system message if there isn't one
-    if (messages.length === 0 || messages[0].role !== 'system') {
-      messages.unshift({
-        role: 'system',
-        content: 'You are the Paralegal AI Assistant, a helpful AI trained to assist with legal matters.'
-      });
-    }
-
-    // Add document context if provided
-    if (documentContext) {
-      messages.unshift({
-        role: 'system',
-        content: `The following is relevant document context that may help with the user's query: ${documentContext}`,
-      });
-    }
-    
-    // Add analysis context if provided
-    if (analysisContext) {
-      try {
-        // Use the imported type for parsing
-        const analysis: DocumentAnalysisResult = JSON.parse(analysisContext);
-        const analysisType = analysis.analysisType || 'document';
-        let formattedAnalysis = '';
-        
-        // Format the analysis based on its type
-        switch (analysisType) {
-          case 'summary':
-            formattedAnalysis = `Summary of the document provided: ${analysis.result || 'Not available'}`;
-            break;
-          case 'risks':
-            formattedAnalysis = `Potential risks identified in the document: ${analysis.result || 'None found or analysis unavailable'}`;
-            break;
-          case 'clauses':
-            formattedAnalysis = `Key clauses identified: ${analysis.result || 'None found or analysis unavailable'}`;
-            break;
-          default:
-            formattedAnalysis = `Analysis result provided: ${analysis.result || 'Content unavailable'}`;
-        }
-        
-        messages.unshift({
-          role: 'system',
-          content: `Relevant Analysis Context:\n${formattedAnalysis}`
-        });
-      } catch (e: unknown) {
-        const error = e instanceof Error ? e : new Error('Unknown error parsing or formatting analysis context');
-        console.error('Failed to parse or format analysis context:', error.message);
-        messages.unshift({
-          role: 'system',
-          content: '[System Note: Provided analysis context could not be processed.]'
-        });
+      console.log('No conversationId provided, creating new conversation...');
+      const { data: newConv, error: createError } = await createConversationSafely(caseId);
+      if (createError || !newConv) {
+        throw createError || new Error('Failed to create new conversation.');
       }
+      actualConversationId = newConv.id;
+      newConversationCreated = true;
+      console.log(`New conversation created with ID: ${actualConversationId}`);
     }
 
-    // Add case context if provided
-    if (caseId) {
-        messages.unshift({
-            role: 'system',
-            content: `Current Case Context ID: ${caseId}`
-        });
+    const { data: historyData, error: historyError } = await getConversationMessagesSafely(actualConversationId);
+    if (historyError) {
+      console.warn('Could not fetch conversation history:', historyError.message);
+    }
+    const conversationHistory = (historyData || []).map(msg => ({
+        role: msg.role,
+        content: msg.content
+    })).slice(-10); 
+
+    const { error: userMessageError } = await addMessageSafely(actualConversationId, 'user', message);
+    if (userMessageError) {
+      console.error('Failed to save user message:', userMessageError);
     }
 
-    // Add a default system message if there isn't one
-    if (!messages.some((msg) => msg.role === 'system')) {
-      messages.unshift({
-        role: 'system',
-        content: 'You are a helpful legal assistant. Provide accurate and helpful information on legal documents and queries.',
-      });
-    }
+    const invokePayload = {
+        message,
+        conversationHistory,
+        documentId
+    };
 
-    // Create initial message in the DB for the assistant's response
-    const assistantMessageId = uuidv4();
-    const { error: initialAssistantError } = await supabase
-      .from('messages')
-      .insert({
-        id: assistantMessageId,
-        conversation_id: actualConversationId,
-        role: 'assistant',
-        content: '', // Will be updated as we get chunks
-      });
+    console.log(`Invoking chat-rag function for convo ${actualConversationId}, docId: ${documentId}`);
 
-    if (initialAssistantError) {
-      throw initialAssistantError;
-    }
-
-    // Create stream
-    const stream = await openai.chat.completions.create({
-      model: 'gpt-4',
-      messages,
-      stream: true,
-      temperature: 0.1, // Lower temperature for more factual responses with legal content
+    const { data: responseData, error: invokeError } = await supabase.functions.invoke('chat-rag', {
+        body: invokePayload,
     });
 
-    let fullResponse = '';
+    if (invokeError) throw invokeError;
+    if (!responseData) throw new Error('Function invocation returned no data.');
 
-    // Process the stream
-    for await (const chunk of stream) {
-      const content = chunk.choices[0]?.delta?.content || '';
-      if (content) {
-        fullResponse += content;
-        onChunk(content);
+    let stream: ReadableStream<Uint8Array>;
+    if (responseData instanceof Blob) {
+        stream = responseData.stream();
+    } else if (responseData instanceof ReadableStream) {
+        stream = responseData;
+    } else {
+        console.error('Unexpected response type from function invocation:', typeof responseData);
+        throw new Error('Unexpected response type received from chat function.');
+    }
+
+    const reader = stream.getReader();
+    const decoder = new TextDecoder();
+    let accumulatedResponse = '';
+    let done = false;
+
+    const assistantMessageId = uuidv4();
+    const { error: initialAssistantError } = await addMessageSafely(
+        actualConversationId,
+        'assistant',
+        '...' 
+    );
+    if (initialAssistantError) {
+        console.error('Failed to save initial placeholder assistant message:', initialAssistantError);
+    }
+
+    while (!done) {
+      const { value, done: readerDone } = await reader.read();
+      done = readerDone;
+      if (value) {
+        const chunk = decoder.decode(value, { stream: true });
+        const lines = chunk.split('\n').filter(line => line.trim() !== '');
+        for (const line of lines) {
+            if (line.startsWith('data:')) {
+                const dataContent = line.substring(5).trim();
+                if (dataContent === '[DONE]') {
+                    done = true;
+                    break;
+                }
+                try {
+                   const parsedChunk = JSON.parse(dataContent);
+                   const content = parsedChunk.choices?.[0]?.delta?.content || '';
+                   if (content) {
+                       accumulatedResponse += content;
+                       onChunk(content);
+                   }
+                } catch (e) {
+                    console.warn('Could not parse stream chunk as JSON:', dataContent, e); 
+                }
+            } else {
+                 console.warn('Received non-SSE line:', line);
+            }
+        }
       }
     }
 
-    // Update the assistant message with the full response
-    const { error: updateError } = await supabase
-      .from('messages')
-      .update({ content: fullResponse })
-      .eq('id', assistantMessageId);
+    console.log(`Stream finished for convo ${actualConversationId}. Full response length: ${accumulatedResponse.length}`);
 
-    if (updateError) {
-      throw updateError;
+    if (assistantMessageId && accumulatedResponse.trim()) {
+        const { error: updateError } = await supabase
+            .from('messages')
+            .update({ content: accumulatedResponse.trim() })
+            .eq('id', assistantMessageId);
+
+        if (updateError) {
+            console.error(`Failed to update final assistant message (ID: ${assistantMessageId}):`, updateError);
+        } else {
+             console.log(`Successfully updated assistant message (ID: ${assistantMessageId})`);
+        }
+    } else if (!accumulatedResponse.trim()) {
+         console.warn(`Assistant response was empty for convo ${actualConversationId}, placeholder not updated.`);
     }
 
-    // Update the conversation's updated_at timestamp
-    await supabase
-      .from('conversations')
-      .update({ updated_at: new Date().toISOString() })
-      .eq('id', actualConversationId);
-
-    // Return success with the new conversation ID if one was created
-    return { 
-      success: true, 
+    return {
+      success: true,
       error: null,
-      newConversationId: newConversationCreated ? actualConversationId : undefined 
+      newConversationId: newConversationCreated ? actualConversationId : undefined,
     };
-  } catch (e: unknown) {
-    const error = e instanceof Error ? e : new Error('Unknown error sending message');
-    console.error('Error in sendMessageStream:', error.message, e); // Log original error too
-    return { success: false, error };
+
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : 'Unknown error in sendMessageStream';
+    console.error('Error sending message stream:', msg);
+    return {
+      success: false,
+      error: error instanceof Error ? error : new Error(msg),
+      newConversationId: newConversationCreated && actualConversationId ? actualConversationId : undefined,
+    };
   }
 };
 
@@ -422,341 +322,285 @@ export const addDocumentToConversation = async (
 };
 
 /**
- * Handle a /research query using RAG (Retrieval-Augmented Generation)
- * 1. Fetch relevant legal documents/snippets from CourtListener
- * 2. Build a RAG prompt with those snippets and the user query
- * 3. Call OpenAI with the prompt
- * 4. Return the grounded answer
+ * Handle a /research query using the courtlistener-rag Supabase Edge Function
  */
 export const handleResearchQueryStream = async (
   researchQuery: string,
   onChunk: (chunk: string) => void
-): Promise<{ success: boolean; error: Error | null; answer?: string; snippets?: Snippet[] }> => {
-  try {
-    // Call the backend API instead of CourtListener directly
-    const response = await fetch('/api/research', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query: researchQuery })
-    });
-    if (!response.ok) {
-      throw new Error(`Backend /api/research error: ${response.status} ${response.statusText}`);
-    }
-    const data: ResearchApiResponse = await response.json();
+): Promise<DispatcherResponse> => {
+  console.log(`Handling Research Query (via Streaming Edge Function): "${researchQuery}"`);
+  let sources: SourceInfo[] | undefined;
 
-    // Check for backend error reported in the response body
-    if (!data.success && data.error) {
-        throw new Error(`Backend /api/research error: ${data.error}`);
-    }
+  const streamResult = await processSupabaseStream(
+      'courtlistener-rag',
+      { query: researchQuery },
+      onChunk,
+      (receivedSnippets: SourceInfo[]) => { 
+          console.log('Received snippets:', receivedSnippets);
+          sources = receivedSnippets; 
+      },
+      (errorMessage) => {
+          onChunk(`\n--- Stream Error: ${errorMessage} ---`);
+      }
+  );
 
-    // If OpenAI answer is present, stream it; otherwise, stream snippets as fallback
-    if (data.answer) {
-      onChunk(data.answer);
-      return { success: true, error: null, answer: data.answer, snippets: data.snippets };
-    } else if (data.snippets) {
-      // Fallback: stream snippets as a single chunk
-      const snippetText = data.snippets.map((s: Snippet) => s.content || '').join('\n---\n');
-      onChunk(snippetText);
-      return { success: true, error: null, snippets: data.snippets };
-    } else {
-      throw new Error('No answer or snippets returned from backend');
-    }
-  } catch (e: unknown) {
-    const error = e instanceof Error ? e : new Error('Unknown error in research query');
-    console.error('Error in handleResearchQueryStream:', error.message, e); // Log original error too
-    return { success: false, error };
-  }
+  return { 
+      success: streamResult.success, 
+      error: streamResult.error, 
+      sources: sources 
+  };
 };
 
 /**
- * Handle a /agent draft query using OpenAI
- * 1. Build a system prompt using the user's instructions and any document/analysis context
- * 2. Call OpenAI with the prompt
- * 3. Stream the response
+ * Define types for task update/remove functions (matching TaskDispatcherParams)
+ */
+type UpdateTaskFn = (update: { id: string; status?: TaskStatus; progress?: number; description?: string }) => void;
+type RemoveTaskFn = (taskId: string) => void;
+
+/**
+ * Handle a /agent draft query using the 'agent-draft' Supabase Edge function
  */
 export const handleAgentDraftStream = async (
   instructions: string,
   onChunk: (chunk: string) => void,
+  caseId?: string, 
   documentContext?: string,
-  analysisContext?: string
+  analysisContext?: string,
+  taskId?: string, 
+  updateTask?: UpdateTaskFn, 
+  removeTask?: RemoveTaskFn
 ): Promise<{ success: boolean; error: Error | null; answer?: string }> => {
+  let userId: string | undefined;
   try {
-    // Build the system prompt for legal drafting
-    let contextPrompt = '';
-    if (documentContext) {
-      contextPrompt += `Relevant document context:\n${documentContext}\n`;
-    }
-    if (analysisContext) {
-      contextPrompt += `Relevant analysis context:\n${analysisContext}\n`;
-    }
-    const systemPrompt =
-      'You are a paralegal AI assistant. Draft legal documents, emails, or letters as instructed. Use any provided context. Be clear, professional, and legally accurate.';
-    const userPrompt = `${contextPrompt}\nDrafting instructions: ${instructions}`;
+      const { data: { user } } = await supabase.auth.getUser();
+      userId = user?.id;
+  } catch (authError) {
+      console.error('Auth error getting user for agent-draft:', authError);
+      return { success: false, error: new Error('Authentication error.') };
+  }
+  if (!userId) {
+      return { success: false, error: new Error('User not authenticated.') };
+  }
 
-    const stream = await openai.chat.completions.create({
-      model: 'gpt-4',
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt },
-      ],
-      stream: true,
-      temperature: 0.2,
-    });
+  console.log(`Handling Agent Draft (via Edge Function) for case ${caseId}`);
 
-    let answer = '';
-    for await (const chunk of stream) {
-      const content = chunk.choices[0]?.delta?.content || '';
-      if (content) {
-        answer += content;
-        onChunk(content);
-      }
+  try {
+    const payload: Record<string, any> = {
+      instructions,
+      caseId,
+      documentContext,
+      analysisContext,
+      userId,
+    };
+
+    // Use the processSupabaseStream helper
+    const result = await processSupabaseStream('agent-draft', payload, onChunk);
+    if (result.success) {
+      if (taskId && updateTask) updateTask({ id: taskId, status: 'success', description: 'Draft complete' }); 
+      return { success: true, error: null, answer: result.fullResponse };
+    } else {
+      if (taskId && updateTask) updateTask({ id: taskId, status: 'error', description: `Draft failed: ${result.error?.message}` }); 
+      return { success: false, error: result.error, answer: undefined };
     }
-    return { success: true, error: null, answer };
-  } catch (e: unknown) {
-    const error = e instanceof Error ? e : new Error('Unknown error in agent draft');
-    console.error('Error in handleAgentDraftStream:', error.message, e); // Log original error too
-    return { success: false, error };
+  } catch (error) {
+    console.error('Error in handleAgentDraftStream:', error);
+    onChunk(`Error drafting: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    if (taskId && updateTask) updateTask({ id: taskId, status: 'error', description: `Draft failed: ${error instanceof Error ? error.message : 'Unknown error'}` }); 
+    return { success: false, error: error instanceof Error ? error : new Error('Unknown draft error'), answer: undefined };
+  } finally {
+    if (taskId && removeTask) removeTask(taskId); 
   }
 };
 
 /**
- * Handle a /find-clause query using OpenAI
- * 1. Fetch the document by ID
- * 2. Extract the text
- * 3. Build a prompt for OpenAI to find the clause
- * 4. Stream the response
+ * Handle a /find-clause query using the 'find-clause' Supabase Edge function
  */
 export const handleFindClauseStream = async (
   clause: string,
   docId: string,
-  onChunk: (chunk: string) => void
+  onChunk: (chunk: string) => void,
+  taskId?: string, 
+  updateTask?: UpdateTaskFn, 
+  removeTask?: RemoveTaskFn
 ): Promise<{ success: boolean; error: Error | null; answer?: string }> => {
+  let userId: string | undefined;
   try {
-    // Import here to avoid circular dependency
-    const { getDocumentById } = await import('./documentService');
-    const { data: document, error: docError } = await getDocumentById(docId);
-    if (docError || !document) {
-      throw docError || new Error('Document not found');
-    }
-    if (!document.extractedText) {
-      throw new Error('Document text not available. Please wait for processing to complete.');
-    }
-    const systemPrompt =
-      'You are a paralegal AI assistant. Given a legal document and a clause description, find and return the most relevant clause or section from the document. If no exact match is found, return the closest relevant text.';
-    const userPrompt = `Document text:\n${document.extractedText}\n\nFind the clause: ${clause}`;
+      const { data: { user } } = await supabase.auth.getUser();
+      userId = user?.id;
+  } catch (authError) {
+      console.error('Auth error getting user for find-clause:', authError);
+      return { success: false, error: new Error('Authentication error.') };
+  }
 
-    const stream = await openai.chat.completions.create({
-      model: 'gpt-4',
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt },
-      ],
-      stream: true,
-      temperature: 0.1,
-    });
+  if (!userId) {
+      return { success: false, error: new Error('User not authenticated.') };
+  }
+  
+  console.log(`Handling Find Clause (via Edge Function) for doc ${docId}, clause: "${clause}"`);
 
-    let answer = '';
-    for await (const chunk of stream) {
-      const content = chunk.choices[0]?.delta?.content || '';
-      if (content) {
-        answer += content;
-        onChunk(content);
-      }
+  try {
+    const payload: Record<string, any> = {
+      docId,
+      clause,
+      userId,
+    };
+
+    // Use the processSupabaseStream helper
+    const result = await processSupabaseStream('find-clause', payload, onChunk);
+    if (result.success) {
+      if (taskId && updateTask) updateTask({ id: taskId, status: 'success', description: 'Clause search complete' }); 
+      return { success: true, error: null, answer: result.fullResponse };
+    } else {
+      if (taskId && updateTask) updateTask({ id: taskId, status: 'error', description: `Clause search failed: ${result.error?.message}` }); 
+      return { success: false, error: result.error, answer: undefined };
     }
-    return { success: true, error: null, answer };
-  } catch (e: unknown) {
-    const error = e instanceof Error ? e : new Error('Unknown error finding clause');
-    console.error('Error in handleFindClauseStream:', error.message, e); // Log original error too
-    return { success: false, error };
+  } catch (error) {
+    console.error('Error in handleFindClauseStream:', error);
+    onChunk(`Error finding clause: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    if (taskId && updateTask) updateTask({ id: taskId, status: 'error', description: `Clause search failed: ${error instanceof Error ? error.message : 'Unknown error'}` }); 
+    return { success: false, error: error instanceof Error ? error : new Error('Unknown clause search error'), answer: undefined };
+  } finally {
+    if (taskId && removeTask) removeTask(taskId); 
   }
 };
 
 /**
- * Handle a /agent generate_timeline query using OpenAI
- * 1. Fetch the document by ID
- * 2. Extract the text
- * 3. Build a prompt for OpenAI to generate a timeline
- * 4. Stream the response as a Markdown list
- */
-export const handleGenerateTimelineStream = async (
-  docId: string,
-  onChunk: (chunk: string) => void
-): Promise<{ success: boolean; error: Error | null; answer?: string }> => {
-  try {
-    // Import here to avoid circular dependency
-    const { getDocumentById } = await import('./documentService');
-    const { data: document, error: docError } = await getDocumentById(docId);
-    if (docError || !document) {
-      throw docError || new Error('Document not found');
-    }
-    if (!document.extractedText) {
-      throw new Error('Document text not available. Please wait for processing to complete.');
-    }
-    const systemPrompt =
-      'You are a paralegal AI assistant. Given a legal document, extract a chronological timeline of key events. For each event, identify the date (if available) and provide a concise description. Format the output as a Markdown list, with each item starting with the date.';
-    const userPrompt = `Document text:\n${document.extractedText}\n\nGenerate a timeline of key dates and events as a Markdown list.`;
-
-    const stream = await openai.chat.completions.create({
-      model: 'gpt-4',
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt },
-      ],
-      stream: true,
-      temperature: 0.1,
-    });
-
-    let answer = '';
-    for await (const chunk of stream) {
-      const content = chunk.choices[0]?.delta?.content || '';
-      if (content) {
-        answer += content;
-        onChunk(content);
-      }
-    }
-    return { success: true, error: null, answer };
-  } catch (e: unknown) {
-    const error = e instanceof Error ? e : new Error('Unknown error generating timeline');
-    console.error('Error in handleGenerateTimelineStream:', error.message, e); // Log original error too
-    return { success: false, error };
-  }
-};
-
-/**
- * Handle a /agent explain_term query using OpenAI
- * 1. Build a prompt to define/explain the legal term or acronym
- * 2. Stream the response
+ * Handle a /agent explain_term query using the 'explain-term' Supabase Edge function
  */
 export const handleExplainTermStream = async (
   term: string,
   onChunk: (chunk: string) => void,
-  jurisdiction?: string
+  jurisdiction?: string,
+  caseId?: string, 
+  taskId?: string, 
+  updateTask?: UpdateTaskFn, 
+  removeTask?: RemoveTaskFn
 ): Promise<{ success: boolean; error: Error | null; answer?: string }> => {
+  console.log(`Handling Explain Term (via Edge Function): ${term}, Jurisdiction: ${jurisdiction}`);
+
   try {
-    const systemPrompt =
-      'You are a legal dictionary AI assistant. Given a legal term or acronym, provide a clear, concise definition or explanation in the context of US law unless another jurisdiction is specified.';
-    const userPrompt = `Define or explain the following legal term${jurisdiction ? ` in the context of ${jurisdiction} law` : ' in the context of US law'}: ${term}`;
+    const payload: Record<string, any> = {
+      term,
+      jurisdiction,
+      caseId,
+    };
 
-    const stream = await openai.chat.completions.create({
-      model: 'gpt-4',
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt },
-      ],
-      stream: true,
-      temperature: 0.1,
-    });
-
-    let answer = '';
-    for await (const chunk of stream) {
-      const content = chunk.choices[0]?.delta?.content || '';
-      if (content) {
-        answer += content;
-        onChunk(content);
-      }
+    // Use the processSupabaseStream helper
+    const result = await processSupabaseStream('explain-term', payload, onChunk);
+    if (result.success) {
+      if (taskId && updateTask) updateTask({ id: taskId, status: 'success', description: 'Term explanation complete' }); 
+      return { success: true, error: null, answer: result.fullResponse };
+    } else {
+      if (taskId && updateTask) updateTask({ id: taskId, status: 'error', description: `Term explanation failed: ${result.error?.message}` }); 
+      return { success: false, error: result.error, answer: undefined };
     }
-    return { success: true, error: null, answer };
-  } catch (e: unknown) {
-    const error = e instanceof Error ? e : new Error('Unknown error explaining term');
-    console.error('Error in handleExplainTermStream:', error.message, e); // Log original error too
-    return { success: false, error };
+  } catch (error) {
+    console.error('Error in handleExplainTermStream:', error);
+    onChunk(`Error explaining term: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    if (taskId && updateTask) updateTask({ id: taskId, status: 'error', description: `Term explanation failed: ${error instanceof Error ? error.message : 'Unknown error'}` }); 
+    return { success: false, error: error instanceof Error ? error : new Error('Unknown term explanation error'), answer: undefined };
+  } finally {
+    if (taskId && removeTask) removeTask(taskId); 
   }
 };
 
 /**
- * Handle a /agent compare query using OpenAI
- * Accepts an array of document contexts or IDs, fetches their texts if needed, and builds a prompt for comparison.
- * Streams the response via onChunk.
+ * Handle a /agent compare query using the 'compare-documents' Supabase Edge function
  */
 export const handleAgentCompareStream = async (
-  task: ComparisonTask, // Use the defined interface
   onChunk: (chunk: string) => void,
-  documentContexts?: string | string[],
-  analysisContext?: string
+  caseId: string, 
+  documentContexts?: string | string[], 
+  analysisContext?: string,
+  taskId?: string, 
+  updateTask?: UpdateTaskFn, 
+  removeTask?: RemoveTaskFn
 ): Promise<{ success: boolean; error: Error | null; answer?: string }> => {
-  try {
-    // Accepts either array of extracted texts or array of IDs
-    let docTexts: string[] = [];
-    if (Array.isArray(documentContexts)) {
-      // If they look like IDs (short, no spaces), fetch their text
-      for (const ctx of documentContexts) {
-        if (ctx.length < 40 && !ctx.includes(' ')) {
-          // Looks like an ID, fetch from DB
-          const { getDocumentById } = await import('./documentService');
-          const { data: doc, error } = await getDocumentById(ctx);
-          if (error || !doc || !doc.extractedText) {
-            docTexts.push(`[Document ${ctx}: could not fetch or extract text]`);
-          } else {
-            docTexts.push(doc.extractedText);
-          }
-        } else {
-          // Looks like extracted text
-          docTexts.push(ctx);
-        }
-      }
-    } else if (typeof documentContexts === 'string') {
-      docTexts = [documentContexts];
-    } else {
-      throw new Error('No document contexts provided for comparison.');
-    }
-    if (docTexts.length < 2) {
-      throw new Error('At least two documents are required for comparison.');
-    }
-    // Build the system and user prompt
-    let contextPrompt = '';
-    docTexts.forEach((text, idx) => {
-      contextPrompt += `Document ${idx + 1}:
-${text.substring(0, 8000)}\n\n`;
-    });
-    if (analysisContext) {
-      contextPrompt += `Relevant analysis context:\n${analysisContext}\n`;
-    }
-    const systemPrompt =
-      'You are a paralegal AI assistant. Compare the following legal documents. Highlight similarities, differences, and any notable legal issues. Be concise and use bullet points or tables where helpful.';
-    const userPrompt = `${contextPrompt}\nCompare the above documents as requested by the user.`;
-    const stream = await openai.chat.completions.create({
-      model: 'gpt-4',
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt },
-      ],
-      stream: true,
-      temperature: 0.2,
-    });
-    let answer = '';
-    for await (const chunk of stream) {
-      const content = chunk.choices[0]?.delta?.content || '';
-      if (content) {
-        answer += content;
-        onChunk(content);
-      }
-    }
-    return { success: true, error: null, answer };
-  } catch (e: unknown) {
-    const error = e instanceof Error ? e : new Error('Unknown error in agent comparison');
-    console.error('Error in handleAgentCompareStream:', error.message, e); // Log original error too
+  const docIds = Array.isArray(documentContexts) 
+    ? documentContexts 
+    : (documentContexts ? [documentContexts] : []);
+
+  if (docIds.length < 2) {
+    const error = new Error('Compare agent requires at least two document IDs.');
+    onChunk(`Error: ${error.message}`);
     return { success: false, error };
+  }
+
+  let userId: string | undefined;
+  try {
+      const { data: { user } } = await supabase.auth.getUser();
+      userId = user?.id;
+  } catch (authError) {
+      console.error('Auth error getting user for compare-documents:', authError);
+      return { success: false, error: new Error('Authentication error.') };
+  }
+  if (!userId) {
+      return { success: false, error: new Error('User not authenticated.') };
+  }
+
+  console.log(`Handling Agent Compare (via Edge Function) for docs: ${docIds.join(', ')}`);
+
+  try {
+    const payload: Record<string, any> = {
+      caseId,
+      documentContexts: docIds,
+      analysisContext,
+      userId,
+    };
+
+    // Use the processSupabaseStream helper
+    const result = await processSupabaseStream('compare-documents', payload, onChunk);
+    if (result.success) {
+      if (taskId && updateTask) updateTask({ id: taskId, status: 'success', description: 'Comparison complete' }); 
+      return { success: true, error: null, answer: result.fullResponse };
+    } else {
+      if (taskId && updateTask) updateTask({ id: taskId, status: 'error', description: `Comparison failed: ${result.error?.message}` }); 
+      return { success: false, error: result.error, answer: undefined };
+    }
+  } catch (error) {
+    console.error('Error in handleAgentCompareStream:', error);
+    onChunk(`Error comparing documents: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    if (taskId && updateTask) updateTask({ id: taskId, status: 'error', description: `Comparison failed: ${error instanceof Error ? error.message : 'Unknown error'}` }); 
+    return { success: false, error: error instanceof Error ? error : new Error('Unknown comparison error'), answer: undefined };
+  } finally {
+    if (taskId && removeTask) removeTask(taskId); 
   }
 };
 
 /**
  * Handle a /agent flag_privileged_terms query using OpenAI
- * Scans a document for keywords/phrases associated with attorney-client privilege or work product.
- * Streams the response via onChunk.
+ * 1. Fetch the document by ID
+ * 2. Extract the text
+ * 3. Build a prompt for OpenAI to flag terms
+ * 4. Stream the response
  */
 export const handleFlagPrivilegedTermsStream = async (
   docId: string,
-  onChunk: (chunk: string) => void
+  onChunk: (chunk: string) => void,
+  caseId: string,
+  taskId?: string, 
+  updateTask?: UpdateTaskFn, 
+  removeTask?: RemoveTaskFn
 ): Promise<{ success: boolean; error: Error | null; answer?: string }> => {
-  console.log(`Starting handleFlagPrivilegedTermsStream for docId: ${docId}`);
+  console.log(`Starting handleFlagPrivilegedTermsStream for docId: ${docId} in case: ${caseId}`);
   try {
-    // Simulate streaming for immediate feedback
+    const { data: caseDocLink, error: linkError } = await supabase
+      .from('case_documents').select('document_id').eq('case_id', caseId).eq('document_id', docId).maybeSingle();
+    if (linkError || !caseDocLink) throw linkError || new Error('Document not found or access denied.');
+
     onChunk('Analyzing document for potentially privileged terms...\n\n');
-    await new Promise(resolve => setTimeout(resolve, 500)); // Simulate work
     
-    // Call backend document analysis service
-    const { analyzeDocument } = await import('./documentAnalysisService');
-    const { data, error } = await analyzeDocument(docId, 'privilegedTerms');
+    const dummyAddTask = () => {};
+    const dummyUpdateTask = () => {};
+    const dummyRemoveTask = () => {};
+
+    const { data, error } = await analyzeDocumentService({ 
+        documentId: docId, 
+        analysisType: 'privilegedTerms',
+        addTask: dummyAddTask,
+        updateTask: dummyUpdateTask,
+        removeTask: dummyRemoveTask
+    });
     
     if (error || !data) {
       console.error('Error flagging privileged terms:', error);
@@ -764,338 +608,429 @@ export const handleFlagPrivilegedTermsStream = async (
       return { success: false, error: error || new Error('Unknown error') };
     }
 
-    let result = 'Analysis complete.\n\n';
-    if (data.result && Array.isArray(data.result) && data.result.length > 0) {
-      result += 'Potentially Privileged Terms Found:\n';
-      data.result.forEach((term, index) => {
-        result += `${index + 1}. ${term}\n`;
+    let resultText = 'Analysis complete.\n\n';
+    const terms = (data as any)?.result; 
+    if (terms && Array.isArray(terms) && terms.length > 0) {
+      resultText += 'Potentially Privileged Terms Found:\n';
+      terms.forEach((term: string, index: number) => {
+        resultText += `${index + 1}. ${term}\n`;
       });
-      result += '\nPlease review these terms in context to confirm privilege.';
+      resultText += '\nPlease review these terms in context to confirm privilege.';
     } else {
-      result += 'No potentially privileged terms were automatically detected.';
+      resultText += 'No potentially privileged terms were automatically detected.';
     }
     
-    onChunk(result);
+    onChunk(resultText);
     console.log('Flag privileged terms analysis complete.');
-    return { success: true, error: null, answer: result };
-
+    if (taskId && updateTask) updateTask({ id: taskId, status: 'success', description: 'Privileged terms flagged' }); 
+    return { success: true, error: null, answer: resultText };
   } catch (e: unknown) {
-    const error = e instanceof Error ? e : new Error('Unknown error flagging privileged terms');
-    console.error('Error handling flag privileged terms:', error.message, e); // Log original error too
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error flagging privileged terms';
-    onChunk(`Error: An unexpected error occurred while flagging terms. ${errorMessage}`);
-    return { success: false, error };
+     const error = e instanceof Error ? e : new Error('Unknown error flagging privileged terms');
+     console.error('Error handling flag privileged terms:', error.message, e); 
+     const errorMessage = error instanceof Error ? error.message : 'Unknown error flagging privileged terms';
+     onChunk(`Error: An unexpected error occurred while flagging terms. ${errorMessage}`);
+     if (taskId && updateTask) updateTask({ id: taskId, status: 'error', description: `Flagging failed: ${error instanceof Error ? error.message : 'Unknown error'}` }); 
+     return { success: false, error };
+  } finally {
+    if (taskId && removeTask) removeTask(taskId); 
   }
 };
 
 /**
- * Handle Perplexity agent tasks by invoking the Supabase Edge Function.
+ * Handle a /agent perplexity query using the Supabase Edge function
  */
 export const handlePerplexityAgent = async (
-  conversationId: string, // Keep conversationId if needed for context/history
-  params: { query: string },
-  onChunk: (chunk: string) => void
-): Promise<{ success: boolean; error: Error | null; sources?: Source[] }> => {
-  console.log(`Invoking Perplexity agent for conversation ${conversationId} with query: ${params.query}`);
+  conversationId: string, 
+  params: { query: string; model?: string },
+  onChunk: (chunk: string) => void,
+  taskId?: string, 
+  updateTask?: UpdateTaskFn, 
+  removeTask?: RemoveTaskFn
+): Promise<DispatcherResponse> => {
+  console.log(`Handling Perplexity Agent (via Streaming Edge Function) for conv: ${conversationId}, query: ${params.query}`);
   
   try {
-    onChunk('Asking Perplexity AI...\n'); // Initial feedback
-    
-    // TODO: Fetch conversation history if needed for context
-    // const { data: history, error: historyError } = await getConversationMessages(conversationId);
-    // if (historyError) {
-    //   console.warn('Could not fetch history for Perplexity:', historyError);
-    // }
+    const { query, model = 'llama-3-sonar-large-32k-online' } = params;
+    const payload = {
+      query,
+      model,
+    };
 
-    // Invoke the Supabase Function
-    const { data, error } = await supabase.functions.invoke('perplexity-agent', {
-      body: { 
-        query: params.query,
-        // conversationHistory: history // Pass history if fetched
-      },
-    });
-
-    if (error) {
-      console.error('Error invoking Perplexity Edge Function:', error);
-      throw new Error(`Failed to call Perplexity agent: ${error.message}`);
+    // Use the processSupabaseStream helper
+    const result = await processSupabaseStream('perplexity-search', payload, onChunk);
+    if (result.success) {
+      if (taskId && updateTask) updateTask({ id: taskId, status: 'success', description: 'Perplexity query complete' }); 
+      return { success: true, sources: result.sources as SourceInfo[] | undefined };
+    } else {
+      if (taskId && updateTask) updateTask({ id: taskId, status: 'error', description: `Perplexity query failed: ${result.error?.message}` }); 
+      return { success: false, error: result.error };
     }
-
-    if (data.error) {
-      console.error('Error returned from Perplexity Edge Function:', data.error);
-      throw new Error(`Perplexity agent failed: ${data.error}`);
-    }
-
-    // Process the response
-    const answer = data.answer || 'Perplexity did not provide an answer.';
-    const sources = data.sources || [];
-    
-    onChunk(answer); // Send the full answer as one chunk for now
-    
-    // If sources exist, format them
-    if (sources.length > 0) {
-      let sourcesText = '\n\nSources:\n';
-      sources.forEach((src: { url?: string, title?: string }, i: number) => {
-        sourcesText += `${i + 1}. ${src.title || 'Source'}${src.url ? ` (${src.url})` : ''}\n`;
-      });
-      onChunk(sourcesText); // Send sources as a separate chunk (or append)
-    }
-
-    console.log('Perplexity agent execution successful.');
-    return { success: true, error: null, sources: sources };
-
-  } catch (e: unknown) {
-    const error = e instanceof Error ? e : new Error('Unknown error in Perplexity agent');
-    console.error('Error handling Perplexity agent:', error.message, e);
-    const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
-    onChunk(`Error interacting with Perplexity: ${errorMessage}`);
-    return { success: false, error: error instanceof Error ? error : new Error(errorMessage) };
+  } catch (error) {
+    console.error('Error calling perplexity-agent function:', error);
+    onChunk(`Error processing Perplexity query: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    if (taskId && updateTask) updateTask({ id: taskId, status: 'error', description: `Perplexity query failed: ${error instanceof Error ? error.message : 'Unknown error'}` }); 
+    return { success: false, error: error instanceof Error ? error : new Error('Unknown Perplexity agent error') };
+  } finally {
+    if (taskId && removeTask) removeTask(taskId); 
   }
-};
+}; 
 
 /**
- * Handle a case-wide document search query.
- * Fetches documents related to the case and performs a search.
- */
-export const handleCaseSearch = async (
-  caseId: string,
-  query: string,
-  onChunk: (chunk: string) => void
-): Promise<{ success: boolean; error: Error | null; answer?: string }> => {
-  console.log(`Handling case search for caseId: ${caseId} with query: "${query}"`);
-  try {
-    // 1. Fetch document IDs for the given caseId
-    onChunk('[{"type": "status", "message": "Fetching documents for the case..."}]');
-    const { data: caseDocuments, error: docError } = await supabase
-      .from('case_documents')
-      .select('document_id')
-      .eq('case_id', caseId);
-
-    if (docError) {
-      console.error('Error fetching case documents:', docError);
-      onChunk(`[{"type": "error", "message": "Error fetching documents: ${docError.message}"}]`);
-      return { success: false, error: docError };
-    }
-
-    if (!caseDocuments || caseDocuments.length === 0) {
-      console.log('No documents found for this case.');
-      onChunk('[{"type": "info", "message": "No documents found for this case to search."}]');
-      // Return success with a message and null error
-      return { success: true, answer: "No documents found for this case to search.", error: null };
-    }
-
-    const documentIds = caseDocuments.map(doc => doc.document_id);
-    console.log(`Found ${documentIds.length} documents for case ${caseId}:`, documentIds);
-
-    // 2. Fetch content for each document ID
-    onChunk(`[{"type": "status", "message": "Fetching content for ${documentIds.length} document(s)..."}]`);
-    
-    // Use Promise.all to fetch all document contents concurrently
-    const contentPromises = documentIds.map(async (docId) => {
-      const { data: documentData, error: contentError } = await supabase
-        .from('documents')
-        .select('content, name') // Select content and name
-        .eq('id', docId)
-        .single(); // Expect only one document per ID
-
-      if (contentError) {
-        console.error(`Error fetching content for document ${docId}:`, contentError);
-        // Decide how to handle partial failures. For now, we'll skip this document.
-        // Could also throw an error to fail the whole search or return partial results.
-        return null; 
-      }
-      if (!documentData) {
-        console.warn(`No content found for document ${docId}. Skipping.`);
-        return null;
-      }
-      // Return an object with name and content
-      return { name: documentData.name || `Document ${docId}`, content: documentData.content };
-    });
-
-    const documentContents = (await Promise.all(contentPromises)).filter(doc => doc !== null) as { name: string, content: string }[]; // Filter out nulls
-
-    if (documentContents.length === 0) {
-      console.log('No content could be fetched for any of the documents.');
-      onChunk(`[{"type": "info", "message": "Could not fetch content for the case documents."}]`);
-      return { success: true, answer: "Could not fetch content for the case documents.", error: null };
-    }
-
-    console.log(`Successfully fetched content for ${documentContents.length} documents.`);
-
-    // 3. Combine content
-    let combinedContext = '';
-    documentContents.forEach(doc => {
-        // Add document name as a header for clarity
-        combinedContext += `--- Document: ${doc.name} ---\n\n`;
-        combinedContext += `${doc.content}\n\n`; // Add content, ensure separation
-    });
-    
-    // Limit combined context size if necessary (e.g., for token limits)
-    const MAX_CONTEXT_LENGTH = 100000; // Example limit, adjust as needed
-    if (combinedContext.length > MAX_CONTEXT_LENGTH) {
-        console.warn(`Combined context length (${combinedContext.length}) exceeds limit (${MAX_CONTEXT_LENGTH}). Truncating.`);
-        combinedContext = combinedContext.substring(0, MAX_CONTEXT_LENGTH);
-        onChunk(`[{"type": "warning", "message": "Combined document content is very large and has been truncated."}]`);
-    }
-
-    // 4. Construct prompt and call OpenAI
-    onChunk(`[{"type": "status", "message": "Searching documents with AI..."}]`);
-
-    const systemPrompt = `You are a paralegal AI assistant. You are given a collection of documents related to a specific case, marked with '--- Document: [Document Name] ---'. Search through these documents to find information relevant to the user's query. Summarize your findings clearly. When possible, indicate which document(s) (using their names) contain the relevant information.`;
-
-    const userPrompt = `Case Document Context:
-${combinedContext}
-
-User Query: ${query}
-
-Based *only* on the provided Case Document Context, find and summarize the information relevant to the User Query. Cite the document names where the information is found.`;
-
-    const stream = await openai.chat.completions.create({
-      model: 'gpt-4', // Or consider 'gpt-4-turbo' if context is very large
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt },
-      ],
-      stream: true,
-      temperature: 0.1, // Low temperature for factual search
-    });
-
-    // 5. Stream results via onChunk
-    let fullResponse = '';
-    for await (const chunk of stream) {
-      const content = chunk.choices[0]?.delta?.content || '';
-      if (content) {
-        fullResponse += content;
-        // Stream raw content chunks directly
-        onChunk(content); 
-      }
-    }
-
-    console.log(`Case search completed for caseId: ${caseId}`);
-    return { success: true, answer: fullResponse, error: null };
-
-  } catch (e: unknown) {
-    const error = e instanceof Error ? e : new Error('Unknown error in case search');
-    console.error('Error handling case search:', error.message, e); // Log original error too
-    const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
-    onChunk(`[{"type": "error", "message": "Error during case search: ${errorMessage}"}]`);
-    return { success: false, error: error instanceof Error ? error : new Error(errorMessage) };
-  }
-};
-
-// TODO: SECURITY - Move OpenAI call to a secure backend API route for production
-/**
- * Handles rewriting selected text using OpenAI stream.
+ * Handle a /agent flag_privileged_terms query using OpenAI
+ * 1. Fetch the document by ID
+ * 2. Extract the text
+ * 3. Build a prompt for OpenAI to flag terms
+ * 4. Stream the response
  */
 export const handleRewriteStream = async (
   selectedText: string,
   onChunk: (chunk: string) => void,
-  surroundingContext?: string, // Optional context around the selection
-  instructions?: string // Optional specific instructions (e.g., "make it more formal")
+  caseId: string, 
+  documentId: string, 
+  surroundingContext?: string,
+  instructions?: string,
+  taskId?: string, 
+  updateTask?: UpdateTaskFn, 
+  removeTask?: RemoveTaskFn
 ): Promise<{ success: boolean; error: Error | null; answer?: string }> => {
-  console.log(`Starting handleRewriteStream`);
-  let fullResponse = '';
+  console.log(`Invoking rewrite-text function for doc ${documentId} in case ${caseId}`);
   try {
-    const systemPrompt = `You are an expert legal assistant AI. Rewrite the following text as instructed. Maintain the original meaning and context unless specified otherwise.`;
+    const invokePayload = {
+      textToRewrite: selectedText,
+      instructions,
+      surroundingContext,
+    };
 
-    let userMessageContent = `Rewrite the following text:
---- TEXT START ---
-${selectedText}
---- TEXT END ---`;
+    const { data: responseData, error: invokeError } = await supabase.functions.invoke(
+      'rewrite-text',
+      {
+        body: invokePayload,
+      }
+    );
 
-    if (instructions) {
-      userMessageContent += `\n\nInstructions: ${instructions}`;
+    if (invokeError) throw invokeError;
+    if (!(responseData instanceof ReadableStream)) {
+        let errorMessage = 'Received non-stream response from rewrite-text function.';
+        try {
+            const errorJson = JSON.parse(await new Response(responseData).text());
+            errorMessage = errorJson.error || errorMessage;
+        } catch (e) { /* ignore parsing error */ }
+        throw new Error(errorMessage);
     }
 
-    if (surroundingContext) {
-        userMessageContent += `\n\nFor context, here is the text surrounding the selection:
---- CONTEXT START ---
-${surroundingContext}
---- CONTEXT END ---`;
-    }
+    const reader = responseData.getReader();
+    const decoder = new TextDecoder();
+    let accumulatedResponse = '';
+    let done = false;
 
-    const stream = await openai.chat.completions.create({
-      model: 'gpt-4', // Or your preferred model
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userMessageContent },
-      ],
-      stream: true,
-      temperature: 0.5, // Adjust temperature as needed for creativity vs. fidelity
-    });
-
-    for await (const part of stream) {
-      const chunk = part.choices[0]?.delta?.content || '';
-      fullResponse += chunk;
-      onChunk(chunk);
+    while (!done) {
+      const { value, done: readerDone } = await reader.read();
+      done = readerDone;
+      if (value) {
+        const chunk = decoder.decode(value, { stream: true });
+        const lines = chunk.split('\n').filter(line => line.trim() !== '');
+        for (const line of lines) {
+             if (line.startsWith('data:')) {
+                const dataContent = line.substring(5).trim();
+                if (dataContent === '[DONE]') {
+                    done = true;
+                    break;
+                }
+                try {
+                   const parsedChunk = JSON.parse(dataContent);
+                   const content = parsedChunk.choices?.[0]?.delta?.content || '';
+                   if (content) {
+                       accumulatedResponse += content;
+                       onChunk(content);
+                   }
+                } catch (e) {
+                    console.warn('Could not parse stream chunk as JSON:', dataContent, e);
+                }
+            } else {
+                 console.warn('Received non-SSE line:', line);
+            }
+        }
+      }
     }
 
     console.log('Rewrite stream finished successfully.');
-    return { success: true, error: null, answer: fullResponse };
-
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : 'Unknown error during rewrite stream';
-    console.error('Error in handleRewriteStream:', message);
-    // Pass a generic or specific error message back if needed
-    onChunk(`\n\n--- ERROR ---\n${message}`); 
-    return { success: false, error: error instanceof Error ? error : new Error(message) };
+    if (taskId && updateTask) updateTask({ id: taskId, status: 'success', description: 'Rewrite complete' }); 
+    return { success: true, error: null, answer: accumulatedResponse };
+  } catch (error) {
+    console.error('Error in handleRewriteStream:', error);
+    onChunk(`\n\n--- ERROR ---\n${error instanceof Error ? error.message : 'Unknown error'}`);
+    if (taskId && updateTask) updateTask({ id: taskId, status: 'error', description: `Rewrite failed: ${error instanceof Error ? error.message : 'Unknown error'}` }); 
+    return { success: false, error: error instanceof Error ? error : new Error('Unknown rewrite error'), answer: undefined };
+  } finally {
+    if (taskId && removeTask) removeTask(taskId); 
   }
 };
 
-// TODO: SECURITY - Move OpenAI call to a secure backend API route for production
 /**
- * Handles summarizing selected text using OpenAI stream.
+ * Handle a /agent flag_privileged_terms query using OpenAI
+ * 1. Fetch the document by ID
+ * 2. Extract the text
+ * 3. Build a prompt for OpenAI to flag terms
+ * 4. Stream the response
  */
 export const handleSummarizeStream = async (
   selectedText: string,
   onChunk: (chunk: string) => void,
-  surroundingContext?: string, // Optional context around the selection
-  instructions?: string // Optional specific instructions (e.g., "summarize in one sentence")
+  caseId: string, 
+  documentId: string, 
+  surroundingContext?: string,
+  instructions?: string,
+  taskId?: string, 
+  updateTask?: UpdateTaskFn, 
+  removeTask?: RemoveTaskFn
 ): Promise<{ success: boolean; error: Error | null; answer?: string }> => {
-  console.log(`Starting handleSummarizeStream`);
-  let fullResponse = '';
+  console.log(`Invoking summarize-text function for doc ${documentId} in case ${caseId}`);
   try {
-    const systemPrompt = `You are an expert legal assistant AI. Summarize the following text concisely and accurately. Capture the main points and key information.`;
+    const invokePayload = {
+      textToSummarize: selectedText,
+      instructions,
+      surroundingContext,
+    };
 
-    let userMessageContent = `Summarize the following text:
---- TEXT START ---
-${selectedText}
---- TEXT END ---`;
+    const { data: responseData, error: invokeError } = await supabase.functions.invoke(
+      'summarize-text',
+      {
+        body: invokePayload,
+      }
+    );
 
-    if (instructions) {
-      userMessageContent += `\n\nInstructions: ${instructions}`;
+    if (invokeError) throw invokeError;
+    if (!(responseData instanceof ReadableStream)) {
+        let errorMessage = 'Received non-stream response from summarize-text function.';
+        try {
+            const errorJson = JSON.parse(await new Response(responseData).text());
+            errorMessage = errorJson.error || errorMessage;
+        } catch (e) { /* ignore parsing error */ }
+        throw new Error(errorMessage);
     }
-    
-    if (surroundingContext) {
-        userMessageContent += `\n\nFor context, here is the text surrounding the selection:
---- CONTEXT START ---
-${surroundingContext}
---- CONTEXT END ---`;
-    }
 
-    const stream = await openai.chat.completions.create({
-      model: 'gpt-4', // Or your preferred model
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userMessageContent },
-      ],
-      stream: true,
-      temperature: 0.3, // Lower temperature for more focused summaries
-    });
+    const reader = responseData.getReader();
+    const decoder = new TextDecoder();
+    let accumulatedResponse = '';
+    let done = false;
 
-    for await (const part of stream) {
-      const chunk = part.choices[0]?.delta?.content || '';
-      fullResponse += chunk;
-      onChunk(chunk);
+    while (!done) {
+      const { value, done: readerDone } = await reader.read();
+      done = readerDone;
+      if (value) {
+        const chunk = decoder.decode(value, { stream: true });
+        const lines = chunk.split('\n').filter(line => line.trim() !== '');
+        for (const line of lines) {
+             if (line.startsWith('data:')) {
+                const dataContent = line.substring(5).trim();
+                if (dataContent === '[DONE]') {
+                    done = true;
+                    break;
+                }
+                try {
+                   const parsedChunk = JSON.parse(dataContent);
+                   const content = parsedChunk.choices?.[0]?.delta?.content || '';
+                   if (content) {
+                       accumulatedResponse += content;
+                       onChunk(content);
+                   }
+                } catch (e) {
+                    console.warn('Could not parse stream chunk as JSON:', dataContent, e);
+                }
+            } else {
+                 console.warn('Received non-SSE line:', line);
+            }
+        }
+      }
     }
 
     console.log('Summarize stream finished successfully.');
-    return { success: true, error: null, answer: fullResponse };
+    if (taskId && updateTask) updateTask({ id: taskId, status: 'success', description: 'Summarization complete' }); 
+    return { success: true, error: null, answer: accumulatedResponse };
+  } catch (error) {
+    console.error('Error in handleSummarizeStream:', error);
+    onChunk(`\n\n--- ERROR ---\n${error instanceof Error ? error.message : 'Unknown error'}`);
+    if (taskId && updateTask) updateTask({ id: taskId, status: 'error', description: `Summarization failed: ${error instanceof Error ? error.message : 'Unknown error'}` }); 
+    return { success: false, error: error instanceof Error ? error : new Error('Unknown summarization error'), answer: undefined };
+  } finally {
+    if (taskId && removeTask) removeTask(taskId); 
+  }
+};
 
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : 'Unknown error during summarize stream';
-    console.error('Error in handleSummarizeStream:', message);
-    // Pass a generic or specific error message back if needed
-    onChunk(`\n\n--- ERROR ---\n${message}`); 
-    return { success: false, error: error instanceof Error ? error : new Error(message) };
+/**
+ * Helper for processing SSE Streams from Supabase Functions
+ */
+async function processSupabaseStream(
+    functionName: string,
+    payload: Record<string, unknown>,
+    onChunk: (chunk: string) => void,
+    onSnippets?: (snippets: SourceInfo[]) => void, 
+    onError?: (errorMessage: string) => void
+): Promise<{ success: boolean; error: Error | null; fullResponse: string; sources?: SourceInfo[] }> {
+    let accumulatedResponse = '';
+    let receivedSources: SourceInfo[] | undefined = undefined;
+    try {
+        console.log(`Invoking streaming function: ${functionName}`);
+        const { data: responseData, error: invokeError } = await supabase.functions.invoke(functionName, {
+            body: payload,
+        });
+
+        if (invokeError) throw invokeError;
+        if (!responseData) throw new Error('Function invocation returned no data.');
+
+        const stream = responseData.stream();
+        const reader = stream.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || ''; 
+
+            for (const line of lines) {
+                if (line.trim() === '') continue; 
+
+                if (line.startsWith('event:')) {
+                    const eventType = line.substring(6).trim();
+                    const nextLineIndex = lines.indexOf(line) + 1;
+                    if (nextLineIndex < lines.length && lines[nextLineIndex].startsWith('data:')) {
+                        const dataContent = lines[nextLineIndex].substring(5).trim();
+                        try {
+                            const jsonData = JSON.parse(dataContent);
+                            if (eventType === 'snippets' && onSnippets) {
+                                receivedSources = jsonData as SourceInfo[]; 
+                                onSnippets(receivedSources);
+                            } else if (eventType === 'answer') {
+                                const chunk = jsonData; 
+                                if (typeof chunk === 'string') {
+                                     accumulatedResponse += chunk;
+                                     onChunk(chunk);
+                                }
+                            } else if (eventType === 'error') {
+                                const errorMessage = jsonData.message || 'Unknown stream error';
+                                console.error(`Stream error event from ${functionName}:`, errorMessage);
+                                if (onError) onError(errorMessage);
+                            } else if (eventType === 'done') {
+                                console.log(`Received 'done' event from ${functionName}`);
+                            }
+                        } catch (e) {
+                            console.warn(`Failed to parse SSE data line as JSON: ${dataContent}`, e);
+                        }
+                    }
+                } else if (line.startsWith('data:')) {
+                    const dataContent = line.substring(5).trim();
+                     try {
+                         const chunk = JSON.parse(dataContent);
+                         const textChunk = typeof chunk === 'string' ? chunk : chunk.choices?.[0]?.delta?.content || '';
+                         if (textChunk) {
+                            accumulatedResponse += textChunk;
+                            onChunk(textChunk);
+                         }
+                     } catch (e) {
+                         console.warn('Could not parse standard data line as JSON, treating as raw:', dataContent);
+                     }
+                }
+            }
+        }
+        
+        console.log(`Stream finished for ${functionName}. Full response length: ${accumulatedResponse.length}`);
+        return { success: true, error: null, fullResponse: accumulatedResponse, sources: receivedSources }; 
+    } catch (e: unknown) {
+        const error = e instanceof Error ? e : new Error(`Unknown error processing stream for ${functionName}`);
+        console.error(error.message, e);
+        if (onError) onError(error.message);
+        return { success: false, error, fullResponse: accumulatedResponse, sources: receivedSources };
+    }
+}
+
+/**
+ * Handle Summarize action (non-streaming)
+ */
+export const summarizeTextSimple = async (
+  selectedText: string,
+  instructions?: string,
+  surroundingContext?: string
+): Promise<string> => {
+  console.log(`Invoking summarize-text function (non-streaming)`);
+  const invokePayload = {
+    textToSummarize: selectedText,
+    instructions,
+    surroundingContext,
+    stream: false // Add flag to request non-streaming response (needs function support)
+  };
+
+  const { data, error } = await supabase.functions.invoke(
+    'summarize-text',
+    {
+      body: invokePayload,
+    }
+  );
+
+  if (error) {
+    console.error('Error invoking summarize-text:', error);
+    throw new Error(error.message || 'Failed to summarize text.');
+  }
+
+  // Assuming the function returns { result: string } when stream: false
+  if (data && typeof data.result === 'string') { 
+    return data.result;
+  } else {
+     // Fallback or handle unexpected response
+     console.error('Unexpected response from summarize-text:', data);
+     // Attempt to parse if it looks like a stream error message
+     try {
+        const errorJson = JSON.parse(await new Response(data).text());
+        throw new Error(errorJson.error || 'Invalid response from summarize function.');
+     } catch (e) {
+        throw new Error('Invalid response from summarize function.');
+     }
+  }
+};
+
+/**
+ * Handle Rewrite action (non-streaming)
+ */
+export const rewriteTextSimple = async (
+  selectedText: string,
+  instructions?: string,
+  surroundingContext?: string,
+  mode?: 'improve' | 'shorten' | 'expand' | 'professional' | 'formal' | 'simple' | 'custom' 
+): Promise<string> => {
+  console.log(`Invoking rewrite-text function (non-streaming) with mode: ${mode || 'improve'}`);
+  const invokePayload = {
+    textToRewrite: selectedText,
+    instructions,
+    surroundingContext,
+    mode: mode || 'improve',
+    stream: false 
+  };
+
+  const { data, error } = await supabase.functions.invoke(
+    'rewrite-text',
+    {
+      body: invokePayload,
+    }
+  );
+
+  if (error) {
+    console.error('Error invoking rewrite-text:', error);
+    throw new Error(error.message || 'Failed to rewrite text.');
+  }
+  
+  if (data && typeof data.result === 'string') { 
+    return data.result;
+  } else {
+     console.error('Unexpected response from rewrite-text:', data);
+      try {
+        const errorJson = JSON.parse(await new Response(data).text());
+        throw new Error(errorJson.error || 'Invalid response from rewrite function.');
+     } catch (e) {
+        throw new Error('Invalid response from rewrite function.');
+     }
   }
 };

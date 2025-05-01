@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { User, AuthError } from '@supabase/supabase-js';
 import * as authService from '@/services/authService';
+import { supabase } from '@/lib/supabaseClient';
 
 interface UseAuthReturn {
   user: User | null;
@@ -53,21 +54,28 @@ export const useAuth = (): UseAuthReturn => {
   }, []);
 
   useEffect(() => {
-    checkUserSession();
+    // checkUserSession(); // Remove this initial call
+    setLoading(true); // Ensure loading starts true
 
-    // Optional: Set up a listener for auth state changes if Supabase provides one
-    // This would keep the user state synced without needing manual refreshes
-    // const { data: authListener } = authService.supabase.auth.onAuthStateChange(
-    //   (_event, session) => {
-    //     setUser(session?.user ?? null);
-    //     setLoading(false); // Update loading state when listener responds
-    //   }
-    // );
-    // return () => {
-    //   authListener?.subscription.unsubscribe();
-    // };
+    // Use the directly imported supabase client for the listener
+    const { data: authListener } = supabase.auth.onAuthStateChange(
+      (_event, session) => {
+        setUser(session?.user ?? null);
+        setError(null); // Clear errors on auth change
+        setLoading(false); // Update loading state when listener responds
+      }
+    );
+    
+    // Set initial loading state correctly
+    // Check if there's already a session synchronously? Supabase often handles this.
+    // We rely on the listener to fire initially.
 
-  }, [checkUserSession]);
+    return () => {
+      // Ensure subscription exists before trying to unsubscribe
+      authListener?.subscription.unsubscribe();
+    };
+
+  }, []); // Remove checkUserSession from dependency array
 
   // Wrap signOut to clear local state and return the service result
   const handleSignOut = useCallback(async (): Promise<{ error: AuthError | unknown | null }> => {

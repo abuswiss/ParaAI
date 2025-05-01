@@ -1182,3 +1182,47 @@ export const createAITemplateDraft = async (
     return { data: null, error: typedError };
   }
 };
+
+/**
+ * Search templates by name or description for the current user.
+ */
+export const searchTemplatesByName = async (
+  query: string,
+  limit: number = 10
+): Promise<{ data: DocumentTemplate[] | null; error: PostgrestError | Error | null }> => {
+  try {
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
+      throw authError || new Error('User not authenticated');
+    }
+
+    const searchPattern = `%${query}%`;
+
+    const { data, error } = await supabase
+      .from('document_templates')
+      .select<string, RawDocumentTemplate>('*')
+      .or(`is_public.eq.true,creator_id.eq.${user.id}`) // User can see public or their own
+      // Search in name OR description
+      .or(`name.ilike.${searchPattern},description.ilike.${searchPattern}`)
+      .limit(limit)
+      .order('updated_at', { ascending: false });
+
+    if (error) {
+      console.error('Error searching templates:', error);
+      return { data: null, error };
+    }
+
+    if (!data) {
+      return { data: [], error: null };
+    }
+
+    const templates: DocumentTemplate[] = data.map(transformTemplateData);
+    return { data: templates, error: null };
+
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error searching templates';
+    console.error('Error searching templates:', message);
+    const typedError = error instanceof PostgrestError ? error : error instanceof Error ? error : new Error(message);
+    return { data: null, error: typedError };
+  }
+};

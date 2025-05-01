@@ -1,4 +1,7 @@
 import { Component, ErrorInfo, ReactNode } from 'react';
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/Alert";
+import { Button } from "@/components/ui/Button";
+import { Icons } from "@/components/ui/Icons"; // Assuming AlertTriangle is here
 
 interface ErrorBoundaryProps {
   children: ReactNode;
@@ -45,36 +48,29 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
         return this.props.fallback;
       }
       
-      // Default fallback UI
+      // Default fallback UI using shadcn/ui Alert and Button
       return (
-        <div className="p-6 bg-gray-900 rounded-lg border border-red-800 text-center">
-          <svg 
-            xmlns="http://www.w3.org/2000/svg" 
-            className="h-12 w-12 mx-auto text-red-500 mb-4" 
-            fill="none" 
-            viewBox="0 0 24 24" 
-            stroke="currentColor"
-          >
-            <path 
-              strokeLinecap="round" 
-              strokeLinejoin="round" 
-              strokeWidth={2} 
-              d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" 
-            />
-          </svg>
-          <h3 className="text-lg font-medium text-red-400 mb-2">
-            Something went wrong
-          </h3>
-          <p className="text-text-secondary mb-4">
-            An error occurred while rendering this component.
-          </p>
-          <button
-            onClick={() => this.setState({ hasError: false, error: null })}
-            className="px-4 py-2 bg-primary text-white rounded hover:bg-primary-hover"
-          >
-            Try again
-          </button>
-        </div>
+        <Alert variant="destructive" className="m-4">
+          <Icons.AlertTriangle className="h-4 w-4" />
+          <AlertTitle>Something Went Wrong</AlertTitle>
+          <AlertDescription className="space-y-2">
+            <p>An unexpected error occurred.</p>
+            {/* Optionally display error message in dev mode */}
+            {process.env.NODE_ENV === 'development' && this.state.error && (
+              <pre className="mt-2 text-xs whitespace-pre-wrap bg-background/50 p-2 rounded">
+                {this.state.error.message}
+              </pre>
+            )}
+            <Button 
+              variant="secondary" 
+              size="sm"
+              onClick={() => this.setState({ hasError: false, error: null })}
+              className="mt-2"
+            >
+              Try again
+            </Button>
+          </AlertDescription>
+        </Alert>
       );
     }
 

@@ -1,24 +1,26 @@
 // Command parser utility for chat input
 // Recognizes /research, /agent commands, /use template, and returns a Task object or null
 
-import { AgentName } from './agents'; // Assuming AgentName type exists
+import { AnalysisType } from '../services/documentAnalysisService'; // Import AnalysisType
 
 // Define specific task types for clarity
-interface HelpTask { type: 'help' }
-interface ResearchTask { type: 'research'; query: string }
-interface AgentDraftTask { type: 'agent'; agent: 'draft'; instructions?: string }
-interface FindClauseTask { type: 'agent'; agent: 'find_clause'; clause: string; docId: string }
-interface FlagPrivilegedTask { type: 'agent'; agent: 'flag_privileged_terms'; docId: string }
-interface GenerateTimelineTask { type: 'agent'; agent: 'generate_timeline'; docId: string }
-interface RiskAnalysisTask { type: 'agent'; agent: 'risk_analysis'; docId: string }
-interface KeyClausesTask { type: 'agent'; agent: 'key_clauses'; docId: string }
-interface SummarizeDocTask { type: 'agent'; agent: 'summarize'; docId: string }
-interface ExplainTermTask { type: 'agent'; agent: 'explain_term'; term: string; jurisdiction?: string } // Add jurisdiction
-interface PerplexityTask { type: 'agent'; agent: 'perplexity'; query: string }
-interface AgentCompareTask { type: 'agent'; agent: 'compare'; docIdA: string; docIdB: string } // New task type
-interface UseTemplateTask { type: 'use_template'; templateName: string }
-interface CaseSearchTask { type: 'case_search'; query: string }
-interface UnknownTask { type: 'unknown'; command: string }
+export interface HelpTask { type: 'help'; query?: string }
+export interface ResearchTask { type: 'research'; query: string }
+export interface AgentDraftTask { type: 'agent'; agent: 'draft'; instructions: string; docId?: string }
+export interface FindClauseTask { type: 'agent'; agent: 'find_clause'; clauseType: string; docId: string } // Requires docId
+export interface FlagPrivilegedTask { type: 'agent'; agent: 'flag_privileged_terms'; docId: string } // Requires docId
+export interface GenerateTimelineTask { type: 'agent'; agent: 'generate_timeline'; docId: string } // Requires docId
+export interface RiskAnalysisTask { type: 'agent'; agent: 'risk_analysis'; docId: string } // Requires docId
+export interface KeyClausesTask { type: 'agent'; agent: 'key_clauses'; docId: string } // Requires docId
+export interface SummarizeDocTask { type: 'agent'; agent: 'summarize'; docId?: string } // Optional docId
+export interface ExplainTermTask { type: 'agent'; agent: 'explain_term'; term: string; docId?: string } // Optional docId
+export interface PerplexityTask { type: 'agent'; agent: 'perplexity'; query: string }
+export interface AgentCompareTask { type: 'agent'; agent: 'compare'; docId1: string; docId2: string } // Requires two docIds
+export interface RewriteTask { type: 'agent'; agent: 'rewrite'; instructions: string; docId?: string } // Added RewriteTask
+export interface UseTemplateTask { type: 'use_template'; templateName: string }
+export interface CaseSearchTask { type: 'case_search'; query: string }
+export interface UnknownTask { type: 'unknown'; originalInput: string }
+export interface AnalyzeDocumentTask { type: 'analyze_document'; docId: string; analysisType: AnalysisType } // Added AnalyzeDocumentTask
 
 // Union type for all possible tasks
 export type Task =
@@ -34,8 +36,10 @@ export type Task =
   | ExplainTermTask // Add to union
   | PerplexityTask
   | AgentCompareTask // Added to union
+  | RewriteTask      // Added RewriteTask to union
   | UseTemplateTask
   | CaseSearchTask
+  | AnalyzeDocumentTask // Added AnalyzeDocumentTask to union
   | UnknownTask
   | null;
 
@@ -58,7 +62,7 @@ export function parseCommand(inputText: string): Task {
     const clause = findClauseMatch[1].trim();
     const docId = findClauseMatch[3].trim();
     if (clause && docId) {
-      return { type: 'agent', agent: 'find_clause', clause, docId };
+      return { type: 'agent', agent: 'find_clause', clauseType: clause, docId };
     }
   }
   // /agent flag_privileged_terms in|from [doc_id]
@@ -67,14 +71,6 @@ export function parseCommand(inputText: string): Task {
     const docId = flagPrivMatch[2].trim();
     if (docId) {
       return { type: 'agent', agent: 'flag_privileged_terms', docId };
-    }
-  }
-  // /agent generate_timeline in|from [doc_id]
-  const genTimelineMatch = trimmed.match(/^\/agent generate_timeline\s+(in|from)\s+(.+)$/i);
-  if (genTimelineMatch) {
-    const docId = genTimelineMatch[2].trim();
-    if (docId) {
-      return { type: 'agent', agent: 'generate_timeline', docId };
     }
   }
   // /agent risk_analysis in|from [doc_id]
@@ -115,7 +111,7 @@ export function parseCommand(inputText: string): Task {
     const docIdA = compareMatch[1].trim();
     const docIdB = compareMatch[2].trim();
     if (docIdA && docIdB) {
-      return { type: 'agent', agent: 'compare', docIdA, docIdB };
+      return { type: 'agent', agent: 'compare', docId1: docIdA, docId2: docIdB };
     }
   }
   // /use template "Template Name" OR /use template TemplateName
@@ -139,12 +135,25 @@ export function parseCommand(inputText: string): Task {
     const term = explainTermMatch[1].trim();
     const jurisdiction = explainTermMatch[2]?.trim();
     if (term) {
-      return { type: 'agent', agent: 'explain_term', term, jurisdiction };
+      return { type: 'agent', agent: 'explain_term', term, docId: jurisdiction };
+    }
+  }
+  // /analyze [type] in|from [doc_id]
+  const analyzeMatch = trimmed.match(/^\/analyze\s+([a-zA-Z_]+)\s+(?:in|from)\s+(.+)$/i);
+  if (analyzeMatch) {
+    const analysisType = analyzeMatch[1].trim().toLowerCase();
+    const docId = analyzeMatch[2].trim();
+    // Basic validation - check if analysisType is one of the known literal types
+    // A more robust approach might involve importing AnalysisType here, but this avoids circular dependency
+    const knownTypes = ['summary', 'entities', 'clauses', 'risks', 'timeline', 'custom', 'privilegedTerms', 'document_context'];
+    if (docId && knownTypes.includes(analysisType)) {
+      // We assert here because we checked against knownTypes, but TS can't infer it matches AnalysisType
+      return { type: 'analyze_document', analysisType: analysisType as AnalysisType, docId }; 
     }
   }
   // If it starts with / but doesn't match known commands
   if (trimmed.startsWith('/')) {
-    return { type: 'unknown', command: trimmed };
+    return { type: 'unknown', originalInput: trimmed };
   }
   return null; // Not a command
 } 

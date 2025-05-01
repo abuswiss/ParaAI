@@ -1,39 +1,33 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import * as templateService from '@/services/templateService';
 import { DocumentTemplate } from '@/services/templateService';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Label } from '@/components/ui/Label';
+import { Textarea } from '@/components/ui/Textarea';
 import { Spinner } from '@/components/ui/Spinner';
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/Alert";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { AlertTriangle } from 'lucide-react';
-import { Modal, ModalOverlay, ModalContent, ModalHeader, ModalFooter, ModalBody, ModalCloseButton } from "@/components/ui/Modal";
+import { 
+  Dialog, 
+  DialogContent, 
+  DialogHeader, 
+  DialogTitle, 
+  DialogDescription, 
+  DialogFooter, 
+  DialogClose 
+} from '@/components/ui/dialog';
+import TiptapEditor from '../editor/TiptapEditor';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Skeleton } from '@/components/ui/skeleton';
+import { extractVariables } from '@/lib/utils';
 
 interface UseTemplateModalProps {
   isOpen: boolean;
   onClose: () => void;
-  templateId: string;
+  templateId: string | null;
 }
-
-// Helper function to extract variables (could be moved to utils)
-const extractVariables = (htmlContent: string): string[] => {
-    const regex = /{{\s*([a-zA-Z0-9_]+)\s*}}/g;
-    const matches = htmlContent.matchAll(regex);
-    const variables = new Set<string>();
-    for (const match of matches) {
-      variables.add(match[1]);
-    }
-    return Array.from(variables);
-};
 
 const UseTemplateModal: React.FC<UseTemplateModalProps> = ({ isOpen, onClose, templateId }) => {
   const navigate = useNavigate();
@@ -44,72 +38,75 @@ const UseTemplateModal: React.FC<UseTemplateModalProps> = ({ isOpen, onClose, te
   const [isCreatingDraft, setIsCreatingDraft] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Fetch template details when modal opens or templateId changes
   useEffect(() => {
-    if (isOpen && templateId) {
-      setIsLoading(true);
-      setError(null);
-      setTemplate(null);
-      setVariables([]);
-      setVariableValues({});
-
-      templateService.getTemplateById(templateId)
-        .then(({ data, error: fetchError }) => {
-          if (fetchError) throw fetchError;
-          if (data) {
-            setTemplate(data);
-            const extracted = extractVariables(data.content || '');
-            setVariables(extracted);
-            // Initialize variableValues state with empty strings
-            const initialValues: Record<string, string> = {};
-            extracted.forEach(v => { initialValues[v] = '' });
-            setVariableValues(initialValues);
-          } else {
-            throw new Error('Template not found.');
-          }
-        })
-        .catch(err => {
-          console.error("Error fetching template for use:", err);
-          setError("Failed to load template details.");
-        })
-        .finally(() => setIsLoading(false));
+    if (!isOpen || !templateId) {
+        setTemplate(null);
+        setVariables([]);
+        setVariableValues({});
+        setError(null);
+        setIsLoading(false);
+        return;
     }
+
+    setIsLoading(true);
+    setError(null);
+    setTemplate(null);
+    setVariables([]);
+    setVariableValues({});
+
+    templateService.getTemplateById(templateId)
+      .then(({ data, error: fetchError }) => {
+        if (fetchError) throw fetchError;
+        if (data) {
+          setTemplate(data);
+          const extracted = extractVariables(data.content || '');
+          setVariables(extracted);
+          const initialValues: Record<string, string> = {};
+          extracted.forEach(v => { initialValues[v] = '' });
+          setVariableValues(initialValues);
+        } else {
+          throw new Error('Template not found.');
+        }
+      })
+      .catch(err => {
+        console.error("Error fetching template for use:", err);
+        setError("Failed to load template details.");
+      })
+      .finally(() => setIsLoading(false));
+      
   }, [isOpen, templateId]);
 
   const handleInputChange = (variableName: string, value: string) => {
     setVariableValues(prev => ({ ...prev, [variableName]: value }));
+    if (error && !error.includes('load')) setError(null);
   };
 
   const handleCreateDraft = async () => {
-    if (!template) return;
-    setIsCreatingDraft(true);
-    setError(null);
-
-    // Simple validation: Check if all variable fields have been filled
+    if (!template || !templateId) return;
+    
     const unfilledVariables = variables.filter(v => !variableValues[v]?.trim());
     if (unfilledVariables.length > 0) {
         setError(`Please fill in all variables: ${unfilledVariables.join(', ')}`);
-        setIsCreatingDraft(false);
         return;
     }
-
-    // Use a default name for the draft or maybe prompt the user?
-    const draftName = `${template.name} - Draft`;
+    
+    setIsCreatingDraft(true);
+    setError(null);
+    const draftName = `${template.name || 'Template'} Draft - ${new Date().toLocaleString()}`;
 
     try {
       const { data: newDraft, error: createError } = await templateService.createDraftFromTemplate(
-        template.id,
+        templateId,
         draftName,
-        variableValues
-        // Optionally pass caseId if available/needed
+        variableValues,
       );
 
       if (createError) throw createError;
       
       if (newDraft?.id) {
         console.log('Draft created:', newDraft.id);
-        onClose(); // Close modal on success
-        navigate(`/documents/drafts/${newDraft.id}`); // Navigate to the new draft
+        onClose(); 
+        navigate(`/documents/${newDraft.id}`);
       } else {
           throw new Error('Failed to create draft: No ID returned.');
       }
@@ -122,71 +119,135 @@ const UseTemplateModal: React.FC<UseTemplateModalProps> = ({ isOpen, onClose, te
     }
   };
 
-  // If not open, render nothing (Dialog handles visibility)
-  // if (!isOpen) return null; // No longer needed
+  const renderVariableInput = (varName: string) => {
+    const isLongInput = varName.toLowerCase().includes('address') || 
+                        varName.toLowerCase().includes('description') || 
+                        varName.toLowerCase().includes('notes') || 
+                        varName.toLowerCase().includes('clause');
+    
+    return (
+      <div key={varName} className="mb-3">
+        <Label htmlFor={`var-${varName}`} className="capitalize mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+          {varName.replace(/_/g, ' ')}
+        </Label>
+        {isLongInput ? (
+          <Textarea
+            id={`var-${varName}`}
+            value={variableValues[varName] || ''}
+            onChange={(e) => handleInputChange(varName, e.target.value)}
+            placeholder={`Enter value for ${varName}`}
+            disabled={isCreatingDraft || isLoading}
+            className="w-full mt-1"
+            rows={3}
+          />
+        ) : (
+          <Input
+            id={`var-${varName}`}
+            value={variableValues[varName] || ''}
+            onChange={(e) => handleInputChange(varName, e.target.value)}
+            placeholder={`Enter value for ${varName}`}
+            disabled={isCreatingDraft || isLoading}
+            className="w-full mt-1"
+          />
+        )}
+      </div>
+    );
+  };
 
   return (
-    // Use the custom Modal components
-    <Modal isOpen={isOpen} onClose={onClose} size="xl"> 
-      <ModalOverlay />
-      {/* Pass sizeClass to ModalContent */}
-      <ModalContent sizeClass="sm:max-w-xl"> 
-        <ModalHeader>
-          Use Template: {template?.name || 'Loading...'}
-          {/* Add close button to header */}
-          <ModalCloseButton onClick={onClose} /> 
-        </ModalHeader>
-        <ModalBody className="max-h-[70vh] overflow-y-auto"> 
-          {/* Body content remains the same: loading, error, form */}
-          {isLoading && (
-            <div className="flex justify-center items-center py-10">
-              <Spinner size="md" />
-              <span className="ml-3 text-gray-500 dark:text-gray-400">Loading Template Details...</span>
+    <Dialog open={isOpen} onOpenChange={(open) => !open && !isCreatingDraft && onClose()}> 
+      <DialogContent className="max-w-4xl"> 
+        <DialogHeader>
+          <DialogTitle>Use Template: {template?.name || 'Loading...'}</DialogTitle>
+          {template?.description && <DialogDescription>{template.description}</DialogDescription>}
+        </DialogHeader>
+       
+        <div className="grid md:grid-cols-2 gap-6 py-4 max-h-[70vh]"> 
+            <div className="flex flex-col border rounded-lg overflow-hidden">
+                <h3 className="text-sm font-medium p-3 border-b bg-muted/50 flex-shrink-0">Preview</h3>
+                <ScrollArea className="flex-grow p-1 bg-background">
+                    {isLoading && (
+                        <div className="p-4 space-y-2">
+                            <Skeleton className="h-4 w-3/4" />
+                            <Skeleton className="h-4 w-full" />
+                            <Skeleton className="h-4 w-5/6" />
+                        </div>
+                    )}
+                    {!isLoading && template?.content && (
+                        <TiptapEditor
+                            content={template.content}
+                            editable={false}
+                            className="p-3 text-sm min-h-[200px]"
+                            placeholder=""
+                        />
+                    )}
+                    {!isLoading && !template?.content && (
+                        <p className="p-4 text-center text-muted-foreground italic">No content found.</p>
+                    )}
+                     {isLoading && !templateId && (
+                         <p className="p-4 text-center text-muted-foreground italic">Select a template.</p>
+                     )}
+                </ScrollArea>
             </div>
-          )}
-          {!isLoading && error && (
-            <Alert variant="destructive" className="my-4">
-              <AlertTriangle className="h-4 w-4" />
-              <AlertTitle>Error</AlertTitle>
-              <AlertDescription>{error}</AlertDescription>
-            </Alert>
-          )}
-          {!isLoading && !error && template && (
-            <div className="space-y-4 py-4">
-              <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">{template.description}</p>
-              {variables.length === 0 ? (
-                 <p className="text-center text-gray-500 dark:text-gray-400 py-4">This template has no variables to fill.</p>
-              ) : (
-                variables.map((variable) => (
-                  <div key={variable}>
-                    <Label htmlFor={`var-${variable}`} className="capitalize mb-1 block">{variable.replace(/_/g, ' ')}</Label>
-                    <Input
-                      id={`var-${variable}`}
-                      value={variableValues[variable] || ''}
-                      onChange={(e) => handleInputChange(variable, e.target.value)}
-                      placeholder={`Enter value for ${variable}`}
-                      disabled={isCreatingDraft}
-                      className="w-full dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-                    />
-                  </div>
-                ))
-              )}
+
+            <div className="flex flex-col border rounded-lg overflow-hidden">
+                <h3 className="text-sm font-medium p-3 border-b bg-muted/50 flex-shrink-0">Fill Variables</h3>
+                <ScrollArea className="flex-grow p-4">
+                    {isLoading && (
+                       <div className="space-y-4">
+                           <div className="space-y-1">
+                               <Skeleton className="h-3 w-1/4" />
+                               <Skeleton className="h-8 w-full" />
+                           </div>
+                           <div className="space-y-1">
+                               <Skeleton className="h-3 w-1/3" />
+                               <Skeleton className="h-8 w-full" />
+                           </div>
+                       </div>
+                    )}
+                    {!isLoading && error && error.includes('load') && (
+                        <Alert variant="destructive">
+                            <AlertTriangle className="h-4 w-4" />
+                            <AlertTitle>Error Loading Template</AlertTitle>
+                            <AlertDescription>{error}</AlertDescription>
+                        </Alert>
+                    )}
+                    {!isLoading && !error && template && (
+                        <> 
+                            {variables.length === 0 ? (
+                                <p className="text-center text-muted-foreground py-4 italic">This template has no variables to fill.</p>
+                            ) : (
+                                variables.map(renderVariableInput)
+                            )}
+                            {error && !error.includes('load') && (
+                                <Alert variant="destructive" className="mt-3">
+                                     <AlertTriangle className="h-4 w-4" />
+                                     <AlertDescription>{error}</AlertDescription>
+                                </Alert>
+                            )}
+                        </>
+                    )}
+                    {!isLoading && !template && !error && (
+                        <p className="p-4 text-center text-muted-foreground italic">Template details not available.</p>
+                    )}
+                </ScrollArea>
             </div>
-          )}
-        </ModalBody>
-        <ModalFooter>
-          {/* Footer buttons remain the same */}
-          <Button variant="outline" onClick={onClose} disabled={isCreatingDraft}>Cancel</Button>
+        </div>
+
+        <DialogFooter>
+          <DialogClose asChild>
+             <Button variant="outline" onClick={onClose} disabled={isCreatingDraft}>Cancel</Button>
+          </DialogClose>
           <Button 
             onClick={handleCreateDraft} 
-            disabled={isLoading || isCreatingDraft || (variables.length === 0 && !template) || !template}
+            disabled={isLoading || isCreatingDraft || !template || (variables.length > 0 && variables.some(v => !variableValues[v]?.trim()))}
           >
             {isCreatingDraft ? <Spinner size="sm" className="mr-2" /> : null}
-            {isCreatingDraft ? 'Creating Draft...' : 'Create Draft Document'}
+            {isCreatingDraft ? 'Creating Draft...' : 'Create Document Draft'}
           </Button>
-        </ModalFooter>
-      </ModalContent>
-    </Modal>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 };
 

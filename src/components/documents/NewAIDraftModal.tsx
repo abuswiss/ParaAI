@@ -11,6 +11,7 @@ import { Spinner } from '@/components/ui/Spinner';
 import { Icons } from '@/components/ui/Icons';
 import * as templateService from '@/services/templateService';
 import { DocumentDraft } from '@/services/templateService'; // Import type
+import { toast } from 'react-hot-toast';
 
 interface NewAIDraftModalProps {
   isOpen: boolean;
@@ -95,6 +96,7 @@ const NewAIDraftModal: React.FC<NewAIDraftModalProps> = ({ isOpen, onClose, onSu
       console.log("AI draft saved successfully:", newDraft.id);
 
       // Step 3: Call success callback and close
+      toast.success(`AI draft "${draftName}" saved!`);
       onSuccess(newDraft.id);
       onClose(); // Close modal on full success
 

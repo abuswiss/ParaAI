@@ -1,357 +1,581 @@
 import React, { useState, useEffect } from 'react';
-import { getDocumentById, getDocumentUrl, processDocument } from '../../services/documentService';
-import { Document as DocumentType } from '../../types/document';
-import DocumentAnalyzer from './DocumentAnalyzer';
-import { useNavigate } from 'react-router-dom';
+import { useSetAtom } from 'jotai';
+import { addTaskAtom, updateTaskAtom, removeTaskAtom } from '@/atoms/appAtoms';
+import { getDocumentById, getDocumentUrl, DocumentMetadata } from '@/services/documentService';
+import {
+  analyzeDocument, 
+  getDocumentAnalyses,
+  DocumentAnalysisResult, 
+  AnalysisType,
+  StructuredAnalysisResult,
+  Entity,
+  Clause,
+  Risk,
+  TimelineEvent,
+} from '@/services/documentAnalysisService';
 import { Button } from '@/components/ui/Button';
 import { Spinner } from '@/components/ui/Spinner';
-import { Edit } from 'lucide-react';
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/Alert";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/Tabs";
+import { TextSelect, Users, ListChecks, ShieldAlert, CalendarDays, FileWarning, Download, FileSearch, Image as ImageIcon, StickyNote, Info, Gavel, Play } from 'lucide-react';
+import TiptapEditor from '../editor/TiptapEditor';
+import ReactMarkdown from 'react-markdown';
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Badge, BadgeVariant } from "@/components/ui/Badge";
+import Breadcrumb from '../common/Breadcrumb';
+import { getCaseById } from '@/services/caseService';
+import { Case } from '@/types/case';
+import { cn } from '@/lib/utils';
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 interface DocumentViewerProps {
   documentId: string;
-  onClose?: () => void;
-  onEdit?: (docId: string) => void;
 }
 
-const DocumentViewer: React.FC<DocumentViewerProps> = ({ documentId, onClose, onEdit }) => {
-  const navigate = useNavigate();
-  const [document, setDocument] = useState<DocumentType | null>(null);
+const analysisOptions: { value: AnalysisType; label: string; icon?: React.ElementType }[] = [
+  { value: 'summary', label: 'Summary', icon: StickyNote },
+  { value: 'entities', label: 'Entities', icon: Users },
+  { value: 'clauses', label: 'Key Clauses', icon: ListChecks },
+  { value: 'risks', label: 'Risk Analysis', icon: ShieldAlert },
+  { value: 'timeline', label: 'Timeline', icon: CalendarDays },
+  { value: 'privilegedTerms', label: 'Privileged Terms', icon: Gavel },
+];
+
+const DocumentViewer: React.FC<DocumentViewerProps> = ({ documentId }) => {
+  const [document, setDocument] = useState<DocumentMetadata | null>(null);
   const [documentUrl, setDocumentUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [processing, setProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<'preview' | 'text'>('preview');
-  const [showAnalyzer, setShowAnalyzer] = useState(false);
+  const [activeTab, setActiveTab] = useState<'text' | 'preview' | 'summary'>('text');
+  const [selectedAnalysisType, setSelectedAnalysisType] = useState<AnalysisType | null>(null);
+  const [currentAnalysisResult, setCurrentAnalysisResult] = useState<StructuredAnalysisResult | null>(null);
+  const [analysisHistory, setAnalysisHistory] = useState<DocumentAnalysisResult[]>([]);
+  const [isAnalysisLoading, setIsAnalysisLoading] = useState<boolean>(false);
+  const [analysisError, setAnalysisError] = useState<string | null>(null);
+  const [summaryContent, setSummaryContent] = useState<string | null>(null);
+  const [activeCase, setActiveCase] = useState<Case | null>(null);
+
+  const addTask = useSetAtom(addTaskAtom);
+  const updateTask = useSetAtom(updateTaskAtom);
+  const removeTask = useSetAtom(removeTaskAtom);
 
   useEffect(() => {
-    const fetchDocument = async () => {
+    const fetchAllData = async () => {
       try {
         setLoading(true);
         setError(null);
+        setDocument(null);
+        setActiveCase(null);
+        setDocumentUrl(null);
+        setAnalysisHistory([]);
+        setSelectedAnalysisType(null);
+        setCurrentAnalysisResult(null);
+        setAnalysisError(null);
+        setSummaryContent(null);
 
-        // Fetch document metadata
-        const { data, error } = await getDocumentById(documentId);
-        if (error) throw error;
-        if (!data) throw new Error('Document not found');
+        const { data: docData, error: docError } = await getDocumentById(documentId);
+        if (docError) throw docError;
+        if (!docData) throw new Error('Document not found');
+        setDocument(docData);
 
-        setDocument(data);
+        if (docData.caseId) {
+          try {
+            const { data: caseData, error: caseError } = await getCaseById(docData.caseId);
+            if (caseError) console.warn('Could not fetch case details:', caseError);
+            else setActiveCase(caseData);
+          } catch (caseFetchErr) {
+            console.warn('Error fetching case for breadcrumb:', caseFetchErr);
+          }
+        }
+        
+        const { data: historyData, error: historyError } = await getDocumentAnalyses(documentId);
+        if (historyError) console.warn('Could not fetch analysis history:', historyError);
+        const validHistory = historyData || [];
+        setAnalysisHistory(validHistory);
+        
+        const latestSummary = validHistory.find((a: DocumentAnalysisResult) => a.analysisType === 'summary');
+        let initialTab: 'text' | 'preview' | 'summary' = 'text';
+        if (latestSummary && typeof latestSummary.result === 'string') {
+             setSummaryContent(latestSummary.result);
+             initialTab = 'summary';
+        } else if (docData.extractedText) {
+             initialTab = 'text';
+        } else if (docData.storagePath) {
+            initialTab = 'preview';
+        }
+        setActiveTab(initialTab);
 
-        // Determine initial view mode based on content type
-        if (data.contentType?.startsWith('text/') || 
-            data.contentType === 'application/json' || 
-            data.extractedText) { // Prefer text view if already extracted
-             setViewMode('text');
-        } else {
-            setViewMode('preview');
+        if (initialTab === 'preview' && docData.storagePath) {
+             try {
+                 const urlResponse = await getDocumentUrl(docData.storagePath);
+                 if (urlResponse.error) throw urlResponse.error;
+                 setDocumentUrl(urlResponse.data);
+             } catch (urlErr) {
+                 console.warn('Could not pre-fetch document URL for preview:', urlErr);
+             }
         }
 
-        // Get download URL only if needed for preview
-        if (data.storagePath && viewMode === 'preview') { 
-          const urlResponse = await getDocumentUrl(data.storagePath);
-          if (urlResponse.error) throw urlResponse.error;
-          setDocumentUrl(urlResponse.data);
-        }
+        if (initialTab !== 'summary' && latestSummary) {
+             setSelectedAnalysisType('summary');
+             setCurrentAnalysisResult(latestSummary.result);
+        } 
+
       } catch (err) {
-        console.error('Error loading document:', err);
-        setError('Failed to load document. Please try again.');
+        console.error('Error loading document or history:', err);
+        setError(err instanceof Error ? err.message : 'Failed to load document data.');
       } finally {
         setLoading(false);
       }
     };
+    fetchAllData();
+  }, [documentId]);
 
-    fetchDocument();
-    // Reset analyzer when document changes
-    setShowAnalyzer(false);
-  }, [documentId]); // Removed viewMode dependency to avoid re-fetching url on toggle
-
-  // Fetch URL specifically when switching TO preview mode if not already fetched
   useEffect(() => {
-    if (viewMode === 'preview' && !documentUrl && document?.storagePath && !loading) {
+    if (activeTab === 'preview' && !documentUrl && document?.storagePath && !loading) {
         const fetchUrlForPreview = async () => {
+            console.log('Fetching URL for preview tab...');
             try {
+                 setDocumentUrl(null);
                  const urlResponse = await getDocumentUrl(document.storagePath!);
                  if (urlResponse.error) throw urlResponse.error;
                  setDocumentUrl(urlResponse.data);
             } catch (err) {
                  console.error('Error fetching document URL for preview:', err);
-                 setError('Failed to load document preview URL.');
+                 setError('Failed to load document preview URL.'); 
             }
         };
         fetchUrlForPreview();
     }
-  }, [viewMode, documentUrl, document, loading]);
+  }, [activeTab, documentUrl, document, loading]);
 
-  const handleProcessDocument = async () => {
-    if (!document) return;
-    
+  const handleRunAnalysis = async (type: AnalysisType | null) => {
+    if (!document?.id || isAnalysisLoading || !type) return;
+
+    setSelectedAnalysisType(type);
+    setIsAnalysisLoading(true);
+    setAnalysisError(null);
+    // Don't clear currentAnalysisResult immediately, maybe show stale while loading?
+    // setCurrentAnalysisResult(null);
+
+    console.log(`Running analysis type: ${type} for doc: ${document.id}`);
+
     try {
-      setProcessing(true);
-      setError(null);
-      
-      const { success, error } = await processDocument(documentId);
-      
-      if (!success || error) {
-        throw error || new Error('Failed to process document');
+      const existingResult = analysisHistory.find((a: DocumentAnalysisResult) => a.analysisType === type);
+      if (existingResult) {
+        console.log('Using existing analysis result from history.');
+        setCurrentAnalysisResult(existingResult.result);
+        if (type === 'summary' && typeof existingResult.result === 'string') {
+          setSummaryContent(existingResult.result);
+        }
+        setIsAnalysisLoading(false);
+        return; 
       }
-      
-      // Refresh document data to get extracted text
-      const { data, error: refreshError } = await getDocumentById(documentId);
-      if (refreshError) throw refreshError;
-      if (!data) throw new Error('Document not found');
-      
-      setDocument(data);
-      setViewMode('text'); // Switch to text view after processing
+
+      const { data, error: analysisErr, analysisId } = await analyzeDocument({
+        documentId: document.id,
+        analysisType: type,
+        addTask,
+        updateTask,
+        removeTask
+      });
+
+      if (analysisErr) throw analysisErr;
+      if (!data) throw new Error('Analysis did not return any data.');
+
+      console.log(`Analysis result for ${type}:`, data);
+      setCurrentAnalysisResult(data);
+
+      if (type === 'summary' && typeof data === 'string') {
+        setSummaryContent(data);
+      }
+
+      if (analysisId) {
+        const newHistoryEntry: DocumentAnalysisResult = {
+          id: analysisId,
+          documentId: document.id,
+          analysisType: type,
+          result: data,
+          createdAt: new Date().toISOString()
+        };
+        setAnalysisHistory(prev => [...prev, newHistoryEntry]
+          .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
+      }
+
     } catch (err) {
-      console.error('Error processing document:', err);
-      setError('Failed to extract text from document. Please try again.');
+      console.error(`Error running analysis type ${type}:`, err);
+      const message = err instanceof Error ? err.message : 'Failed to run analysis.';
+      setAnalysisError(message);
+      // Set current result to an error object to display in DocumentAnalyzer
+      setCurrentAnalysisResult({ error: message }); 
     } finally {
-      setProcessing(false);
+      setIsAnalysisLoading(false);
     }
   };
 
-  const renderFilePreview = () => {
-    if (!document || !documentUrl) return (
-        <div className="flex justify-center items-center h-full">
-            <Spinner />
-            <span className="ml-2 text-text-secondary">Loading preview...</span>
-        </div>
-    );
-    
-    const fileType = document.contentType;
-    
-    if (fileType.includes('pdf')) {
-      return (
-        <iframe 
-          src={documentUrl} 
-          className="w-full h-full rounded-b-lg border-t border-gray-600" // Adjusted for header
-          title={document.filename}
-        />
-      );
-    } else if (fileType.includes('image')) {
-      return (
-         <div className="w-full h-full flex justify-center items-center p-4">
-             <img 
-               src={documentUrl} 
-               alt={document.filename} 
-               className="max-w-full max-h-full object-contain"
-             />
-         </div>
-      );
-    } else if (fileType.includes('text') || fileType.includes('application/json')) {
-      // This might be redundant if text view is preferred, but keep as fallback
-      return (
-        <iframe 
-          src={documentUrl} 
-          className="w-full h-full rounded-b-lg border-t border-gray-600 bg-white" // Adjusted
-          title={document.filename}
-        />
-      );
-    } else {
-      return (
-        <div className="text-center p-8 flex flex-col justify-center items-center h-full">
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12 text-gray-400 mx-auto mb-4" viewBox="0 0 20 20" fill="currentColor">
-            <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clipRule="evenodd" />
-          </svg>
-          <p className="text-text-secondary mb-4">Preview not available for this file type ({fileType})</p>
-          <a 
-            href={documentUrl} 
-            target="_blank" 
-            rel="noopener noreferrer" 
-            className="bg-primary hover:bg-primary-hover text-white font-medium py-2 px-4 rounded-md transition inline-flex items-center"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
-              <path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clipRule="evenodd" />
-            </svg>
-            Download File
-          </a>
-        </div>
-      );
+  // --- Render Functions ---
+
+  const renderLoading = () => (
+    <div className="flex justify-center items-center h-full">
+        <Spinner size="lg" />
+    </div>
+  );
+
+  const renderError = (errorMessage: string) => (
+    <div className="p-4">
+        <Alert variant="destructive">
+            {/* Use Info icon from lucide-react */}
+            <Info className="h-4 w-4" /> 
+            <AlertTitle>Error</AlertTitle>
+            <AlertDescription>{errorMessage}</AlertDescription>
+        </Alert>
+    </div>
+  );
+
+  const renderAnalysisPanel = () => {
+    if (isAnalysisLoading) {
+      return <div className="p-4 text-center"><Spinner size="sm" /> Loading analysis...</div>;
+    }
+    if (analysisError) {
+      return <Alert variant="destructive" className="m-4"><AlertDescription>{analysisError}</AlertDescription></Alert>;
+    }
+    if (!currentAnalysisResult) {
+      return <div className="p-4 text-center text-muted-foreground">Select an analysis type to run.</div>;
+    }
+
+    // Handle different analysis types
+    switch (selectedAnalysisType) {
+      case 'entities':
+        const entities = (currentAnalysisResult as any)?.entities as Entity[];
+        if (!entities || entities.length === 0) return <div className="p-4 text-muted-foreground">No entities found.</div>;
+        return (
+          <ScrollArea className="h-full">
+            <ul className="p-4 space-y-2 text-sm">
+              {entities.map((entity, index) => (
+                <li key={index} className="border-b pb-1 mb-1">
+                  <span className="font-medium">{entity.text}</span> 
+                  <Badge variant="secondary" className="ml-2">{entity.type}</Badge>
+                </li>
+              ))}
+            </ul>
+          </ScrollArea>
+        );
+      case 'clauses':
+        const clauses = (currentAnalysisResult as any)?.clauses as Clause[];
+        if (!clauses || clauses.length === 0) return <div className="p-4 text-muted-foreground">No key clauses identified.</div>;
+        return (
+          <ScrollArea className="h-full">
+            <ul className="p-4 space-y-3 text-sm">
+              {clauses.map((clause, index) => (
+                <li key={index} className="border rounded p-2 bg-muted/30">
+                  <p className="font-semibold mb-1">{clause.title || `Clause ${index + 1}`}</p>
+                  <p className="text-xs text-muted-foreground truncate">{clause.text}</p>
+                </li>
+              ))}
+            </ul>
+          </ScrollArea>
+        );
+      case 'risks':
+        const risks = (currentAnalysisResult as any)?.risks as Risk[];
+        if (!risks || risks.length === 0) return <div className="p-4 text-muted-foreground">No risks identified.</div>;
+        
+        const getRiskBadgeVariant = (severity: Risk['severity']): BadgeVariant => {
+            switch (severity) {
+                case 'Critical': return 'danger';
+                case 'High': return 'danger';
+                case 'Medium': return 'warning';
+                case 'Low': return 'success';
+                default: return 'secondary';
+            }
+        };
+        const getRiskIconColor = (severity: Risk['severity']): string => {
+             switch (severity) {
+                case 'Critical': return 'text-red-600';
+                case 'High': return 'text-orange-500';
+                case 'Medium': return 'text-yellow-500';
+                case 'Low': return 'text-green-500';
+                default: return 'text-muted-foreground';
+            }
+        };
+
+        return (
+          <ScrollArea className="h-full">
+            <ul className="p-4 space-y-3 text-sm">
+              {risks.map((risk, index) => (
+                <li key={index} className="border rounded p-2">
+                  <p className="font-medium mb-1 flex items-center">
+                     <ShieldAlert size={14} className={cn('mr-1.5', getRiskIconColor(risk.severity))} />
+                     {risk.explanation}
+                  </p>
+                  <Badge variant={getRiskBadgeVariant(risk.severity)} className="text-xs capitalize">{risk.severity}</Badge>
+                   {(risk as any).suggestion && <p className="text-xs text-muted-foreground mt-1 pl-5 italic">Suggestion: {(risk as any).suggestion}</p>} 
+                </li>
+              ))}
+            </ul>
+          </ScrollArea>
+        );
+       case 'timeline':
+        const timelineEvents = (currentAnalysisResult as any)?.timeline as TimelineEvent[];
+        if (!timelineEvents || timelineEvents.length === 0) return <div className="p-4 text-muted-foreground">No timeline events extracted.</div>;
+        return (
+           <ScrollArea className="h-full">
+              <ul className="p-4 space-y-3 text-sm">
+                {timelineEvents.sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime()).map((event, index) => (
+                  <li key={index} className="border-b pb-2">
+                     <p className="font-semibold mb-0.5">{new Date(event.date).toLocaleDateString()}</p>
+                     {(event as any).type && <p className="text-muted-foreground text-xs mb-1">{(event as any).type}</p>}
+                     <p>{event.event}</p>
+                  </li>
+                ))}
+              </ul>
+           </ScrollArea>
+         );
+       case 'privilegedTerms':
+         const terms = (currentAnalysisResult as any)?.result as string[]; 
+         if (!terms || !Array.isArray(terms) || terms.length === 0) return <div className="p-4 text-muted-foreground">No potentially privileged terms detected.</div>;
+         return (
+            <ScrollArea className="h-full">
+               <ul className="p-4 space-y-1 text-sm">
+                 <p className="text-xs text-muted-foreground mb-2">The following terms were flagged as potentially privileged. Review them in context.</p>
+                 {terms.map((term, index) => (
+                   <li key={index} className="border-b py-1">
+                     <span className="font-mono text-primary">{term}</span>
+                   </li>
+                 ))}
+               </ul>
+            </ScrollArea>
+          );
+      default:
+        return <div className="p-4 text-muted-foreground">Selected analysis type cannot be displayed here.</div>;
     }
   };
 
   const renderTextContent = () => {
-    if (!document?.extractedText) {
+    if (!document) return renderLoading(); 
+
+    if (!document.extractedText && !loading) {
       return (
         <div className="text-center p-8 flex flex-col justify-center items-center h-full">
-          <p className="text-text-secondary mb-4">No extracted text available.</p>
-          <Button
-            onClick={handleProcessDocument}
-            disabled={processing}
-            variant="primary"
-            size="sm"
-          >
-            {processing ? (
-              <>
-                <Spinner size="xs" className="mr-2" />
-                Processing...
-              </>
-            ) : (
-              <>
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-2" viewBox="0 0 20 20" fill="currentColor">
-                  <path fillRule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 100-2h5a1 1 0 011 1v5a1 1 0 100-2v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clipRule="evenodd" />
-                </svg>
-                Extract Text
-              </>
-            )}
-          </Button>
+          <FileSearch className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+          <p className="text-muted-foreground mb-4">Text has not been extracted for this document yet.</p>
+          <p className="text-xs text-muted-foreground">(Status: {document.processingStatus || 'Unknown'})</p>
         </div>
       );
     }
 
     return (
-      <div className="p-4 h-full overflow-y-auto">
-        <div className="prose prose-sm dark:prose-invert max-w-none">
-          <pre className="whitespace-pre-wrap text-sm font-mono p-4 bg-neutral-100 dark:bg-gray-800 rounded-md">
-              {document.extractedText}
-          </pre>
+      <div className="flex h-full">
+        <div className="flex-1 h-full border-r overflow-hidden"> 
+          <TiptapEditor
+              content={document.extractedText || ''} 
+              editable={false}
+              className="h-full border-0 shadow-none rounded-none"
+              placeholder="Loading document text..."
+              analysisResult={selectedAnalysisType === 'privilegedTerms' ? { type: 'privilegedTerms', result: (currentAnalysisResult as any)?.result } : undefined}
+          />
         </div>
-          
-          {/* Text analysis actions - keep as is */}
-          <div className="mt-6 border-t border-neutral-200 dark:border-gray-700 pt-4">
-            <h3 className="text-lg font-medium text-neutral-800 dark:text-text-primary mb-2">Document Analysis Options</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
-              {/* Comprehensive Analysis */}
-              <Button 
-                 variant="outline"
-                 size="sm"
-                 onClick={() => setShowAnalyzer(true)}
-                 className="justify-start"
-               >
-                 <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-2" viewBox="0 0 20 20" fill="currentColor">
-                   <path d="M9 9a2 2 0 114 0 2 2 0 01-4 0z" />
-                   <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-13a4 4 0 00-3.446 6.032l-2.261 2.26a1 1 0 101.414 1.415l2.261-2.261A4 4 0 1011 5z" clipRule="evenodd" />
-                 </svg>
-                 Analyze Document
-              </Button>
-              {/* Quick Summary */}
-               <Button 
-                 variant="outline"
-                 size="sm"
-                 onClick={() => { /* TODO: Trigger quick summary */ console.log("Quick Summary Clicked"); }}
-                 className="justify-start"
-               >
-                 <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-2" viewBox="0 0 20 20" fill="currentColor">
-                   <path d="M5 3a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2V5a2 2 0 00-2-2H5zM5 11a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2v-2a2 2 0 00-2-2H5zM11 5a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V5zM14 11a1 1 0 011 1v1h1a1 1 0 110 2h-1v1a1 1 0 11-2 0v-1h-1a1 1 0 110-2h1v-1a1 1 0 011-1z" />
-                 </svg>
-                 Quick Summary
-               </Button>
-               {/* Add more actions like 'Identify Risks' if needed */}
+        <ScrollArea className="w-[350px] flex-shrink-0 border-l overflow-y-auto bg-muted/10">
+            <div className="p-2 sticky top-0 bg-background z-10 border-b">
+                <h3 className="text-sm font-semibold mb-1">Analysis Results</h3>
             </div>
-          </div>
-        </div>
+            <div className="p-2">
+                {renderAnalysisPanel()}
+            </div>
+        </ScrollArea>
+      </div>
     );
   };
 
-  if (loading) {
-    return (
-      <div className="flex justify-center items-center h-full">
-        <Spinner size="large" />
-      </div>
-    );
-  }
+  const renderPreviewContent = () => {
+    if (!document) return renderLoading();
 
-  if (error) {
-    return (
-      <div className="flex flex-col justify-center items-center h-full text-center p-4">
-        <p className="text-error dark:text-error mb-4">{error}</p>
-        {/* Optional: Add a retry button */}
-      </div>
-    );
-  }
+    if (error && error.includes('preview')) {
+         return renderError(error);
+    }
 
-  if (!document) {
-    return (
-      <div className="flex justify-center items-center h-full">
-        <p className="text-text-secondary">Document not found.</p>
-      </div>
+    if (!documentUrl) return (
+        <div className="flex justify-center items-center h-64">
+            <Spinner />
+            <span className="ml-2 text-muted-foreground">Loading preview...</span>
+        </div>
     );
-  }
+    
+    const fileType = document.contentType || '';
+    const containerStyle = "w-full h-[calc(100vh-200px)] flex justify-center items-center p-4";
+    const iframeStyle = "w-full h-full border-0";
+    const imgStyle = "max-w-full max-h-full object-contain";
+
+    if (fileType.includes('pdf')) {
+      return <iframe src={documentUrl} className={iframeStyle} title={document.filename} />;
+    } else if (fileType.includes('image')) {
+      return <div className={containerStyle}><img src={documentUrl} alt={document.filename} className={imgStyle}/></div>;
+    } else if (fileType.startsWith('text/')) {
+       if (document.extractedText) {
+          return (
+             <div className="flex h-full">
+                <div className="flex-1 h-full p-1">
+                  <TiptapEditor
+                      content={document.extractedText}
+                      editable={false}
+                      className="h-full border-0 shadow-none"
+                  />
+                </div>
+              </div>
+          );
+       } else {
+           return <iframe src={documentUrl} className={iframeStyle} title={document.filename} />;
+       }
+    } else {
+      return (
+        <div className="text-center p-8 flex flex-col justify-center items-center h-full">
+          <FileWarning className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+          <p className="text-muted-foreground mb-4">Preview not available for this file type ({fileType || 'unknown'})</p>
+          <Button asChild variant="outline" size="sm">
+            <a href={documentUrl} target="_blank" rel="noopener noreferrer">
+                <Download className="h-4 w-4 mr-2" />
+                Download File
+            </a>
+          </Button>
+        </div>
+      );
+    }
+  };
+
+  // --- Main Return --- 
+  if (loading && !document) return renderLoading(); // Show loading only if document is null
+  if (error && !error.includes('preview') && activeTab !== 'preview') return renderError(error); // Show non-preview error if not on preview tab
+  if (!document) return renderError('Document data could not be loaded.');
+
+  // Determine if the summary tab should be disabled
+  const isSummaryLoading = isAnalysisLoading && selectedAnalysisType === 'summary';
+  const summaryTabDisabled = !summaryContent && !isSummaryLoading;
 
   return (
-    <div className="document-viewer h-full flex flex-col bg-white dark:bg-surface-darker text-neutral-900 dark:text-text-primary">
-        {/* Header Bar */} 
-        <div className="flex justify-between items-center p-3 border-b border-neutral-200 dark:border-gray-700 flex-shrink-0">
-           <div className="flex items-center min-w-0">
-             <h2 className="text-base font-semibold truncate mr-4" title={document.filename}>
-               {document.filename}
-             </h2>
-             {/* View Mode Toggle */} 
-             <div className="flex items-center border border-gray-300 dark:border-gray-600 rounded-md">
-                 <Button 
-                     variant={viewMode === 'preview' ? 'secondary' : 'ghost'}
-                     size="xs"
-                     onClick={() => setViewMode('preview')}
-                     className="p-1 rounded-r-none border-r border-gray-300 dark:border-gray-600"
-                     title="Preview Mode"
-                     disabled={!document.storagePath} // Disable if no file to preview
-                 >
-                     {/* Placeholder for Eye icon */}
-                     <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
-                 </Button>
-                 <Button 
-                     variant={viewMode === 'text' ? 'secondary' : 'ghost'}
-                     size="xs"
-                     onClick={() => setViewMode('text')}
-                     className="p-1 rounded-l-none"
-                     title="Text Mode"
-                     disabled={!document.extractedText && !document.storagePath} // Disable if no text and no way to extract
-                 >
-                    {/* Placeholder for FileText icon */}
-                     <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-                 </Button>
-             </div>
-           </div>
-           
-           {/* Action Buttons */} 
-           <div className="flex items-center gap-2">
-              {/* Add Edit Button */}
-              {onEdit && (
-                  <Button 
-                      variant="outline"
-                      size="sm"
-                      onClick={() => onEdit(documentId)}
-                      title="Edit Document"
-                  >
-                      <Edit className="h-4 w-4" />
-                  </Button>
-              )}
-              {/* Add Download Button if URL exists */}
-              {documentUrl && (
-                  <a 
-                    href={documentUrl} 
-                    download={document.filename} 
-                    target="_blank" 
-                    rel="noopener noreferrer"
-                  >
-                      <Button variant="outline" size="sm" title="Download Document">
-                           {/* Placeholder for Download icon */} 
-                           <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
-                      </Button>
-                  </a>
-              )}
-              {/* Close Button if handler provided */}
-              {onClose && (
-                   <Button variant="ghost" size="icon" onClick={onClose} title="Close Viewer">
-                       {/* Placeholder for X icon */} 
-                       <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-                   </Button>
-              )}
-           </div>
-        </div>
-
-        {/* Main Content Area */} 
-        <div className="flex-grow overflow-auto">
-           {viewMode === 'preview' ? renderFilePreview() : renderTextContent()}
-        </div>
-
-      {/* Analyzer Modal/Drawer */} 
-      {showAnalyzer && document?.extractedText && (
-        <DocumentAnalyzer 
-          documentText={document.extractedText} 
-          isOpen={showAnalyzer} 
-          onClose={() => setShowAnalyzer(false)} 
+    <div className="flex flex-col h-full p-4 bg-background">
+      {/* Header Section */} 
+      <div className="mb-4 flex justify-between items-center">
+        {/* Breadcrumbs */} 
+        <Breadcrumb 
+          items={[
+            { label: 'Cases', href: '/cases' },
+            ...(activeCase ? [{ label: activeCase.name, href: `/cases/${activeCase.id}` }] : []),
+            { label: document?.filename || 'Document' },
+          ]} 
+          className="flex-grow mr-4"
         />
-      )}
+         
+        {/* Analysis Selector & Button */} 
+       <div className="flex items-center space-x-2 flex-shrink-0">
+         <Select 
+            value={selectedAnalysisType || ''}
+            onValueChange={(value: string) => handleRunAnalysis(value as AnalysisType)} 
+            disabled={isAnalysisLoading || loading}
+          >
+              <SelectTrigger className="w-[180px] h-8 text-xs">
+                  <SelectValue placeholder="Select Analysis" />
+              </SelectTrigger>
+              <SelectContent>
+                  {analysisOptions.map(option => (
+                     <SelectItem key={option.value} value={option.value} className="text-xs">
+                         {option.icon && <option.icon className="h-3.5 w-3.5 mr-1.5 inline-block" />} 
+                         {option.label}
+                     </SelectItem>
+                  ))}
+              </SelectContent>
+          </Select>
+         <Button 
+            size="sm" 
+            onClick={() => handleRunAnalysis(selectedAnalysisType)} 
+            disabled={!selectedAnalysisType || isAnalysisLoading || loading}
+            className="h-8"
+          >
+              {isAnalysisLoading ? <Spinner size="xs" className="mr-1" /> : <Play className="h-3.5 w-3.5 mr-1" />} 
+              Run
+         </Button>
+         {/* Add Download/Edit buttons? */}
+       </div>
+      </div>
+
+      {/* Main Content Area */} 
+      <div className="flex-grow flex overflow-hidden">
+          {/* Left Panel: Editor/Preview */} 
+          <div className="flex-grow flex flex-col overflow-hidden">
+              {loading && (
+                 <div className="p-4 space-y-2">
+                     <Skeleton className="h-6 w-3/4 mb-4" />
+                     <Skeleton className="h-4 w-full" />
+                     <Skeleton className="h-4 w-full" />
+                     <Skeleton className="h-4 w-5/6" />
+                 </div>
+              )} 
+              {error && !loading && renderError(error)} 
+              {!loading && !error && (
+                 <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as any)} className="flex flex-col h-full">
+                     <TabsList className="flex-shrink-0 rounded-none border-b justify-start px-3 bg-muted/30">
+                         <TabsTrigger value="text" disabled={!document?.extractedText}><TextSelect size={14} className="mr-1.5"/> Text</TabsTrigger>
+                         <TabsTrigger value="preview" disabled={!document?.storagePath}><ImageIcon size={14} className="mr-1.5"/> Preview</TabsTrigger>
+                         <TabsTrigger value="summary" disabled={summaryTabDisabled}><StickyNote size={14} className="mr-1.5"/> Summary</TabsTrigger>
+                     </TabsList>
+                     <TabsContent value="text" className="flex-1 h-full overflow-hidden mt-0 border rounded-b-md">
+                       {renderTextContent()}
+                     </TabsContent>
+
+                     <TabsContent value="preview" className="flex-1 h-full overflow-hidden mt-0 border rounded-b-md">
+                       {renderPreviewContent()}
+                     </TabsContent>
+                     
+                     <TabsContent value="summary" className="flex-1 h-full overflow-hidden mt-0 border rounded-b-md">
+                       <ScrollArea className="h-full p-4">
+                         {isSummaryLoading ? (
+                           <div className="flex justify-center items-center h-60">
+                             <Spinner size="lg" />
+                           </div>
+                         ) : analysisError && selectedAnalysisType === 'summary' ? (
+                           renderError(analysisError)
+                         ) : summaryContent ? (
+                           <div className="prose prose-sm dark:prose-invert max-w-none">
+                             <ReactMarkdown>
+                               {summaryContent}
+                             </ReactMarkdown>
+                           </div>
+                         ) : (
+                           <div className="text-center p-8">
+                             <p className="text-muted-foreground mb-4">No summary available for this document.</p>
+                             <Button 
+                               variant="secondary" 
+                               onClick={() => handleRunAnalysis('summary')}
+                               disabled={isAnalysisLoading}
+                             >
+                               {isAnalysisLoading ? <Spinner size="sm" className="mr-2"/> : <StickyNote size={16} className="mr-2"/>} Generate Summary
+                             </Button>
+                           </div>
+                         )}
+                       </ScrollArea>
+                     </TabsContent>
+
+                     <TabsContent value="analysis" className="flex-1 h-full overflow-hidden mt-0 border rounded-b-md bg-muted/30">
+                        {renderAnalysisPanel()} 
+                     </TabsContent>
+                 </Tabs>
+              )}
+          </div>
+
+          {/* Right Panel: Analysis Results */} 
+          <div className="w-[350px] flex-shrink-0 border-l overflow-hidden flex flex-col">
+              <div className="p-3 border-b bg-muted/30 flex-shrink-0">
+                 <h3 className="text-sm font-medium">Analysis Results</h3> 
+              </div>
+              <div className="flex-grow overflow-y-auto bg-background">
+                 {renderAnalysisPanel()}
+              </div>
+          </div>
+      </div>
     </div>
   );
 };

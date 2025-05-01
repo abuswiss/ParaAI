@@ -173,8 +173,8 @@ interface Conversation {
  * Create a conversation securely while avoiding RLS recursion issues
  */
 export const createConversationSafely = async (
-  title?: string,
-  caseId?: string
+  caseId: string,
+  title?: string
 ): Promise<{ data: Conversation | null; error: Error | null }> => {
   try {
     // Get the current user ID - this will attempt to refresh auth if needed
@@ -187,7 +187,7 @@ export const createConversationSafely = async (
     const conversationData = {
       // id: conversationId, // Let DB handle default
       title: title?.trim() || 'New Conversation',
-      case_id: caseId || null,
+      case_id: caseId,
       // created_at: new Date().toISOString(), // Let DB handle default
       // updated_at: new Date().toISOString(), // Let DB handle default
       owner_id: userId, // Still need to provide the owner

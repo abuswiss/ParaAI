@@ -5,6 +5,7 @@ import { Textarea } from '@/components/ui/Textarea';
 import { Label } from '@/components/ui/Label';
 import { Spinner } from '@/components/ui/Spinner';
 import { Icons } from '@/components/ui/Icons';
+import { toast } from 'react-hot-toast';
 
 interface TemplateImportModalProps {
   isOpen: boolean;
@@ -30,8 +31,7 @@ const TemplateImportModal: React.FC<TemplateImportModalProps> = ({ isOpen, onClo
       const { data, error: importError } = await importTemplate(jsonInput);
       if (importError) throw importError;
       
-      // Optionally show a success message before closing
-      console.log('Template imported successfully:', data?.name);
+      toast.success(`Template '${data?.name || 'Template'}' imported successfully!`);
       onImportSuccess(); // Trigger list refresh and close
       setJsonInput(''); // Clear input on success
     } catch (err) {

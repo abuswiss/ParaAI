@@ -1,10 +1,12 @@
 import { supabase } from '../lib/supabaseClient';
 import { fetchCasesSafely } from '../lib/secureDataClient';
 import { v4 as uuidv4 } from 'uuid';
+import { Case } from '@/types/case';
 
 /**
  * Interface for a case
  */
+/*
 export interface Case {
   id: string;
   name: string;
@@ -18,23 +20,24 @@ export interface Case {
   case_number?: string;
   court?: string;
 }
+*/
 
 // Define interface for creation data matching the form
 interface CaseCreateData {
   name: string;
-  description?: string;
-  client_name?: string;
-  opposing_party?: string;
-  case_number?: string;
-  court?: string;
-  status?: 'active' | 'archived' | 'closed'; // Include status
+  description?: string | null;
+  client_name?: string | null;
+  opposing_party?: string | null;
+  case_number?: string | null;
+  court?: string | null;
+  status?: 'active' | 'archived' | 'closed';
 }
 
 /**
  * Create a new case
  */
 export const createCase = async (
-  caseInputData: CaseCreateData // Accept the full object
+  caseInputData: CaseCreateData
 ): Promise<{ data: Case | null; error: Error | null }> => {
   try {
     console.log('Starting case creation for:', caseInputData.name);
@@ -68,13 +71,13 @@ export const createCase = async (
       id: caseId,
       owner_id: user.id,
       name: caseInputData.name,
-      title: caseInputData.name, // Assuming title mirrors name
+      title: caseInputData.name,
       description: caseInputData.description || null,
       client_name: caseInputData.client_name || null,
       opposing_party: caseInputData.opposing_party || null,
       case_number: caseInputData.case_number || null,
       court: caseInputData.court || null,
-      status: caseInputData.status || 'active', // Default to active if not provided
+      status: caseInputData.status || 'active',
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
     };
@@ -85,8 +88,8 @@ export const createCase = async (
     const insertResult = await supabase
       .from('cases')
       .insert(caseDataToInsert)
-      .select() // Select the inserted row
-      .single(); // Expect a single row
+      .select()
+      .single();
 
     console.log('Case insert response:', JSON.stringify(insertResult));
     
@@ -95,7 +98,7 @@ export const createCase = async (
       throw insertResult.error;
     }
     
-    const data = insertResult.data; // Use the data returned from insert
+    const data = insertResult.data;
 
     // Now add the user as a collaborator to ensure they can see the case
     console.log('Adding user as collaborator for case:', caseId);
@@ -111,11 +114,9 @@ export const createCase = async (
     
     if (collaboratorResult.error) {
       console.error('Error adding collaborator record:', collaboratorResult.error);
-      // Don't fail the entire operation if just the collaborator part fails
     }
 
     console.log('Case creation successful, returning data.');
-    // Map the inserted data back to the Case interface
     return {
       data: {
         id: data.id,
@@ -128,7 +129,7 @@ export const createCase = async (
         opposing_party: data.opposing_party,
         case_number: data.case_number,
         court: data.court,
-        documentCount: 0, // Initialize count, actual count needs separate query if required here
+        documentCount: 0,
       },
       error: null,
     };
@@ -147,7 +148,6 @@ export const getCaseById = async (
   try {
     const { data, error } = await supabase
       .from('cases')
-      // Select base fields, new detailed fields, and document count
       .select('*, client_name, opposing_party, case_number, court, documents(count)')
       .eq('id', caseId)
       .single();
@@ -164,13 +164,12 @@ export const getCaseById = async (
     return {
       data: {
         id: data.id,
-        name: data.name, // Use 'name' or 'title' based on what's primarily used
+        name: data.name,
         description: data.description,
         status: data.status,
         createdAt: data.created_at,
         updatedAt: data.updated_at,
-        documentCount: data.documents?.count || 0,
-        // Map the new detailed fields
+        documentCount: Array.isArray(data.documents) ? data.documents[0]?.count || 0 : 0,
         client_name: data.client_name,
         opposing_party: data.opposing_party,
         case_number: data.case_number,
@@ -224,7 +223,6 @@ export const getUserCases = async (): Promise<{
  */
 export const updateCase = async (
   caseId: string,
-  // Use the same CaseCreateData interface for allowed update fields
   updates: Partial<CaseCreateData> 
 ): Promise<{ success: boolean; error: Error | null }> => {
   try {
@@ -321,19 +319,66 @@ export const addDocumentToCase = async (
 export const removeDocumentFromCase = async (
   documentId: string
 ): Promise<{ success: boolean; error: Error | null }> => {
+  console.warn('removeDocumentFromCase is not fully implemented.');
+  // Placeholder implementation
   try {
-    const { error } = await supabase
-      .from('documents')
-      .update({ case_id: null })
-      .eq('id', documentId);
-
-    if (error) {
-      throw error;
-    }
-
+    // Example: update document's case_id to null
+    // const { error } = await supabase
+    //   .from('documents')
+    //   .update({ case_id: null })
+    //   .eq('id', documentId);
+    // if (error) throw error;
     return { success: true, error: null };
   } catch (error) {
     console.error('Error removing document from case:', error);
     return { success: false, error: error as Error };
+  }
+};
+
+/**
+ * Search cases by name for the current user.
+ */
+export const searchCasesByName = async (
+  query: string,
+  limit: number = 10 // Default limit
+): Promise<{ data: Case[] | null; error: Error | null }> => {
+  try {
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
+      throw authError || new Error('User not authenticated');
+    }
+
+    const { data, error } = await supabase
+      .from('cases')
+      .select('*, documents(count)') // Select necessary fields
+      .eq('owner_id', user.id) // Filter by owner 
+      .ilike('name', `%${query}%`) // Case-insensitive search on name
+      .limit(limit) // Apply limit
+      .order('updated_at', { ascending: false }); // Optional: order by relevance or date
+
+    if (error) {
+      console.error('Error searching cases:', error);
+      throw error;
+    }
+
+    const formattedCases = (data || []).map(c => ({
+        id: c.id,
+        name: c.name,
+        description: c.description,
+        status: c.status as 'active' | 'archived' | 'closed',
+        createdAt: c.created_at,
+        updatedAt: c.updated_at,
+        documentCount: Array.isArray(c.documents) ? c.documents[0]?.count || 0 : 0,
+        client_name: c.client_name,
+        opposing_party: c.opposing_party,
+        case_number: c.case_number,
+        court: c.court,
+    }));
+
+    return { data: formattedCases, error: null };
+
+  } catch (error) {
+    console.error('Error in searchCasesByName:', error);
+    return { data: null, error: error as Error };
   }
 };

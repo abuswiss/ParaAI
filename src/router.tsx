@@ -2,18 +2,24 @@
 import { createBrowserRouter, Navigate } from 'react-router-dom';
 import Auth from './pages/Auth';
 import DashboardPage from './pages/DashboardPage';
-import Documents from './pages/Documents';
-import Cases from './pages/Cases';
+// import Documents from './pages/Documents'; // Deleted
+// import Cases from './pages/Cases'; // To be deleted
 import CaseDetail from './pages/CaseDetail';
-import Chat from './pages/Chat';
 import AppLayout from './components/layout/AppLayout';
-import DatabaseDiagnostic from './utils/DatabaseDiagnostic';
-import TemplateManager from './pages/TemplateManager';
+// import Chat from './pages/Chat'; // Removed import
+// import DatabaseDiagnostic from './utils/DatabaseDiagnostic'; // Removed import
+// Removed import of TemplateManager
+// import TemplateManager from './pages/TemplateManager'; 
 import ProtectedRoute from './components/auth/ProtectedRoute';
 import EditPage from './pages/EditPage';
 // Placeholder imports for new viewer pages
 import DocumentViewPage from './pages/DocumentViewPage';
 import TemplateViewPage from './pages/TemplateViewPage';
+// Import FileManager page/component if it's intended as a route element
+import FileManager from './components/common/FileManager'; // Import the actual component
+// import FileManagerPage from './pages/FileManagerPage'; // Remove import for the missing page
+import SettingsPage from './pages/SettingsPage'; // Import the new Settings page
+// import ChatInterface from './components/chat/ChatInterface'; // Import removed as it's no longer a route element
 
 const router = createBrowserRouter([
   {
@@ -34,28 +40,31 @@ const router = createBrowserRouter([
           },
           {
             path: 'documents',
-            element: <Documents />,
+            element: <FileManager />,
+          },
+           {
+            path: 'files',
+            element: <FileManager />,
           },
           {
+            // Redirect /cases to /files
             path: 'cases',
-            element: <Cases />,
+            element: <Navigate to="/files" replace />,
           },
           {
             path: 'cases/:id',
             element: <CaseDetail />,
           },
-          {
-            path: 'chat/:id',
-            element: <Chat />,
-          },
-          {
-            path: 'diagnostic',
-            element: <DatabaseDiagnostic />,
-          },
-          {
-            path: 'templates',
-            element: <TemplateManager />,
-          },
+          // --- Add Chat Route --- // Removed Chat route section
+          // {
+          //   path: 'chat', // Base chat route
+          //   element: <ChatInterface />,
+          // },
+          // Optional: Add route for specific chat later if needed
+          // {
+          //   path: 'chat/:conversationId',
+          //   element: <ChatInterface />,
+          // },
           {
             path: 'edit/:type/:id?',
             element: <EditPage />,
@@ -68,6 +77,11 @@ const router = createBrowserRouter([
           {
             path: 'view/template/:id',
             element: <TemplateViewPage />,
+          },
+          // --- Add Settings Route ---
+          {
+            path: 'settings',
+            element: <SettingsPage />,
           },
         ],
       },

@@ -10,12 +10,10 @@ import { Textarea } from '@/components/ui/Textarea';
 import { Spinner } from '@/components/ui/Spinner';
 import { PostgrestError } from '@supabase/supabase-js';
 import { Save } from 'lucide-react';
-// Remove CreateVariableModal import
-// import { Editor } from '@tiptap/react'; // Keep if DocumentEditor uses it, maybe not needed here
+import Breadcrumb from '../common/Breadcrumb'; // Import Breadcrumb
 import { 
   activeEditorTypeAtom, 
   isNavCollapsedAtom
-  // Remove other atoms
 } from '@/atoms/appAtoms';
 
 // Define categories - should match the service/DB definition
@@ -153,119 +151,110 @@ const TemplateEditor: React.FC<TemplateEditorProps> = ({ templateId, onSaveSucce
   const handleInsertVariable = ...
   */
 
-  if (isLoading) {
-    return (
-        <div className="flex justify-center items-center py-10">
-          <Spinner size="lg" />
-          <span className="ml-3 text-gray-500 dark:text-gray-400">Loading Template Editor...</span>
-        </div>
-      );
-  }
+  // ... handleContentChange ...
+
+  // ... handleVariableInsert ...
 
   return (
-    <div className="template-editor flex flex-col h-full">
-      {/* Header part (non-scrolling) */}
-      <div className="px-4 pt-4 flex-shrink-0">
-        <h3 className="text-lg font-semibold mb-4 text-gray-800 dark:text-white">
-          {templateId ? 'Edit Template' : 'Create New Template'}
-        </h3>
-        {error && (
-          <div className="mb-4 p-3 bg-red-100 dark:bg-red-900/30 border border-red-300 dark:border-red-700 rounded-md text-red-700 dark:text-red-300 text-sm">
-            <strong>Error:</strong> {error}
-          </div>
-        )}
+    <div className="flex flex-col h-full p-4 bg-background text-foreground">
+      {/* Header Section */}
+      <div className="flex items-center justify-between mb-4 flex-shrink-0 pb-3 border-b">
+        <Breadcrumb 
+          items={[
+            { label: 'Templates', href: '/files' }, // Link back to file manager (templates view)
+            { label: templateId ? name || 'Loading Template...' : 'New Template' },
+          ]} 
+          className="flex-grow mr-4"
+        />
+        <div className="flex items-center space-x-2">
+          <Button variant="outline" onClick={onCancel} disabled={isSaving}>
+            Cancel
+          </Button>
+          <Button onClick={handleSave} disabled={isSaving || isLoading || !isEditorDirty}>
+            {isSaving ? <Spinner size="sm" className="mr-2" /> : <Save className="h-4 w-4 mr-2" />}
+            Save Template
+          </Button>
+        </div>
       </div>
 
-      {/* Scrollable content area */}
-      <div className="flex-grow overflow-y-auto px-4 pb-4 space-y-4">
-        <div>
-          <Label id="label-template-name">Template Name</Label>
-          <Input
-            id="template-name"
-            aria-labelledby="label-template-name"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="e.g., Cease and Desist Letter"
-            disabled={isSaving}
-            className="w-full dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-          />
+      {/* Editor Area */}
+      {isLoading ? (
+        <div className="flex-grow flex items-center justify-center">
+          <Spinner size="lg" />
         </div>
-        <div>
-          <Label id="label-template-description">Description</Label>
-          <Textarea
-            id="template-description"
-            aria-labelledby="label-template-description"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            placeholder="Briefly describe what this template is for."
-            rows={3}
-            disabled={isSaving}
-            className="w-full dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-          />
+      ) : error ? (
+        <div className="flex-grow flex items-center justify-center text-red-500">
+          {error}
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <Label id="label-template-category">Category</Label>
-            <select
-              id="template-category"
-              aria-labelledby="label-template-category"
-              value={category}
-              onChange={(e) => setCategory(e.target.value as DocumentTemplate['category'])}
-              className="block w-full mt-1 rounded-md border-gray-300 dark:border-gray-600 shadow-sm focus:border-primary focus:ring focus:ring-primary focus:ring-opacity-50 dark:bg-gray-700 dark:text-white"
-              disabled={isSaving}
-            >
-              {TEMPLATE_CATEGORIES.map(cat => (
-                <option key={cat} value={cat}>{cat.charAt(0).toUpperCase() + cat.slice(1)}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <Label id="label-template-tags">Tags (comma-separated)</Label>
-            <Input
-              id="template-tags"
-              aria-labelledby="label-template-tags"
-              value={tags}
-              onChange={(e) => setTags(e.target.value)}
-              placeholder="e.g., litigation, real estate, contract"
-              disabled={isSaving}
-              className="w-full dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-            />
-          </div>
-        </div>
-
-        {/* Editor Body Section (Button was removed) */}
-        <div className="template-body-section flex flex-col flex-grow min-h-[400px]">
-           <div className="flex justify-between items-center mb-1">
-             <Label>Template Body</Label>
-             {/* Button removed */}
-           </div>
-          <div className="flex-grow h-full border border-neutral-200 dark:border-gray-700 rounded-md overflow-hidden">
-            <DocumentEditor
+      ) : (
+        <div className="flex-grow grid grid-cols-1 md:grid-cols-3 gap-4 overflow-hidden">
+          {/* Left Column: Editor */}
+          <div className="md:col-span-2 h-full overflow-hidden flex flex-col border rounded-md">
+             <DocumentEditor
               ref={editorRef}
               initialContent={initialContent}
-              // Pass simpler props now
-              editorItem={{ type: 'template', id: templateId || 'new_template' }}
-              showToolbar={true}
-              isSaving={false} // These might need re-evaluation based on DocumentEditor needs
-              saveStatus={'Idle'}
-              isDirty={isEditorDirty}
-              onSave={() => {}} // Or potentially trigger handleSave?
-              onDirtyChange={setIsEditorDirty} 
-              onSaveStatusChange={() => {}} 
-              // Remove variable-specific props if any were passed
-            />
+              onUpdate={handleContentChange}
+              editable={true}
+              className="flex-grow overflow-y-auto"
+             />
+          </div>
+
+          {/* Right Column: Metadata */}
+          <div className="md:col-span-1 h-full overflow-y-auto space-y-4 p-4 border rounded-md bg-muted/30">
+              <h3 className="text-lg font-semibold border-b pb-2 mb-4">Template Details</h3>
+             <div>
+                <Label htmlFor="template-name">Name</Label>
+                <Input 
+                  id="template-name" 
+                  value={name} 
+                  onChange={(e) => { setName(e.target.value); setIsEditorDirty(true); }} 
+                  disabled={isSaving}
+                  required
+                />
+             </div>
+             <div>
+                <Label htmlFor="template-description">Description</Label>
+                <Textarea 
+                  id="template-description" 
+                  value={description} 
+                  onChange={(e) => { setDescription(e.target.value); setIsEditorDirty(true); }} 
+                  disabled={isSaving}
+                  rows={3}
+                />
+             </div>
+              <div>
+                <Label htmlFor="template-category">Category</Label>
+                <select
+                  id="template-category"
+                  value={category}
+                  onChange={(e) => { setCategory(e.target.value as DocumentTemplate['category']); setIsEditorDirty(true); }}
+                  className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md bg-background dark:bg-surface"
+                  disabled={isSaving}
+                >
+                  {TEMPLATE_CATEGORIES.map(cat => (
+                    <option key={cat} value={cat}>{cat.charAt(0).toUpperCase() + cat.slice(1)}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <Label htmlFor="template-tags">Tags (comma-separated)</Label>
+                <Input 
+                  id="template-tags" 
+                  value={tags} 
+                  onChange={(e) => { setTags(e.target.value); setIsEditorDirty(true); }} 
+                  placeholder="e.g., nda, consulting, agreement"
+                  disabled={isSaving}
+                />
+             </div>
+              {/* Placeholder for Variable Management */}
+              {/* <div>
+                  <Label>Variables</Label>
+                  <Button variant="outline" size="sm" onClick={handleInsertVariable}>Add Variable</Button>
+                  <ul>... list variables ...</ul>
+              </div> */} 
           </div>
         </div>
-      </div>
-      
-      {/* Footer buttons (non-scrolling) */}
-      <div className="mt-auto px-4 py-3 border-t border-gray-200 dark:border-gray-700 flex justify-end space-x-3 flex-shrink-0">
-         <Button variant="outline" onClick={onCancel} disabled={isSaving}>Cancel</Button>
-         <Button onClick={handleSave} disabled={isSaving || isLoading || !isEditorDirty}>
-           {isSaving ? <Spinner size="sm" className="mr-2" /> : <Save className="mr-2 h-4 w-4" />}
-           {isSaving ? 'Saving...' : (templateId ? 'Update Template' : 'Create Template')}
-         </Button>
-      </div>
+      )}
     </div>
   );
 };

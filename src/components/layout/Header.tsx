@@ -1,78 +1,77 @@
-import React, { useState } from 'react';
-import { InfoIcon } from '../ui/Icons';
-import { Tooltip } from '../ui/Tooltip';
-import MagicalInfoButton from '../ui/MagicalInfoButton';
+import React from 'react';
+import { useNavigate } from 'react-router-dom';
+import { PanelLeft, User as UserIcon, LogOut, Settings } from 'lucide-react'; // Use specific icons
+import { useSidebar } from './Sidebar'; // Import hook to control sidebar
+import { useAuth } from '@/hooks/useAuth'; // Import auth hook
+import { Button } from '@/components/ui/Button';
+import { Avatar } from "@/components/ui/Avatar"; // Use Avatar
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/DropdownMenu";
+import { cn } from '@/lib/utils';
 
-interface HeaderProps {
-  toggleSidebar: () => void;
-  isSidebarOpen: boolean;
-}
+const Header: React.FC = () => {
+  const { toggleSidebar, state: sidebarState } = useSidebar(); // Get sidebar state and toggle function
+  const { user, signOut } = useAuth();
+  const navigate = useNavigate();
 
-const Header: React.FC<HeaderProps> = ({ toggleSidebar, isSidebarOpen }) => {
-  const [showInfo, setShowInfo] = useState(false);
+  const handleLogout = () => {
+    signOut();
+    navigate('/auth'); // Redirect after logout
+  };
+
   return (
-    <header className="
-      bg-surface border-b border-gray-800 
-      py-3 px-4 md:px-6
-      flex items-center justify-between
-      transition-all duration-300 ease-in-out
-      shadow-sm shadow-inner-light
-    ">
-      <div className="flex items-center">
-        <button
-          onClick={toggleSidebar}
-          className="
-            text-text-secondary hover:text-text-primary
-            p-2 rounded-full
-            hover:bg-surface-lighter
-            bg-surface-darker
-            transition-all duration-200
-            focus:outline-none focus:ring-2 focus:ring-primary focus:ring-opacity-50
-            mr-3
-            z-50
-            shadow-sm
-          "
-          aria-label="Toggle sidebar"
-        >
-          {isSidebarOpen ? (
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          ) : (
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-            </svg>
-          )}
-        </button>
-        <div className="flex items-center">
-          {/* Logo or icon could go here */}
-          <span className="text-primary font-medium text-lg">Paralegal AI</span>
-        </div>
+    <header className="sticky top-0 z-30 flex h-14 items-center gap-4 border-b bg-background px-4 sm:static sm:h-auto sm:border-0 sm:bg-transparent sm:px-6">
+      {/* Sidebar Toggle Button */}
+      <Button
+        size="icon"
+        variant="outline"
+        onClick={toggleSidebar}
+      >
+        <PanelLeft className="h-5 w-5" />
+        <span className="sr-only">Toggle Menu</span>
+      </Button>
+
+      {/* Placeholder for Breadcrumbs or Page Title if needed */}
+      <div className="flex-1">
+         {/* Breadcrumbs could go here */}
       </div>
-      <div className="flex items-center space-x-2">
-        {/* Search button - greyed out with tooltip */}
-        <Tooltip content="Full app search coming soon">
-          <button className="
-            p-2 rounded-full
-            text-gray-500 cursor-not-allowed
-            bg-surface-lighter
-            transition-all duration-200
-            focus:outline-none
-          "
-            tabIndex={-1}
-            aria-label="Search (coming soon)"
-            disabled
+
+      {/* User Menu Removed - Moved to SidebarFooter in AppLayout */}
+      {/* <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            variant="outline"
+            size="icon"
+            className="overflow-hidden rounded-full"
           >
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-            </svg>
-          </button>
-        </Tooltip>
-        {/* Magical AI Info button - now animated and extracted */}
-        <MagicalInfoButton />
-      </div>
+            <Avatar 
+              name={user?.email || 'User'} 
+              src={user?.user_metadata?.avatar_url}
+              size="sm"
+            />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuLabel>{user?.email || 'My Account'}</DropdownMenuLabel>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem onClick={() => navigate('/settings')}>
+            <Settings className="mr-2 h-4 w-4" />
+            Settings
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={handleLogout}>
+             <LogOut className="mr-2 h-4 w-4" />
+            Logout
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu> */}
     </header>
   );
 };
 
-export default Header;
+export default Header; 

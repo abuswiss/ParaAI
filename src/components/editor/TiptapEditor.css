@@ -1,0 +1,247 @@
+/* Basic styling for Tiptap Editor */
+
+:root {
+  --highlight-opacity: 0.6;
+  --highlight-opacity-hover: 0.9;
+  --highlight-transition: background-color 0.3s ease, border-color 0.3s ease, opacity 0.3s ease;
+
+  /* Base Colors */
+  --highlight-entity-bg: rgba(173, 216, 230, var(--highlight-opacity)); /* Light blue */
+  --highlight-clause-bg: rgba(144, 238, 144, var(--highlight-opacity)); /* Light green */
+  --highlight-risk-bg: rgba(255, 192, 203, var(--highlight-opacity)); /* Light pink */
+  --highlight-timeline-bg: rgba(216, 191, 216, var(--highlight-opacity)); /* Thistle */
+
+  /* Risk Severity */
+  --highlight-risk-low-border: 2px solid rgba(60, 179, 113, 0.7);
+  --highlight-risk-medium-border: 2px solid rgba(255, 165, 0, 0.8);
+  --highlight-risk-high-bg: rgba(255, 99, 71, 0.5);
+  --highlight-risk-high-border: 2px solid rgba(220, 20, 60, 0.8);
+  --highlight-risk-critical-bg: rgba(220, 20, 60, 0.6);
+  --highlight-risk-critical-border: 3px solid rgba(139, 0, 0, 0.9);
+
+  /* Specific Entity Types (Examples) */
+  --highlight-entity-person-bg: rgba(173, 216, 230, 0.7);
+  --highlight-entity-organization-bg: rgba(173, 216, 230, 0.7);
+  --highlight-entity-organization-border: 1px dotted steelblue;
+  --highlight-entity-date-border: 1px dashed gray;
+  --highlight-entity-location-bg: rgba(240, 230, 140, 0.6);
+  --highlight-entity-legal_term-bg: rgba(204, 182, 221, 0.5); /* Light purple */
+  --highlight-entity-legal_term-border: 1px dotted purple;
+}
+
+.tiptap-editor-wrapper .ProseMirror {
+  padding: 0.5rem;
+  min-height: 150px; /* Match editorProps */
+}
+
+.tiptap-editor-wrapper .ProseMirror:focus {
+  outline: none;
+}
+
+.tiptap-editor-wrapper .ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  color: #adb5bd;
+  pointer-events: none;
+  height: 0;
+}
+
+/* Basic highlight styling (can be adjusted) */
+.tiptap-editor-wrapper .ProseMirror mark {
+  background-color: #ffe066; /* Example color for standard highlight */
+  padding: 0.1em 0;
+  border-radius: 0.2em;
+}
+
+/* Ensure prose styles don't override highlight backgrounds completely */
+.tiptap-editor-wrapper .prose :where(mark):not(:where([class~="not-prose"] *)) {
+    background-color: inherit; /* Let our mark/span styles take precedence */
+    color: inherit;
+    padding: inherit;
+    border-radius: inherit;
+}
+
+/* Add styles for analysis highlights */
+/* CONSOLIDATED AND REFINED HIGHLIGHT STYLES */
+
+/* Base style for all analysis highlights */
+.analysis-highlight {
+  border-radius: 3px;
+  padding: 0.1em 0.2em;
+  margin: 0 -0.1em; /* Offset padding */
+  box-decoration-break: clone; /* Handle line breaks */
+  cursor: help; /* Indicate tooltip */
+  transition: var(--highlight-transition);
+  opacity: var(--highlight-opacity);
+  border-bottom: 1px solid transparent; /* Default border */
+}
+
+.analysis-highlight:hover {
+  opacity: var(--highlight-opacity-hover);
+}
+
+/* Type-specific base styles */
+.highlight-entity {
+  background-color: var(--highlight-entity-bg);
+}
+
+.highlight-clause {
+  background-color: var(--highlight-clause-bg);
+}
+.highlight-clause-key { /* Specifically for key clauses */
+  border-bottom: 1px dashed darkgreen;
+}
+
+.highlight-risk {
+  background-color: var(--highlight-risk-bg);
+}
+
+.highlight-timeline {
+  background-color: var(--highlight-timeline-bg);
+}
+.highlight-timeline-event { /* Specifically for timeline events */
+   border-bottom: 1px dotted purple;
+}
+
+/* --- Risk severity specific styles --- */
+.highlight-risk-low {
+  border-bottom: var(--highlight-risk-low-border);
+}
+.highlight-risk-medium {
+  border-bottom: var(--highlight-risk-medium-border);
+}
+.highlight-risk-high {
+  background-color: var(--highlight-risk-high-bg);
+  border-bottom: var(--highlight-risk-high-border);
+  font-weight: 500;
+}
+.highlight-risk-critical {
+  background-color: var(--highlight-risk-critical-bg);
+  border-bottom: var(--highlight-risk-critical-border);
+  font-weight: 600;
+}
+
+/* --- Specific entity type styles (Examples) --- */
+.highlight-entity-person {
+   background-color: var(--highlight-entity-person-bg);
+}
+.highlight-entity-organization {
+    background-color: var(--highlight-entity-organization-bg);
+    border-bottom: var(--highlight-entity-organization-border);
+}
+.highlight-entity-date {
+    border-bottom: var(--highlight-entity-date-border);
+}
+.highlight-entity-location {
+    background-color: var(--highlight-entity-location-bg);
+}
+.highlight-entity-legal_term {
+    background-color: var(--highlight-entity-legal_term-bg);
+    border-bottom: var(--highlight-entity-legal_term-border);
+    font-style: italic;
+}
+/* Add more entity types as needed, using variables or specific values */
+/* .highlight-entity-financial_term { ... } */
+
+/* Style for template placeholders (ensure this doesn't conflict if using <mark>) */
+/* Keep this if standard Tiptap highlight mark is used elsewhere */
+.highlight {
+    background-color: #ffe066;
+    padding: 1px 3px;
+    border-radius: 3px;
+    box-decoration-break: clone;
+}
+
+/* Base Highlight Styles */
+.highlight {
+  background-color: transparent;
+  /* transition: background-color 0.3s ease; */ /* Optional smooth transition */
+  border-radius: 2px;
+  padding: 0.5px 1px;
+  margin: -0.5px -1px;
+  box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.1); /* Subtle underline */
+}
+
+/* Entity Highlighting */
+.highlight-person {
+  background-color: rgba(153, 217, 234, 0.4); /* Light blue */
+  box-shadow: inset 0 -1px 0 rgba(153, 217, 234, 0.8);
+}
+.highlight-organization {
+  background-color: rgba(174, 214, 148, 0.4); /* Light green */
+  box-shadow: inset 0 -1px 0 rgba(174, 214, 148, 0.8);
+}
+.highlight-date {
+  background-color: rgba(247, 182, 197, 0.4); /* Light pink */
+  box-shadow: inset 0 -1px 0 rgba(247, 182, 197, 0.8);
+}
+.highlight-location {
+  background-color: rgba(255, 219, 148, 0.4); /* Light yellow */
+  box-shadow: inset 0 -1px 0 rgba(255, 219, 148, 0.8);
+}
+.highlight-legal_term {
+  background-color: rgba(204, 182, 221, 0.4); /* Light purple */
+  box-shadow: inset 0 -1px 0 rgba(204, 182, 221, 0.8);
+}
+.highlight-financial_term {
+    background-color: rgba(255, 190, 128, 0.4); /* Light orange */
+    box-shadow: inset 0 -1px 0 rgba(255, 190, 128, 0.8);
+}
+
+/* Clause Highlighting (General) */
+.highlight-clause {
+  background-color: rgba(210, 210, 210, 0.4); /* Light gray */
+  box-shadow: inset 0 -1px 0 rgba(180, 180, 180, 0.8);
+}
+
+/* Risk Highlighting */
+.highlight-risk {
+  font-weight: 500; /* Slightly bolder */
+  transition: background-color 0.2s ease-in-out;
+}
+.highlight-risk-low {
+  background-color: rgba(74, 222, 128, 0.2); /* Tailwind green-400 */
+  box-shadow: inset 0 -1.5px 0 rgba(34, 197, 94, 0.5); /* Tailwind green-500 */
+}
+.highlight-risk-medium {
+  background-color: rgba(250, 204, 21, 0.2); /* Tailwind yellow-400 */
+  box-shadow: inset 0 -1.5px 0 rgba(234, 179, 8, 0.5); /* Tailwind yellow-500 */
+}
+.highlight-risk-high {
+  background-color: rgba(249, 115, 22, 0.2); /* Tailwind orange-500 */
+  box-shadow: inset 0 -1.5px 0 rgba(234, 88, 12, 0.5); /* Tailwind orange-600 */
+}
+.highlight-risk-critical {
+  background-color: rgba(239, 68, 68, 0.2); /* Tailwind red-500 */
+  box-shadow: inset 0 -1.5px 0 rgba(220, 38, 38, 0.5); /* Tailwind red-600 */
+}
+
+/* Timeline Highlighting (Optional) */
+.highlight-timeline {
+  background-color: rgba(165, 210, 235, 0.3); /* Another shade of blue/gray */
+  box-shadow: inset 0 -1px 0 rgba(135, 180, 205, 0.7);
+}
+
+/* --- ADD Privileged Term Highlighting --- */
+.highlight-privileged {
+  background-color: rgba(255, 100, 100, 0.3); /* Distinctive reddish background */
+  box-shadow: inset 0 -1.5px 0 rgba(200, 50, 50, 0.6); /* Darker red underline */
+  border: 1px dashed rgba(200, 50, 50, 0.4); /* Dashed border */
+  padding: 0.5px 2px; /* Slightly more padding */
+  margin: -0.5px -2px;
+  font-style: italic;
+}
+
+/* Hover Effects (Optional but Recommended) */
+.highlight-person:hover { background-color: rgba(153, 217, 234, 0.6); }
+.highlight-organization:hover { background-color: rgba(174, 214, 148, 0.6); }
+.highlight-date:hover { background-color: rgba(247, 182, 197, 0.6); }
+.highlight-location:hover { background-color: rgba(255, 219, 148, 0.6); }
+.highlight-legal_term:hover { background-color: rgba(204, 182, 221, 0.6); }
+.highlight-financial_term:hover { background-color: rgba(255, 190, 128, 0.6); }
+.highlight-clause:hover { background-color: rgba(210, 210, 210, 0.6); }
+.highlight-timeline:hover { background-color: rgba(165, 210, 235, 0.5); }
+.highlight-privileged:hover {
+     background-color: rgba(255, 100, 100, 0.5); 
+     border-color: rgba(200, 50, 50, 0.8);
+}
