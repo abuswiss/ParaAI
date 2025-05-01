@@ -2,7 +2,6 @@ import React, { useEffect, useState } from 'react';
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAtom } from 'jotai';
 import {
-  SidebarProvider,
   Sidebar,
   SidebarHeader,
   SidebarContent,
@@ -10,10 +9,9 @@ import {
   SidebarMenu,
   SidebarMenuItem,
   SidebarMenuButton,
-  SidebarInset,
   SidebarGroup,
   SidebarGroupLabel,
-  useSidebar
+  SidebarSeparator,
 } from './Sidebar';
 import Header from './Header';
 import { useAuth } from '@/hooks/useAuth';
@@ -25,7 +23,7 @@ import {
 import { cn } from '@/lib/utils';
 import CommandPalette from '@/components/common/GlobalCommandPalette';
 import TaskStatusBar from '@/components/common/TaskStatusBar';
-import { Home, Files, LogOut, User, Settings, MessageSquare } from 'lucide-react';
+import { Home, Files, LogOut, User, Settings, MessageSquare, PanelLeft } from 'lucide-react';
 import { Avatar } from "@/components/ui/Avatar";
 import {
   ResizableHandle,
@@ -33,189 +31,8 @@ import {
   ResizablePanelGroup,
 } from "@/components/ui/resizable";
 import ChatInterface from '@/components/chat/ChatInterface';
+import { TooltipProvider } from "@/components/ui/Tooltip";
 
-// Define the inner component that uses the Sidebar context
-const ResizableLayout: React.FC<{ 
-  user: any; // Replace with actual User type if available
-  tasks: any[]; // Replace with actual Task type if available
-  handleLogout: () => void;
-  location: ReturnType<typeof useLocation>;
-  navigate: ReturnType<typeof useNavigate>;
-}> = ({ user, tasks, handleLogout, location, navigate }) => {
-  const { isOpen: isSidebarOpen } = useSidebar(); // Now called within the Provider's context
-  const [isChatPanelCollapsed, setIsChatPanelCollapsed] = useState(false);
-  const [chatPanelSize, setChatPanelSize] = useState(30);
-
-  const handleChatToggle = () => {
-      if (isChatPanelCollapsed) {
-          setIsChatPanelCollapsed(false);
-          setChatPanelSize(prevSize => prevSize < 10 ? 30 : prevSize);
-      } else {
-          setIsChatPanelCollapsed(true);
-      }
-  };
-
-  // Calculate default size for the main panel based on sidebar and chat panel states
-  const mainPanelDefaultSize = 100 - (isSidebarOpen ? 15 : 5) - (isChatPanelCollapsed ? 0 : chatPanelSize);
-
-  return (
-    <ResizablePanelGroup direction="horizontal" className="min-h-screen w-full">
-      {/* Left Panel: Sidebar */}
-      <ResizablePanel
-        defaultSize={isSidebarOpen ? 15 : 5}
-        minSize={5}
-        maxSize={20}
-        collapsible={true}
-        collapsedSize={5}
-        className={cn("transition-all duration-300 ease-in-out", !isSidebarOpen ? "min-w-[56px] max-w-[56px]" : "min-w-[200px]")} // Sync with sidebar state
-        order={1} // Explicit ordering
-      >
-          <Sidebar collapsible="icon">
-            <SidebarHeader>
-              <div className="p-2 font-semibold text-lg flex items-center gap-2 group-data-[state=expanded]:pl-3">
-                <img
-                  src="/src/assets/gavel-icon.svg"
-                  alt="BenchWise Logo"
-                  className="h-6 w-6 flex-shrink-0"
-                  aria-hidden="true"
-                />
-                <span className="group-data-[state=collapsed]:hidden">BenchWise</span>
-              </div>
-            </SidebarHeader>
-            <SidebarContent className="flex-1 overflow-y-auto">
-               <SidebarGroup>
-                 <SidebarGroupLabel>Workspace</SidebarGroupLabel>
-                 <SidebarMenu>
-                   <SidebarMenuItem>
-                     <SidebarMenuButton
-                       asChild
-                       isActive={location.pathname === '/dashboard'}
-                       tooltip="Dashboard"
-                     >
-                       <Link to="/dashboard"><Home /><span>Dashboard</span></Link>
-                     </SidebarMenuButton>
-                   </SidebarMenuItem>
-                   <SidebarMenuItem>
-                     <SidebarMenuButton
-                       asChild
-                       isActive={location.pathname.startsWith('/files') || location.pathname.startsWith('/documents') || location.pathname.startsWith('/cases')}
-                       tooltip="Files & Cases"
-                     >
-                       <Link to="/files"><Files /><span>Files & Cases</span></Link>
-                     </SidebarMenuButton>
-                   </SidebarMenuItem>
-                   <SidebarMenuItem>
-                      <SidebarMenuButton
-                        onClick={handleChatToggle} // Use handler from this component
-                        isActive={!isChatPanelCollapsed}
-                        tooltip="Chat"
-                      >
-                        <MessageSquare /><span>Chat</span>
-                      </SidebarMenuButton>
-                   </SidebarMenuItem>
-                 </SidebarMenu>
-               </SidebarGroup>
-            </SidebarContent>
-            <SidebarFooter>
-               <SidebarGroup>
-                 <SidebarMenu>
-                     {user && (
-                       <SidebarMenuItem>
-                         <SidebarMenuButton
-                           variant="ghost"
-                           className="cursor-default hover:bg-transparent h-auto justify-start px-2 py-1.5 group-data-[state=collapsed]:justify-center group-data-[state=collapsed]:px-0"
-                           tooltip={{ content: user.email || 'Account', side: 'right', align: 'center' }}
-                         >
-                           <Avatar
-                             name={user.email || 'User'}
-                             src={user.user_metadata?.avatar_url}
-                             size="sm"
-                             className="flex-shrink-0"
-                           />
-                           <span className="ml-2 text-sm font-medium text-foreground truncate max-w-[140px] group-data-[state=collapsed]:hidden">
-                             {user.email || 'Account'}
-                           </span>
-                         </SidebarMenuButton>
-                       </SidebarMenuItem>
-                     )}
-                     <SidebarMenuItem>
-                       <SidebarMenuButton
-                         onClick={() => navigate('/settings')}
-                         tooltip={{ content: 'Settings', side: 'right', align: 'center' }}
-                       >
-                         <Settings />
-                         <span className="group-data-[state=collapsed]:hidden">Settings</span>
-                       </SidebarMenuButton>
-                     </SidebarMenuItem>
-                     <SidebarMenuItem>
-                       <SidebarMenuButton
-                          onClick={handleLogout} // Use passed-in handler
-                          tooltip={{ content: 'Logout', side: 'right', align: 'center' }}
-                       >
-                         <LogOut />
-                         <span className="group-data-[state=collapsed]:hidden">Logout</span>
-                       </SidebarMenuButton>
-                     </SidebarMenuItem>
-                 </SidebarMenu>
-               </SidebarGroup>
-            </SidebarFooter>
-          </Sidebar>
-      </ResizablePanel>
-
-      <ResizableHandle withHandle />
-
-      {/* Center Panel: Main Content */}
-      <ResizablePanel 
-        defaultSize={mainPanelDefaultSize} 
-        order={2} // Explicit ordering
-        minSize={30} // Ensure main content doesn't get too small
-      >
-        <div className="flex flex-col h-full">
-          <Header />
-          <main className="flex-1 overflow-auto p-4 md:p-6 bg-muted/40">
-            <Outlet />
-          </main>
-          {tasks.length > 0 && (
-             <TaskStatusBar tasks={tasks} />
-           )}
-        </div>
-      </ResizablePanel>
-
-      <ResizableHandle withHandle />
-
-      {/* Right Panel: Chat Interface */}
-      <ResizablePanel
-         defaultSize={chatPanelSize}
-         minSize={20}
-         maxSize={75}
-         collapsible={true}
-         collapsedSize={0}
-         order={3}
-         onCollapse={() => {
-             setIsChatPanelCollapsed(true);
-         }}
-         onExpand={() => {
-             setIsChatPanelCollapsed(false);
-         }}
-         onResize={(size) => {
-            if (size > 0) {
-                setChatPanelSize(size);
-            }
-         }}
-         isCollapsed={isChatPanelCollapsed} // Control collapse state
-      >
-        {!isChatPanelCollapsed && (
-          <div className="h-full border-l flex flex-col">
-            <ChatInterface />
-          </div>
-        )}
-      </ResizablePanel>
-    </ResizablePanelGroup>
-  );
-};
-
-
-// Main AppLayout component remains largely the same, but renders ResizableLayout inside the provider
 const AppLayout: React.FC = () => {
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useAtom(commandPaletteOpenAtom);
   const tasks = useAtom(backgroundTasksAtom)[0];
@@ -223,6 +40,13 @@ const AppLayout: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, signOut } = useAuth();
+
+  // --- Local state for sidebar visibility ---
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false); // Default closed
+  const [chatPanelSize, setChatPanelSize] = useState(20);
+
+  // --- Simple toggle function ---
+  const toggleSidebar = () => setIsSidebarOpen(prev => !prev);
 
   useEffect(() => {
     const intervalId = setInterval(() => {
@@ -238,20 +62,127 @@ const AppLayout: React.FC = () => {
   };
 
   return (
-    <SidebarProvider defaultOpen={false}>
-       <ResizableLayout 
-         user={user}
-         tasks={tasks}
-         handleLogout={handleLogout}
-         location={location}
-         navigate={navigate}
-       />
+    <TooltipProvider>
+      <div className="flex h-screen overflow-hidden">
+        {/* Sidebar DIV - Fixed width, controlled by LOCAL state */}
+        <div 
+          style={{ width: isSidebarOpen ? '16rem' : '3rem' }} 
+          className="flex-shrink-0 bg-background border-r transition-all duration-300 ease-in-out overflow-y-auto"
+        >
+          {/* Pass state down as a prop for internal styling */}
+          <Sidebar 
+            collapsible="icon" 
+            className="h-full" 
+            forceState={isSidebarOpen ? 'expanded' : 'collapsed'} 
+          >
+              <SidebarHeader>
+                <div className="p-2 font-semibold text-lg flex items-center gap-2 group-data-[state=expanded]:pl-3">
+                   <span className="group-data-[state=collapsed]:hidden">BenchWise</span>
+                </div>
+              </SidebarHeader>
+              <SidebarContent className="flex-1 flex flex-col">
+                 <SidebarGroup>
+                   <SidebarGroupLabel>Workspace</SidebarGroupLabel>
+                   <SidebarMenu>
+                      <SidebarMenuItem>
+                         <SidebarMenuButton asChild isActive={location.pathname === '/dashboard'} tooltip="Dashboard">
+                           <Link to="/dashboard"><Home /><span>Dashboard</span></Link>
+                         </SidebarMenuButton>
+                       </SidebarMenuItem>
+                       <SidebarMenuItem>
+                         <SidebarMenuButton asChild isActive={location.pathname.startsWith('/files') || location.pathname.startsWith('/documents') || location.pathname.startsWith('/cases')} tooltip="Files & Cases">
+                           <Link to="/files"><Files /><span>Files & Cases</span></Link>
+                         </SidebarMenuButton>
+                       </SidebarMenuItem>
+                   </SidebarMenu>
+                 </SidebarGroup>
 
-      <CommandPalette
-        open={isCommandPaletteOpen}
-        onOpenChange={setIsCommandPaletteOpen}
-      />
-    </SidebarProvider>
+                 <SidebarGroup className="mt-auto">
+                   <SidebarMenu>
+                       {user && (
+                         <SidebarMenuItem>
+                           <SidebarMenuButton 
+                             variant="ghost" 
+                             className="cursor-default hover:bg-transparent h-auto justify-start px-2 py-1.5" 
+                             tooltip={{ content: user.email || 'Account', side: 'right', align: 'center' }}
+                           >
+                             <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-sidebar text-primary-foreground group-data-[state=expanded]:h-7 group-data-[state=expanded]:w-7">
+                               <span className="text-sm font-medium">{user.email?.charAt(0).toUpperCase() || 'U'}</span>
+                             </div>
+                             <span className="ml-2 text-sm font-medium text-foreground truncate max-w-[140px] group-data-[state=collapsed]:hidden">
+                               {user.email || 'Account'}
+                             </span>
+                           </SidebarMenuButton>
+                         </SidebarMenuItem>
+                       )}
+                       <SidebarMenuItem>
+                         <SidebarMenuButton 
+                           onClick={() => navigate('/settings')} 
+                           tooltip={{ content: 'Settings', side: 'right', align: 'center' }} 
+                         >
+                           <Settings />
+                           <span className="group-data-[state=collapsed]:hidden">Settings</span>
+                         </SidebarMenuButton>
+                       </SidebarMenuItem>
+                       <SidebarMenuItem>
+                         <SidebarMenuButton 
+                           onClick={handleLogout} 
+                           tooltip={{ content: 'Logout', side: 'right', align: 'center' }} 
+                         >
+                           <LogOut />
+                           <span className="group-data-[state=collapsed]:hidden">Logout</span>
+                         </SidebarMenuButton>
+                       </SidebarMenuItem>
+                       <SidebarSeparator className="my-1" /> 
+                       <SidebarMenuItem>
+                        <SidebarMenuButton 
+                          onClick={toggleSidebar} 
+                          tooltip={{ content: isSidebarOpen ? 'Collapse Sidebar' : 'Expand Sidebar', side: 'right', align: 'center' }} 
+                        >
+                         <PanelLeft />
+                         <span className="group-data-[state=collapsed]:hidden">Collapse</span>
+                       </SidebarMenuButton>
+                     </SidebarMenuItem>
+                   </SidebarMenu>
+                 </SidebarGroup>
+              </SidebarContent>
+          </Sidebar>
+        </div>
+
+        {/* Resizable Area (Main + Chat) - Takes remaining space */} 
+        <ResizablePanelGroup direction="horizontal" className="flex-grow">
+          {/* Main Content Panel */}
+          <ResizablePanel order={1} defaultSize={80} minSize={30}>
+            <div className={cn(
+              "flex flex-col h-full"
+            )}>
+              <Header />
+              <main className="flex-1 overflow-auto p-4 md:p-6 bg-muted/40">
+                <Outlet />
+              </main>
+              {tasks.length > 0 && (
+                 <TaskStatusBar tasks={tasks} />
+               )}
+            </div>
+          </ResizablePanel>
+
+          <ResizableHandle withHandle />
+
+          {/* Chat Panel */}
+          <ResizablePanel order={2} defaultSize={20} minSize={20} maxSize={75} collapsible={false} onResize={setChatPanelSize}>
+            <div className="h-full border-l flex flex-col">
+              <ChatInterface />
+            </div>
+          </ResizablePanel>
+        </ResizablePanelGroup>
+
+        {/* Command Palette */} 
+        <CommandPalette
+          open={isCommandPaletteOpen}
+          onOpenChange={setIsCommandPaletteOpen}
+        />
+      </div>
+    </TooltipProvider>
   );
 };
 

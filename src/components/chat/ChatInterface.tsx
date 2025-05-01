@@ -15,7 +15,7 @@ import { handleUserTurn } from '@/lib/taskDispatcher';
 import { Task } from '@/lib/commandParser';
 import { getConversationMessages } from '@/services/chatService';
 import { v4 as uuidv4 } from 'uuid';
-import { MessageCircle, Wand2 } from 'lucide-react';
+import { MessageCircle, Wand2, PlusSquare } from 'lucide-react';
 import ChatInput from './ChatInput';
 import ChatMessage, { Message } from './ChatMessage';
 import { Spinner } from '@/components/ui/Spinner';
@@ -23,6 +23,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/Alert";
 import { Icons } from "@/components/ui/Icons";
 import { toast } from 'react-hot-toast';
+import { Button } from '@/components/ui/Button';
 
 interface ChatInterfaceProps {
   conversationId?: string;
@@ -57,6 +58,7 @@ function ChatInterface({
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const resetTriggerValue = useAtomValue(resetChatTriggerAtom);
+  const setResetChatTrigger = useSetAtom(resetChatTriggerAtom);
   const isInitialMount = useRef(true);
 
   const howToUseTips = [
@@ -320,6 +322,17 @@ function ChatInterface({
 
   return (
     <div className="flex flex-col h-full bg-background overflow-hidden">
+        <div className="flex items-center justify-between p-2 border-b">
+            <h2 className="text-lg font-semibold">Chat</h2>
+            <Button 
+                variant="ghost" 
+                size="icon" 
+                onClick={() => setResetChatTrigger(c => c + 1)} 
+                title="New Chat"
+            >
+                <PlusSquare className="h-5 w-5" />
+            </Button>
+        </div>
         <ScrollArea className="flex-grow p-4 space-y-4">
             {isLoadingHistory && (
                  <div className="flex justify-center items-center h-full">
@@ -374,7 +387,6 @@ function ChatInterface({
             onContextChange={handleContextChange}
             initialValue={initialInput}
             isLoading={isSendingMessage}
-            onInsertContent={onInsertContent}
             onFileUpload={handleFileUpload}
         />
     </div>

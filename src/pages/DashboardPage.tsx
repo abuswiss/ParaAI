@@ -10,7 +10,12 @@ import {
 } from '@/atoms/appAtoms';
 import { Button } from '@/components/ui/Button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/Card';
-import { Icons } from '@/components/ui/Icons';
+import { 
+  RefreshIcon, 
+  DocumentIcon as DocumentIconFromUI,
+  PlusIcon, 
+  FileTextIcon
+} from '@/components/ui/Icons';
 import { FolderPlus, MessageSquarePlus, Upload, FileText, Search } from 'lucide-react';
 
 const DashboardPage: React.FC = () => {
@@ -30,7 +35,6 @@ const DashboardPage: React.FC = () => {
 
   const handleNewChat = () => {
     triggerChatReset(c => c + 1);
-    navigate('/chat');
   };
 
   const handleUseTemplate = () => {
@@ -74,7 +78,7 @@ const DashboardPage: React.FC = () => {
           </CardHeader>
           <CardContent>
             <Button className="w-full" onClick={handleNewChat}>
-              <Icons.Plus className="mr-2 h-4 w-4" /> Go to Chat
+              <RefreshIcon className="mr-2 h-4 w-4" /> New Chat
             </Button>
           </CardContent>
         </Card>
@@ -82,7 +86,7 @@ const DashboardPage: React.FC = () => {
         <Card className="hover:shadow-lg transition-shadow border-border">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <Icons.Document className="h-5 w-5 text-primary" />
+              <FileTextIcon className="h-5 w-5 text-primary" />
               Work with Documents
             </CardTitle>
             <CardDescription>Upload, view, analyze, or summarize your documents.</CardDescription>
@@ -107,7 +111,7 @@ const DashboardPage: React.FC = () => {
           </CardHeader>
           <CardContent className="flex flex-col sm:flex-row gap-2">
             <Button variant="outline" className="flex-1" onClick={handleUseTemplate}>
-              <Icons.Plus className="mr-2 h-4 w-4" /> Use Template
+              <PlusIcon className="mr-2 h-4 w-4" /> Use Template
             </Button>
             <Button variant="outline" className="flex-1" onClick={() => navigate('/files', { state: { view: 'templates' } })}> 
               <Search className="mr-2 h-4 w-4" /> Browse

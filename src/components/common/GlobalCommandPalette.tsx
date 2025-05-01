@@ -13,7 +13,11 @@ import {
   CommandSeparator,
 } from '@/components/ui/command'; 
 import { Search, FileText, Folder, Settings, Mail, Square, File, Sparkles, Upload, LogOut, Globe } from 'lucide-react'; // Example & actual icons
-import { Icons } from '@/components/ui/Icons'; // Use our Icons component
+import { 
+  FolderIcon, 
+  DocumentIcon, // Use this for File Manager?
+  FileTextIcon 
+} from '@/components/ui/Icons'; 
 import useDebounce from '@/hooks/useDebounce'; // Import the hook
 import * as caseService from '@/services/caseService';
 import * as documentService from '@/services/documentService';
@@ -64,35 +68,35 @@ const GlobalCommandPalette: React.FC<GlobalCommandPaletteProps> = ({ open, onOpe
   // --- Predefined Commands --- (Expand this list)
   const predefinedCommands: CommandAction[] = [
     // Navigation
-    { id: 'nav-dashboard', label: 'Go to Dashboard', icon: <Icons.Square className="h-4 w-4" />, action: () => runCommand(() => navigate('/dashboard')), group: 'Navigation' },
-    { id: 'nav-cases', label: 'Manage Cases', icon: <Icons.Folder className="h-4 w-4" />, action: () => runCommand(() => navigate('/cases')), group: 'Navigation' },
-    { id: 'nav-file-manager', label: 'File Manager', icon: <Icons.File className="h-4 w-4" />, action: () => runCommand(() => navigate('/files')), group: 'Navigation' }, // Navigate to unified File Manager
+    { id: 'nav-dashboard', label: 'Go to Dashboard', icon: <Square className="h-4 w-4" />, action: () => runCommand(() => navigate('/dashboard')), group: 'Navigation' },
+    { id: 'nav-cases', label: 'Manage Cases', icon: <FolderIcon className="h-4 w-4" />, action: () => runCommand(() => navigate('/cases')), group: 'Navigation' },
+    { id: 'nav-file-manager', label: 'File Manager', icon: <DocumentIcon className="h-4 w-4" />, action: () => runCommand(() => navigate('/files')), group: 'Navigation' },
 
     // Agent Commands (Navigate to chat and pre-fill)
     { 
       id: 'cmd-draft', 
       label: 'AI Document Draft...', 
-      icon: <Icons.Sparkles className="h-4 w-4" />, 
+      icon: <Sparkles className="h-4 w-4" />,
       action: () => runCommand(() => navigate('/dashboard', { state: { initialChatInput: '/agent draft ' } })), 
       group: 'Agent' 
     },
      { 
       id: 'cmd-perplexity', 
       label: 'AI Live Search...', 
-      icon: <Icons.Globe className="h-4 w-4" />, 
+      icon: <Globe className="h-4 w-4" />,
       action: () => runCommand(() => navigate('/dashboard', { state: { initialChatInput: '/agent perplexity ' } })), 
       group: 'Agent' 
     },
      { 
       id: 'cmd-research', 
       label: 'Legal Research...', 
-      icon: <Icons.Search className="h-4 w-4" />, 
+      icon: <Search className="h-4 w-4" />,
       action: () => runCommand(() => navigate('/dashboard', { state: { initialChatInput: '/research ' } })), 
       group: 'Agent' 
     },
     // General
-    { id: 'cmd-upload', label: 'Upload Document', icon: <Icons.Upload className="h-4 w-4" />, action: () => runCommand(() => setIsUploadModalOpen(true)), group: 'General' },
-    { id: 'cmd-settings', label: 'Settings', icon: <Settings className="h-4 w-4" />, action: () => runCommand(() => navigate('/settings')), group: 'General' }, // Assuming /settings route exists
+    { id: 'cmd-upload', label: 'Upload Document', icon: <Upload className="h-4 w-4" />, action: () => runCommand(() => setIsUploadModalOpen(true)), group: 'General' },
+    { id: 'cmd-settings', label: 'Settings', icon: <Settings className="h-4 w-4" />, action: () => runCommand(() => navigate('/settings')), group: 'General' },
     { id: 'cmd-logout', label: 'Logout', icon: <LogOut className="h-4 w-4" />, action: () => runCommand(signOut), group: 'General' },
   ];
 
@@ -197,7 +201,7 @@ const GlobalCommandPalette: React.FC<GlobalCommandPaletteProps> = ({ open, onOpe
                          onSelect={() => runCommand(() => navigate(`/cases/${c.id}`))}
                          value={`Case: ${c.name}`}
                        >
-                         <Folder className="mr-2 h-4 w-4" />
+                         <FolderIcon className="mr-2 h-4 w-4" />
                          <span>{c.name}</span>
                          {c.case_number && <span className="ml-auto text-xs text-muted-foreground">#{c.case_number}</span>}
                        </CommandItem>
@@ -215,7 +219,7 @@ const GlobalCommandPalette: React.FC<GlobalCommandPaletteProps> = ({ open, onOpe
                      onSelect={() => runCommand(() => navigate(`/view/document/${doc.id}`))}
                      value={`Document: ${doc.filename}`}
                    >
-                     <FileText className="mr-2 h-4 w-4" />
+                     <FileTextIcon className="mr-2 h-4 w-4" />
                      <span>{doc.filename}</span>
                      {/* Maybe add case name or date? Needs fetching case details or adding to search result */}
                    </CommandItem>
@@ -233,7 +237,7 @@ const GlobalCommandPalette: React.FC<GlobalCommandPaletteProps> = ({ open, onOpe
                          onSelect={() => runCommand(() => navigate(`/edit/template/${tmpl.id}`))}
                          value={`Template: ${tmpl.name}`}
                        >
-                         <Icons.FileText className="mr-2 h-4 w-4" />
+                         <FileTextIcon className="mr-2 h-4 w-4" />
                          <span>{tmpl.name}</span>
                          <span className="ml-auto text-xs text-muted-foreground capitalize">{tmpl.category}</span>
                        </CommandItem>

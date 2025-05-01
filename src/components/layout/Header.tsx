@@ -1,7 +1,6 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { PanelLeft, User as UserIcon, LogOut, Settings } from 'lucide-react'; // Use specific icons
-import { useSidebar } from './Sidebar'; // Import hook to control sidebar
 import { useAuth } from '@/hooks/useAuth'; // Import auth hook
 import { Button } from '@/components/ui/Button';
 import { Avatar } from "@/components/ui/Avatar"; // Use Avatar
@@ -16,7 +15,7 @@ import {
 import { cn } from '@/lib/utils';
 
 const Header: React.FC = () => {
-  const { toggleSidebar, state: sidebarState } = useSidebar(); // Get sidebar state and toggle function
+  // const { toggleSidebar, state: sidebarState } = useSidebar(); // No longer needed here
   const { user, signOut } = useAuth();
   const navigate = useNavigate();
 
@@ -27,15 +26,15 @@ const Header: React.FC = () => {
 
   return (
     <header className="sticky top-0 z-30 flex h-14 items-center gap-4 border-b bg-background px-4 sm:static sm:h-auto sm:border-0 sm:bg-transparent sm:px-6">
-      {/* Sidebar Toggle Button */}
-      <Button
+      {/* Sidebar Toggle Button Removed */}
+      {/* <Button
         size="icon"
         variant="outline"
         onClick={toggleSidebar}
       >
         <PanelLeft className="h-5 w-5" />
         <span className="sr-only">Toggle Menu</span>
-      </Button>
+      </Button> */}
 
       {/* Placeholder for Breadcrumbs or Page Title if needed */}
       <div className="flex-1">

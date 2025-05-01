@@ -129,6 +129,9 @@ const SidebarProvider = React.forwardRef<
       [state, open, setOpen, isMobile, openMobile, setOpenMobile, toggleSidebar]
     )
 
+    // Log the value being provided
+    console.log("SidebarProvider providing context:", contextValue);
+
     return (
       <SidebarContext.Provider value={contextValue}>
         <TooltipProvider delayDuration={0}>
@@ -156,103 +159,69 @@ const SidebarProvider = React.forwardRef<
 )
 SidebarProvider.displayName = "SidebarProvider"
 
-const Sidebar = React.forwardRef<
-  HTMLDivElement,
-  React.ComponentProps<"div"> & {
+// Define the new prop type
+type SidebarProps = React.ComponentProps<"div"> & {
     side?: "left" | "right"
     variant?: "sidebar" | "floating" | "inset"
     collapsible?: "offcanvas" | "icon" | "none"
-  }
->(
+    forceState?: "expanded" | "collapsed" // New prop
+}
+
+const Sidebar = React.forwardRef<HTMLDivElement, SidebarProps>( // Use updated type
   (
     {
       side = "left",
       variant = "sidebar",
       collapsible = "offcanvas",
+      forceState, // Get the new prop
       className,
       children,
       ...props
     },
     ref
   ) => {
-    const { isMobile, state, openMobile, setOpenMobile } = useSidebar()
+    const isMobile = useIsMobile(); 
 
-    if (collapsible === "none") {
-      return (
-        <div
-          className={cn(
-            "flex h-full w-[--sidebar-width] flex-col bg-surface text-secondary",
-            className
-          )}
-          ref={ref}
-          {...props}
-        >
-          {children}
-        </div>
-      )
-    }
+    const effectiveState = forceState;
 
     if (isMobile) {
-      return (
-        <Sheet open={openMobile} onOpenChange={setOpenMobile} {...props}>
-          <SheetContent
-            data-sidebar="sidebar"
-            data-mobile="true"
-            className="w-[--sidebar-width] bg-surface p-0 text-secondary [&>button]:hidden"
-            style={
-              {
-                "--sidebar-width": SIDEBAR_WIDTH_MOBILE,
-              } as React.CSSProperties
-            }
-            side={side}
-          >
-            <div className="flex h-full w-full flex-col">{children}</div>
-          </SheetContent>
-        </Sheet>
-      )
+       // Remove context usage here - this breaks mobile sheet for now
+       // const { openMobile, setOpenMobile } = useSidebar(); 
+       // Temporarily render nothing on mobile to avoid context error
+       // TODO: Re-implement mobile sheet using props or local state if needed
+       return null; 
+       // return (
+       //   <Sheet open={openMobile} onOpenChange={setOpenMobile} {...props}>
+       //       <SheetContent
+       //           data-sidebar=\"sidebar\"
+       //           data-mobile=\"true\"
+       //           className=\"w-[--sidebar-width] bg-surface p-0 text-secondary [&>button]:hidden\"
+       //           style={
+       //           {
+       //               \"--sidebar-width\": SIDEBAR_WIDTH_MOBILE,
+       //           } as React.CSSProperties
+       //           }
+       //           side={side}
+       //       >
+       //           <div className=\"flex h-full w-full flex-col\">{children}</div>
+       //       </SheetContent>
+       //   </Sheet>
+       // );
     }
 
+    // Desktop View - Use effectiveState for data-state
     return (
       <div
         ref={ref}
-        className="group peer hidden md:block text-secondary"
-        data-state={state}
-        data-collapsible={state === "collapsed" ? collapsible : ""}
-        data-variant={variant}
-        data-side={side}
+        data-state={effectiveState} // Use the state passed via prop
+        className={cn(
+          // Removed 'hidden md:flex' to always render the div, relying on parent for layout
+          "h-full flex-col bg-surface text-secondary border-r overflow-y-auto",
+          className
+        )}
+        {...props}
       >
-        {/* This is what handles the sidebar gap on desktop */}
-        <div
-          className={cn(
-            "duration-200 relative h-svh w-[--sidebar-width] bg-transparent transition-[width] ease-linear",
-            "group-data-[collapsible=offcanvas]:w-0",
-            "group-data-[side=right]:rotate-180",
-            variant === "floating" || variant === "inset"
-              ? "group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)_+_theme(spacing.4))]"
-              : "group-data-[collapsible=icon]:w-[--sidebar-width-icon]"
-          )}
-        />
-        <div
-          className={cn(
-            "duration-200 fixed inset-y-0 z-10 hidden h-svh w-[--sidebar-width] transition-[left,right,width] ease-linear md:flex",
-            side === "left"
-              ? "left-0 group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-width)*-1)]"
-              : "right-0 group-data-[collapsible=offcanvas]:right-[calc(var(--sidebar-width)*-1)]",
-            // Adjust the padding for floating and inset variants.
-            variant === "floating" || variant === "inset"
-              ? "p-2 group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)_+_theme(spacing.4)_+2px)]"
-              : "group-data-[collapsible=icon]:w-[--sidebar-width-icon] group-data-[side=left]:border-r group-data-[side=right]:border-l",
-            className
-          )}
-          {...props}
-        >
-          <div
-            data-sidebar="sidebar"
-            className="flex h-full w-full flex-col bg-surface group-data-[variant=floating]:rounded-lg group-data-[variant=floating]:border group-data-[variant=floating]:border-border group-data-[variant=floating]:shadow"
-          >
-            {children}
-          </div>
-        </div>
+        {children}
       </div>
     )
   }
@@ -554,7 +523,8 @@ const SidebarMenuButton = React.forwardRef<
     ref
   ) => {
     const Comp = asChild ? Slot : "button"
-    const { isMobile, state } = useSidebar()
+    // Remove context hook call
+    // const { isMobile, state } = useSidebar();
 
     const button = (
       <Comp
@@ -583,7 +553,6 @@ const SidebarMenuButton = React.forwardRef<
         <TooltipContent
           side="right"
           align="center"
-          hidden={state !== "collapsed" || isMobile}
           {...tooltip}
         />
       </Tooltip>
