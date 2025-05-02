@@ -184,10 +184,31 @@ const Sidebar = React.forwardRef<HTMLDivElement, SidebarProps>(
     const { state } = useSidebar();
 
     if (isMobile) {
-       return null;
+       // Handle mobile view if necessary, or return null/Sheet
+       // Keeping original mobile logic for now
+       const { openMobile, setOpenMobile } = useSidebar()
+       return (
+         <Sheet open={openMobile} onOpenChange={setOpenMobile}>
+           <SheetContent
+             side={side}
+             style={
+               {
+                 "--sidebar-width-mobile": SIDEBAR_WIDTH_MOBILE,
+               } as React.CSSProperties
+             }
+             className={cn(
+               "flex w-[var(--sidebar-width-mobile)] flex-col p-0",
+               className
+             )}
+             {...props}
+           >
+             {children}
+           </SheetContent>
+         </Sheet>
+       )
     }
 
-    // Desktop View
+    // Desktop View - Simplified
     return (
       <div
         ref={ref}
@@ -195,39 +216,13 @@ const Sidebar = React.forwardRef<HTMLDivElement, SidebarProps>(
         className={cn(
           "relative h-full flex flex-col bg-surface text-secondary border-r",
           state === 'expanded' ? 'w-[var(--sidebar-width)]' : 'w-[var(--sidebar-width-icon)]',
-          "transition-all duration-300 ease-in-out overflow-hidden",
+          "transition-all duration-300 ease-in-out overflow-hidden", // Keep overflow hidden on main container
           className
         )}
         {...props}
       >
-        <div className="flex-1 overflow-y-auto overflow-x-hidden p-2 space-y-4">
-            <div className={cn("px-2", state === 'collapsed' && "px-0")}> 
-                <CaseSelector />
-            </div>
-
-            {/* Section 1: Main Navigation Links (Original Children) - Always Render */}
-            <div className="flex-shrink-0">
-                 {children}
-            </div>
-
-            {/* Render Separator and Chat History only when expanded */}
-            {state === 'expanded' && (
-              <>
-                <Separator className="my-2" />
-                <div className="flex-grow min-h-0 overflow-y-auto">
-                    <ChatHistoryList />
-                </div>
-              </>
-            )}
-
-            {/* Add a flexible space filler when collapsed to push footer items down (if footer exists) */}
-             {state === 'collapsed' && <div className="flex-grow"></div>}
-        </div>
-
-        {/* Sidebar Footer (Optional) */}
-        <div className="mt-auto p-2 border-t"> 
-          {/* Footer content goes here if needed */}
-        </div>
+        {/* Directly render children. Layout is now fully managed by AppLayout.tsx */}
+        {children}
       </div>
     )
   }
@@ -343,14 +338,17 @@ SidebarHeader.displayName = "SidebarHeader"
 const SidebarFooter = React.forwardRef<
   HTMLDivElement,
   React.ComponentProps<"div">
->(({ className, ...props }, ref) => {
+>(({ className, children, ...props }, ref) => {
   return (
     <div
       ref={ref}
-      data-sidebar="footer"
-      className={cn("flex flex-col gap-2 p-2", className)}
+      // Removed internal styling like mt-auto, border-t, p-2
+      // Layout is controlled by AppLayout
+      className={cn(className)} 
       {...props}
-    />
+    >
+      {children}
+    </div>
   )
 })
 SidebarFooter.displayName = "SidebarFooter"
@@ -372,18 +370,24 @@ SidebarSeparator.displayName = "SidebarSeparator"
 
 const SidebarContent = React.forwardRef<
   HTMLDivElement,
-  React.ComponentProps<"div">
->(({ className, ...props }, ref) => {
+  React.ComponentProps<"div"> & VariantProps<typeof sidebarContentVariants>
+>(({ className, children, ...props }, ref) => {
+  const { variant, collapsible } = useSidebar()
+
   return (
     <div
       ref={ref}
-      data-sidebar="content"
+      // Removed internal padding/spacing. Let AppLayout handle it.
+      // Ensure it allows flex column layout from AppLayout
       className={cn(
-        "flex min-h-0 flex-1 flex-col gap-2 overflow-auto group-data-[collapsible=icon]:overflow-hidden",
+        sidebarContentVariants({ variant, collapsible }), 
+        "flex-1 overflow-y-auto overflow-x-hidden", // Allow vertical scroll if needed
         className
       )}
       {...props}
-    />
+    >
+      {children}
+    </div>
   )
 })
 SidebarContent.displayName = "SidebarContent"
@@ -487,7 +491,7 @@ const SidebarMenuItem = React.forwardRef<
 SidebarMenuItem.displayName = "SidebarMenuItem"
 
 const sidebarMenuButtonVariants = cva(
-  "peer/menu-button flex w-full items-center gap-2 overflow-hidden rounded-md p-2 text-left text-sm outline-none ring-ring transition-[width,height,padding] hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 active:bg-accent active:text-accent-foreground disabled:pointer-events-none disabled:opacity-50 group-has-[[data-sidebar=menu-action]]/menu-item:pr-8 aria-disabled:pointer-events-none aria-disabled:opacity-50 data-[active=true]:bg-accent data-[active=true]:font-medium data-[active=true]:text-accent-foreground data-[state=open]:hover:bg-accent data-[state=open]:hover:text-accent-foreground group-data-[collapsible=icon]:!size-8 group-data-[collapsible=icon]:!p-2 [&>span:last-child]:truncate [&>svg]:size-4 [&>svg]:shrink-0",
+  "peer/menu-button flex w-full items-center gap-2 overflow-hidden rounded-md p-2 text-left text-sm outline-none ring-ring transition-[width,height,padding] hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 active:bg-accent active:text-accent-foreground disabled:pointer-events-none disabled:opacity-50 group-has-[[data-sidebar=menu-action]]/menu-item:pr-8 aria-disabled:pointer-events-none aria-disabled:opacity-50 data-[active=true]:bg-accent data-[active=true]:font-medium data-[active=true]:text-accent-foreground data-[state=open]:hover:bg-accent data-[state=open]:hover:text-accent-foreground group-data-[collapsible=icon]:!size-8 group-data-[collapsible=icon]:!p-2 group-data-[collapsible=icon]:!justify-center group-data-[state=collapsed]:justify-center [&>span:last-child]:truncate [&>svg]:size-4 [&>svg]:shrink-0",
   {
     variants: {
       variant: {
@@ -538,7 +542,12 @@ const SidebarMenuButton = React.forwardRef<
         data-sidebar="menu-button"
         data-size={size}
         data-active={isActive}
-        className={cn(sidebarMenuButtonVariants({ variant, size }), className)}
+        className={cn(
+          sidebarMenuButtonVariants({ variant, size }), 
+          // Added specific classes for icon positioning
+          "group-data-[state=collapsed]:flex group-data-[state=collapsed]:justify-center [&>svg]:group-data-[state=collapsed]:mx-auto",
+          className
+        )}
         {...props}
       />
     )
@@ -709,6 +718,28 @@ const SidebarMenuSubButton = React.forwardRef<
   )
 })
 SidebarMenuSubButton.displayName = "SidebarMenuSubButton"
+
+const sidebarContentVariants = cva(
+  "flex h-full w-full flex-col",
+  {
+    variants: {
+      variant: {
+        sidebar: "",
+        floating: "rounded-lg border",
+        inset: "border-r",
+      },
+      collapsible: {
+        offcanvas: "",
+        icon: "",
+        none: "",
+      },
+    },
+    defaultVariants: {
+      variant: "sidebar",
+      collapsible: "offcanvas",
+    },
+  }
+)
 
 export {
   Sidebar,
