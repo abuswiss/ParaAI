@@ -2,7 +2,7 @@
 
 import React, { useState, useCallback, ChangeEvent, useEffect } from 'react';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
-import { activeCaseIdAtom, addTaskAtom, updateTaskAtom, removeTaskAtom, initialFilesForUploadAtom, activeDocumentContextIdAtom } from '@/atoms/appAtoms';
+import { activeCaseIdAtom, addTaskAtom, updateTaskAtom, removeTaskAtom, initialFilesForUploadAtom, activeEditorItemAtom } from '@/atoms/appAtoms';
 import { v4 as uuidv4 } from 'uuid';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
@@ -55,7 +55,7 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose }) => {
   const addTask = useSetAtom(addTaskAtom);
   const updateTask = useSetAtom(updateTaskAtom);
   const removeTask = useSetAtom(removeTaskAtom);
-  const setActiveDocumentContextId = useSetAtom(activeDocumentContextIdAtom);
+  const setActiveEditorItem = useSetAtom(activeEditorItemAtom);
   const { toast } = useToast();
 
   // Reset state and handle initial files when modal is opened
@@ -174,8 +174,8 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose }) => {
                 throw uploadError || new Error('Upload initiation failed.');
             }
 
-            // Set context immediately after successful upload initiation
-            setActiveDocumentContextId(uploadResult.id);
+            // Set the active editor item immediately after successful upload initiation
+            setActiveEditorItem({ type: 'document', id: uploadResult.id });
 
             // Update task status upon successful initiation (backend handles rest)
             updateTask({ 

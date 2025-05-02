@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/hooks/useAuth';
+import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Label } from '@/components/ui/Label';
@@ -17,7 +18,7 @@ import {
   DialogDescription, 
   DialogFooter, 
   DialogClose 
-} from '@/components/ui/dialog';
+} from '@/components/ui/Dialog';
 import { 
   Select, 
   SelectContent, 
@@ -25,8 +26,9 @@ import {
   SelectTrigger, 
   SelectValue 
 } from '@/components/ui/select';
-import { useToast } from "@/hooks/use-toast";
-import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Alert, AlertDescription } from '@/components/ui/Alert';
+import * as agentService from '@/services/agentService';
+import * as documentService from '@/services/documentService';
 
 // Define common legal document types (can be expanded)
 const DOCUMENT_TYPES = [
@@ -91,57 +93,60 @@ const NewAIDocumentDraftModal: React.FC<NewAIDocumentDraftModalProps> = ({ isOpe
     });
 
     try {
-      console.log("Invoking agent-draft function...");
+      console.log("Calling agentService.handleAgentDraftStream...");
+
+      // 1. Call the agent service to get the draft content
+      const agentResult = await agentService.handleAgentDraftStream(
+          instructions.trim(),
+          activeCaseId, // Should be validated by now
+          undefined, // documentContext (pass if available/needed)
+          additionalContext.trim() || undefined // Pass additionalContext as analysisContext
+          // Optional task tracking args can be added here
+      );
+
+      if (!agentResult.success || !agentResult.draftContent) {
+          throw agentResult.error || new Error('AI generation failed or returned empty content.');
+      }
       
-      // TODO: Verify the exact function name and body structure required by the backend.
-      // Assuming 'agent-draft' and a body structure like this:
-      const { data, error: invokeError } = await supabase.functions.invoke(
-          'agent-draft', // Assuming this is the correct function name
+      console.log("AI draft content received, saving document...");
+      // Update toast
+      toast({
+          description: "AI draft generated, saving document...",
+      });
+
+      // 2. Save the generated content as a new document
+      const filename = `${documentType} Draft - ${new Date().toLocaleDateString()}`;
+      const { data: newDoc, error: createError } = await documentService.createDocument(
+          user.id, // User ID should be validated by now
+          activeCaseId, // Case ID validated
           {
-              body: { 
-                  instructions: instructions.trim(), 
-                  documentType, 
-                  additionalContext: additionalContext.trim(),
-                  caseId: activeCaseId, 
-                  userId: user.id 
-              },
+              content: agentResult.draftContent, // Use the content from the agent
+              filename: filename,
+              // Add template_id if applicable, maybe based on documentType?
           }
       );
 
-      if (invokeError) throw invokeError;
-      
-      // TODO: Adjust response parsing based on actual backend function response
-      const result = data as { success: boolean, documentId?: string, error?: string }; 
+      if (createError) throw createError;
+      if (!newDoc?.id) throw new Error('Document saved, but ID was not returned.');
 
-      if (!result || !result.success) {
-          throw new Error(result?.error || 'AI document generation failed.');
-      }
-      
-      if (!result.documentId) {
-          throw new Error('Document generated, but ID was not returned.');
-      }
-
-      console.log("AI document generated successfully:", result.documentId);
+      console.log("Document saved successfully:", newDoc.id);
       toast({
-          description: "AI document generated successfully!",
-          variant: 'success',
-          id: toastId.id,
+          description: "AI document draft generated and saved successfully!",
       });
 
       if (onSuccess) {
-        onSuccess(result.documentId);
+        onSuccess(newDoc.id);
       }
       handleClose(true); // Close and indicate refresh needed
 
     } catch (err) {
-      console.error('Error during AI document generation:', err);
+      console.error('Error during AI document generation/saving:', err);
       const errorMessage = err instanceof Error ? err.message : 'An unknown error occurred.';
       setError(errorMessage);
       toast({
           title: "Error",
           description: errorMessage,
           variant: 'destructive',
-          id: toastId.id,
       });
     } finally {
       setIsLoading(false);
@@ -163,66 +168,77 @@ const NewAIDocumentDraftModal: React.FC<NewAIDocumentDraftModalProps> = ({ isOpe
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit}>
-          <div className="grid gap-4 py-4">
-            
-             <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="docType" className="text-right text-card-foreground">
-                Document Type
-              </Label>
-              <Select 
-                value={documentType}
-                onValueChange={setDocumentType} 
-                disabled={isLoading}
-              >
-                <SelectTrigger id="docType" className="col-span-3 bg-background text-foreground border-border">
-                  <SelectValue placeholder="Select type" />
-                </SelectTrigger>
-                <SelectContent className="bg-popover text-popover-foreground border-border">
-                  {DOCUMENT_TYPES.map((type) => (
-                    <SelectItem key={type} value={type}>{type}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+          {isLoading ? (
+            // Loading State
+            <div className="flex items-center justify-center min-h-[250px] py-4">
+              <div className="text-center">
+                <Spinner size="lg" className="mx-auto mb-4" />
+                <p className="text-muted-foreground">Generating AI document draft...</p>
+                <p className="text-xs text-muted-foreground mt-2">(This may take a moment)</p>
+              </div>
             </div>
+          ) : (
+            // Form Content when not loading
+            <div className="grid gap-4 py-4">
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label htmlFor="docType" className="text-right text-card-foreground">
+                  Document Type
+                </Label>
+                <Select 
+                  value={documentType}
+                  onValueChange={setDocumentType} 
+                  disabled={isLoading}
+                >
+                  <SelectTrigger id="docType" className="col-span-3 bg-background text-foreground border-border">
+                    <SelectValue placeholder="Select type" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-popover text-popover-foreground border-border">
+                    {DOCUMENT_TYPES.map((type) => (
+                      <SelectItem key={type} value={type}>{type}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
 
-            <div className="grid grid-cols-4 items-start gap-4">
-              <Label htmlFor="instructions-doc" className="text-right pt-2 text-card-foreground">
-                Instructions*
-              </Label>
-              <Textarea
-                id="instructions-doc"
-                value={instructions}
-                onChange={(e) => setInstructions(e.target.value)}
-                placeholder="e.g., Draft a motion to compel discovery, requesting specific documents related to..."
-                required
-                rows={5}
-                className="col-span-3 bg-background text-foreground border-border focus-visible:ring-primary"
-                disabled={isLoading}
-              />
-            </div>
-            
-            <div className="grid grid-cols-4 items-start gap-4">
-              <Label htmlFor="context-doc" className="text-right pt-2 text-card-foreground">
-                Additional Context
-              </Label>
-              <Textarea
-                id="context-doc"
-                value={additionalContext}
-                onChange={(e) => setAdditionalContext(e.target.value)}
-                placeholder="(Optional) Provide key facts, dates, party names, relevant case law citations, or specific clauses to include..."
-                rows={4}
-                className="col-span-3 bg-background text-foreground border-border focus-visible:ring-primary"
-                disabled={isLoading}
-              />
-            </div>
+              <div className="grid grid-cols-4 items-start gap-4">
+                <Label htmlFor="instructions-doc" className="text-right pt-2 text-card-foreground">
+                  Instructions*
+                </Label>
+                <Textarea
+                  id="instructions-doc"
+                  value={instructions}
+                  onChange={(e) => setInstructions(e.target.value)}
+                  placeholder="e.g., Draft a motion to compel discovery, requesting specific documents related to..."
+                  required
+                  rows={5}
+                  className="col-span-3 bg-background text-foreground border-border focus-visible:ring-primary"
+                  disabled={isLoading}
+                />
+              </div>
+              
+              <div className="grid grid-cols-4 items-start gap-4">
+                <Label htmlFor="context-doc" className="text-right pt-2 text-card-foreground">
+                  Additional Context
+                </Label>
+                <Textarea
+                  id="context-doc"
+                  value={additionalContext}
+                  onChange={(e) => setAdditionalContext(e.target.value)}
+                  placeholder="(Optional) Provide key facts, dates, party names, relevant case law citations, or specific clauses to include..."
+                  rows={4}
+                  className="col-span-3 bg-background text-foreground border-border focus-visible:ring-primary"
+                  disabled={isLoading}
+                />
+              </div>
 
-            {error && (
-                <Alert variant="destructive">
-                    <Icons.Alert className="h-4 w-4" /> 
-                    <AlertDescription>{error}</AlertDescription>
-                </Alert>
-            )}
-          </div>
+              {error && (
+                  <Alert variant="destructive">
+                      <Icons.Alert className="h-4 w-4" /> 
+                      <AlertDescription>{error}</AlertDescription>
+                  </Alert>
+              )}
+            </div>
+          )}
           <DialogFooter>
             <DialogClose asChild>
                  <Button type="button" variant="outline" disabled={isLoading}>
@@ -231,7 +247,7 @@ const NewAIDocumentDraftModal: React.FC<NewAIDocumentDraftModalProps> = ({ isOpe
             </DialogClose>
             <Button type="submit" disabled={isLoading || !activeCaseId}>
               {isLoading ? <Spinner size="sm" className="mr-2" /> : <Icons.Sparkles className="mr-2 h-4 w-4" />}
-              Generate Document
+              {isLoading ? 'Generating...' : 'Generate Document'}
             </Button>
           </DialogFooter>
         </form>

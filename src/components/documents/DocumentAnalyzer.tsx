@@ -54,6 +54,7 @@ interface DocumentAnalyzerProps {
   error: string | null;
   onInitiateChat: (item: any, type: AnalysisType) => void; // Add prop type
   onFindingClick: (position: HighlightPosition | null) => void; // Add callback prop
+  onRegenerateAnalysis: (type: AnalysisType) => void; // ** ADDED: Callback to rerun analysis **
 }
 
 // Removed mock interfaces (Entity, Clause, RiskData) as we use imported types
@@ -83,7 +84,8 @@ const DocumentAnalyzer: React.FC<DocumentAnalyzerProps> = ({
     isLoading, 
     error,
     onInitiateChat, // Destructure prop
-    onFindingClick // Destructure prop
+    onFindingClick, // Destructure prop
+    onRegenerateAnalysis // ** ADDED: Destructure prop **
 }) => {
   
   const renderAnalysisContent = () => {
@@ -257,71 +259,72 @@ const DocumentAnalyzer: React.FC<DocumentAnalyzerProps> = ({
         if (risks.length === 0) {
             return <div className="p-4 text-muted-foreground italic">No significant risks identified.</div>;
         }
+        // Sort risks by severity (optional)
+        const severityOrder: Record<Risk['severity'], number> = { 'Critical': 4, 'High': 3, 'Medium': 2, 'Low': 1 };
+        const sortedRisks = risks.sort((a, b) => (severityOrder[b.severity] || 0) - (severityOrder[a.severity] || 0));
 
         const getRiskBadgeVariant = (severity: Risk['severity']): BadgeVariant => {
-            switch (severity?.toLowerCase()) {
-                case 'high': return 'destructive';
-                case 'medium': return 'warning'; // Assuming you have a 'warning' variant
-                case 'low': return 'success'; // Assuming you have a 'success' variant
+            switch (severity) {
+                case 'Critical': return 'destructive';
+                case 'High': return 'warning';
+                case 'Medium': return 'default'; 
+                case 'Low': return 'outline';
                 default: return 'secondary';
             }
         };
         const getRiskIconColor = (severity: Risk['severity']): string => {
-            switch (severity?.toLowerCase()) {
-                case 'high': return 'text-red-500';
-                case 'medium': return 'text-yellow-500';
-                case 'low': return 'text-green-500';
+             switch (severity) {
+                case 'Critical': return 'text-red-500';
+                case 'High': return 'text-orange-500';
+                case 'Medium': return 'text-yellow-500';
+                case 'Low': return 'text-blue-500';
                 default: return 'text-muted-foreground';
             }
         };
 
         return (
-            <ScrollArea className="h-[calc(100vh-250px)] p-4">
-                 <Accordion type="single" collapsible className="w-full space-y-2">
-                    {risks.map((risk, index) => (
-                        <AccordionItem value={`risk-${index}`} key={`${risk.start}-${index}`} className="border rounded bg-muted/30">
-                            <AccordionTrigger 
-                                className="p-3 text-sm text-left hover:no-underline space-x-2 cursor-pointer" // Added cursor-pointer
-                                onClick={() => onFindingClick({ start: risk.start, end: risk.end })} // Added onClick handler
-                                title="Go to risk in document"
-                            >
-                                 <ShieldAlert className={cn("h-4 w-4 flex-shrink-0", getRiskIconColor(risk.severity))} />
-                                 {/* IMPROVEMENT: Added break-words to prevent overflow */}
-                                 <span className="font-medium flex-1 text-foreground break-words">{risk.explanation?.substring(0, 100)}{risk.explanation?.length > 100 ? '...' : ''}</span>
-                                 <Badge variant={getRiskBadgeVariant(risk.severity)} className="flex-shrink-0 ml-auto">{risk.severity || 'Unknown'}</Badge>
-                            </AccordionTrigger>
-                            {/* IMPROVEMENT: Added padding, p tags, and whitespace control */}
-                            <AccordionContent className="p-3 pt-0 text-sm text-foreground space-y-2 bg-background/50 rounded-b relative">
-                                <Button 
-                                    variant="ghost" size="icon_xs" 
-                                    className="absolute top-1 right-1 text-muted-foreground hover:text-primary"
-                                    onClick={() => onInitiateChat(risk, 'risks')}
-                                    title="Discuss this risk in chat"
-                                >
-                                    <MessageSquarePlus className="h-3 w-3" />
-                                </Button>
-                                <p className="whitespace-pre-wrap break-words pr-6"><strong>Explanation:</strong> {risk.explanation}</p>
-                                {risk.suggestion && <p className="whitespace-pre-wrap break-words text-muted-foreground pr-6"><strong>Suggestion:</strong> {risk.suggestion}</p>}
-                           </AccordionContent>
-                        </AccordionItem>
-                    ))}
-                 </Accordion>
-            </ScrollArea>
+           <ScrollArea className="h-[calc(100vh-250px)] p-4"> 
+             <Accordion type="single" collapsible className="w-full space-y-2">
+                 {sortedRisks.map((risk, index) => (
+                     <AccordionItem value={`risk-${index}`} key={`${risk.start}-${index}`} className="border rounded bg-muted/30">
+                         <AccordionTrigger 
+                            className="p-3 text-sm text-left hover:no-underline space-x-2 cursor-pointer" // Added cursor-pointer
+                            onClick={() => onFindingClick({ start: risk.start, end: risk.end })} // Added onClick handler
+                            title="Go to relevant passage in document"
+                         >
+                            <ShieldAlert className={cn("h-4 w-4 flex-shrink-0", getRiskIconColor(risk.severity))} />
+                             <span className="font-medium flex-1 text-foreground">{risk.title || `Risk ${index + 1}`}</span>
+                             <Badge variant={getRiskBadgeVariant(risk.severity)}>{risk.severity}</Badge>
+                         </AccordionTrigger>
+                         <AccordionContent className="p-3 pt-0 text-sm text-foreground space-y-1 bg-background/50 rounded-b relative">
+                             <Button 
+                                 variant="ghost" size="icon_xs" 
+                                 className="absolute top-1 right-1 text-muted-foreground hover:text-primary"
+                                 onClick={() => onInitiateChat(risk, 'risks')}
+                                 title="Discuss this risk in chat"
+                             >
+                                 <MessageSquarePlus className="h-3 w-3" />
+                             </Button>
+                             {risk.explanation && <p className="pr-6">{risk.explanation}</p>}
+                         </AccordionContent>
+                     </AccordionItem>
+                 ))}
+             </Accordion>
+           </ScrollArea>
         );
-    } else if (typeof resultData === 'object' && 'timeline' in resultData) { // Timeline
+    } else if (typeof resultData === 'object' && 'timeline' in resultData) { // ** NEW: Timeline Handling **
         const timelineResult = resultData as TimelineResult;
-        const events = timelineResult.timeline || [];
-        if (events.length === 0) {
-            return <div className="p-4 text-muted-foreground italic">No timeline events extracted.</div>;
-        }
+        const timelineEvents = timelineResult.timeline || [];
+        
+        // Render TimelineView component, passing down props
         return (
-            <ScrollArea className="h-[calc(100vh-250px)] p-4">
-                <TimelineView 
-                    events={events} 
-                    onEventClick={(event) => onFindingClick({ start: event.start, end: event.end })} 
-                    onInitiateChat={(event) => onInitiateChat(event, 'timeline')} // Pass callback
-                 />
-            </ScrollArea>
+            <TimelineView 
+                timelineEvents={timelineEvents}
+                isLoading={isLoading} // Pass down loading state
+                error={error} // Pass down error state
+                // Pass a callback to re-trigger timeline analysis via the parent
+                onRegenerate={() => onRegenerateAnalysis('timeline')}
+            />
         );
     } else if (isPrivilegedTermsResult(resultData)) { // Privileged Terms
          const termsResult = resultData;

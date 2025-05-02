@@ -19,43 +19,68 @@ export async function processSupabaseStream(
 ): Promise<{ success: boolean; error: Error | null; fullResponse: string; sources?: SourceInfo[] }> {
     let accumulatedResponse = '';
     let receivedSources: SourceInfo[] | undefined = undefined; // Store sources if onSnippets is used
+    let responseStream: ReadableStream | null = null;
+
     try {
-        console.log(`Invoking streaming function: ${functionName}`);
-        const { data: responseData, error: invokeError } = await supabase.functions.invoke(functionName, {
-            body: payload,
+        console.log(`Invoking streaming function via fetch: ${functionName}`);
+
+        // --- Use fetch instead of invoke --- 
+        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+        if (sessionError || !session) {
+            throw new Error(sessionError?.message || 'Not authenticated');
+        }
+        
+        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL; 
+        const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY; 
+
+        if (!supabaseUrl || !anonKey) {
+             throw new Error('Supabase URL or Anon Key is not configured in environment variables.');
+        }
+        
+        const functionUrl = `${supabaseUrl}/functions/v1/${functionName}`;
+
+        const response = await fetch(functionUrl, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${session.access_token}`,
+                'apikey': anonKey, // Include the anon key as well
+            },
+            body: JSON.stringify(payload),
         });
+        // --- End fetch logic --- 
 
-        if (invokeError) throw invokeError;
-        if (!responseData) throw new Error('Function invocation returned no data.');
+        if (!response.ok) {
+             const errorText = await response.text();
+             console.error(`Function ${functionName} fetch failed (${response.status}): ${errorText}`);
+             let errorJson: { error?: string } = {};
+             try { errorJson = JSON.parse(errorText); } catch { /* ignore parse error */ }
+             throw new Error(errorJson.error || `Function call failed with status ${response.status}`);
+        }
 
-        // Handle direct string response
-        if (typeof responseData === 'string') {
-            console.warn(`Received string directly from ${functionName}, processing as single chunk.`);
-            accumulatedResponse = chunkParser(responseData, onChunk);
-            // Note: Cannot determine sources reliably from a direct string response
+        // Check content type for streaming
+        const contentType = response.headers.get('content-type');
+        if (!contentType || !contentType.includes('text/event-stream')) {
+            // Handle non-stream response (maybe an unexpected JSON error or string?)
+            const responseText = await response.text();
+            console.warn(`Received non-stream content-type (${contentType}) from ${functionName}. Body: ${responseText}`);
+            // Try to parse as error JSON
+            let errorJson: { error?: string } = {};
+            try { errorJson = JSON.parse(responseText); } catch { /* ignore */ }
+            if (errorJson.error) throw new Error(errorJson.error);
+            // Otherwise, treat the whole text as a single chunk? Or throw error?
+            accumulatedResponse = chunkParser(responseText, onChunk); // Attempt to parse as single chunk
             return { success: true, error: null, fullResponse: accumulatedResponse, sources: undefined }; 
         }
 
-        // Handle potential error object returned in data
-        if (responseData?.error && typeof responseData.error === 'object') {
-             // Define a more specific type for the error object
-             type SupabaseFunctionError = { message?: string; [key: string]: unknown };
-             const errorObj = responseData.error as SupabaseFunctionError;
-             console.error(`Supabase function ${functionName} returned error object:`, errorObj);
-             throw new Error(errorObj.message || JSON.stringify(errorObj));
+        // Get the stream from the response body
+        responseStream = response.body; 
+        if (!responseStream) {
+            throw new Error('Response body is null, cannot get stream.');
         }
-
-        // Ensure we have a ReadableStream
-        if (!(responseData instanceof ReadableStream)) {
-            let receivedDataInfo = 'Unknown structure';
-            try { receivedDataInfo = JSON.stringify(responseData); } catch { /* Ignore */ }
-            console.error(`Unexpected response type from ${functionName}: Expected ReadableStream, got ${typeof responseData}. Data: ${receivedDataInfo}`);
-            throw new Error('Unexpected response type received from streaming function.');
-        }
-
-        // Process the stream
-        const stream = responseData;
-        const reader = stream.getReader();
+        
+        // --- Stream Processing Logic (largely unchanged) ---
+        const reader = responseStream.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
 
@@ -106,6 +131,16 @@ export async function processSupabaseStream(
         console.log(`Stream finished for ${functionName}. Full response length: ${accumulatedResponse.length}`);
         return { success: true, error: null, fullResponse: accumulatedResponse, sources: receivedSources };
     } catch (e: unknown) {
+        // Ensure the stream reader is cancelled if an error occurs
+        if (responseStream) {
+            try {
+                await responseStream.cancel();
+                console.log('Stream cancelled due to error.');
+            } catch (cancelError) {
+                console.error('Error cancelling stream:', cancelError);
+            }
+        }
+        
         const error = e instanceof Error ? e : new Error(`Unknown error processing stream for ${functionName}`);
         console.error(`Error during stream processing for ${functionName}:`, error.message, e);
         const errorMessage = error.message;
@@ -124,6 +159,7 @@ export async function processSupabaseStream(
  */
 export function parseGenericStreamChunks(chunkText: string, onChunk: (content: string) => void): string {
     let accumulatedContent = '';
+    // Process the input chunkText directly, assuming it might contain one or more SSE lines
     const lines = chunkText.split('\n');
 
     for (const line of lines) {
@@ -132,13 +168,31 @@ export function parseGenericStreamChunks(chunkText: string, onChunk: (content: s
         if (line.startsWith('data:')) {
             const dataContent = line.substring(5).trim();
             if (dataContent === '[DONE]') {
+                console.log('Received DONE signal');
                 continue; // Ignore DONE signal
             }
-            // Assume data content is the text chunk
-            onChunk(dataContent);
-            accumulatedContent += dataContent;
+            try {
+                // Attempt to parse the data content as JSON (since OpenAI sends strings JSON-encoded)
+                const parsedData = JSON.parse(dataContent);
+                if (typeof parsedData === 'string') {
+                    onChunk(parsedData);
+                    accumulatedContent += parsedData;
+                } else {
+                     // Handle cases where data might not be a simple string after parsing
+                     console.warn('Parsed SSE data is not a string:', parsedData);
+                     const fallbackString = String(parsedData);
+                     onChunk(fallbackString);
+                     accumulatedContent += fallbackString;
+                }
+            } catch (e) {
+                // If JSON parsing fails, treat the raw content as the chunk (might happen with direct strings or errors)
+                console.warn('Failed to parse SSE data as JSON, using raw content:', dataContent, e);
+                onChunk(dataContent);
+                accumulatedContent += dataContent;
+            }
         } else if (!line.startsWith('event:')) { // Ignore event lines unless handled elsewhere
-            // Treat as plain text line if not data or event
+            // This case should ideally not happen with our backend functions, but log if it does.
+            console.warn("Received non-SSE line (treating as raw text):", line);
             onChunk(line);
             accumulatedContent += line;
         }

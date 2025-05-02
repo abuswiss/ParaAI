@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { DocumentMetadata } from '@/services/documentService';
 import * as documentService from '@/services/documentService';
-import { activeDocumentContextIdAtom } from '@/atoms/appAtoms';
+import { activeEditorItemAtom } from '@/atoms/appAtoms';
 import { 
     Dialog, 
     DialogContent, 
@@ -34,13 +34,14 @@ const DocumentContextPicker: React.FC<DocumentContextPickerProps> = ({
     onOpenChange,
     activeCaseId, 
  }) => {
-  const currentGlobalContextId = useAtomValue(activeDocumentContextIdAtom);
+  const activeEditorItem = useAtomValue(activeEditorItemAtom);
+  const currentActiveDocId = activeEditorItem?.type === 'document' ? activeEditorItem.id : null;
   const [selectedContextIdInModal, setSelectedContextIdInModal] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [caseDocuments, setCaseDocuments] = useState<DocumentMetadata[]>([]);
-  const setActiveDocumentContextId = useSetAtom(activeDocumentContextIdAtom);
+  const setActiveEditorItem = useSetAtom(activeEditorItemAtom);
   
   useEffect(() => {
     if (isOpen && activeCaseId) {
@@ -51,7 +52,7 @@ const DocumentContextPicker: React.FC<DocumentContextPickerProps> = ({
              const { data, error: fetchError } = await documentService.getUserDocuments(activeCaseId); 
              if (fetchError) throw fetchError;
              setCaseDocuments(data || []);
-             setSelectedContextIdInModal(currentGlobalContextId);
+             setSelectedContextIdInModal(currentActiveDocId);
         } catch (err: any) {
              console.error("Error fetching documents for context picker:", err);
              setError("Failed to load documents.");
@@ -66,7 +67,7 @@ const DocumentContextPicker: React.FC<DocumentContextPickerProps> = ({
         setCaseDocuments([]);
         setSelectedContextIdInModal(null);
     }
-  }, [isOpen, activeCaseId, currentGlobalContextId]);
+  }, [isOpen, activeCaseId, currentActiveDocId]);
 
   const filteredDocuments = useMemo(() => {
     if (!caseDocuments) return [];
@@ -76,12 +77,12 @@ const DocumentContextPicker: React.FC<DocumentContextPickerProps> = ({
   }, [caseDocuments, searchTerm]);
 
   const handleSelection = (docId: string) => {
-    setActiveDocumentContextId(docId);
+    setActiveEditorItem({ type: 'document', id: docId });
     onOpenChange(false);
   };
 
   const handleClearSelection = () => {
-    setActiveDocumentContextId(null);
+    setActiveEditorItem(prev => (prev?.type === 'document' ? null : prev));
     onOpenChange(false);
   };
 
@@ -124,7 +125,7 @@ const DocumentContextPicker: React.FC<DocumentContextPickerProps> = ({
                         onClick={handleClearSelection}
                         className={cn(
                             "w-full justify-start px-2 py-1.5 text-sm",
-                            !selectedContextIdInModal ? "text-primary font-medium" : "text-muted-foreground"
+                            selectedContextIdInModal === null ? "text-primary font-medium" : "text-muted-foreground"
                         )}
                      >
                         <X className="h-4 w-4 mr-2"/> No Context

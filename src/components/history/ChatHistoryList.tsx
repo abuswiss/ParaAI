@@ -40,7 +40,7 @@ const ChatHistoryList: React.FC = () => {
   };
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col">
       <div className="p-2 flex justify-between items-center border-b">
         <h3 className="text-xs font-semibold uppercase text-muted-foreground tracking-wider">Chat History</h3>
         <Button variant="ghost" size="sm" onClick={handleNewChat} title="New Chat">

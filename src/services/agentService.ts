@@ -109,14 +109,13 @@ export const handleResearchQueryStream = async (
  */
 export const handleAgentDraftStream = async (
   instructions: string,
-  onChunk: (chunk: string) => void,
   caseId?: string,
   documentContext?: string,
   analysisContext?: string,
   taskId?: string,
   updateTask?: UpdateTaskFn,
   removeTask?: RemoveTaskFn
-): Promise<{ success: boolean; error: Error | null; answer?: string }> => {
+): Promise<{ success: boolean; error: Error | null; draftContent?: string }> => {
   let userId: string | undefined;
   try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -130,6 +129,7 @@ export const handleAgentDraftStream = async (
   }
 
   console.log(`Handling Agent Draft (via Edge Function) for case ${caseId}`);
+  if (taskId && updateTask) updateTask({ id: taskId, status: 'running', description: 'Generating AI draft...' });
 
   try {
     const payload: AgentDraftPayload = {
@@ -139,19 +139,32 @@ export const handleAgentDraftStream = async (
       analysisContext,
       userId,
     };
-    const result = await processSupabaseStream('agent-draft', payload, onChunk, undefined, undefined, parseVercelAiSdkChunks);
+
+    // Use processSupabaseStream to get the full response
+    let fullDraftContent = '';
+    const result = await processSupabaseStream(
+        'agent-draft', 
+        payload, 
+        (chunk) => { fullDraftContent += chunk; }, // Collect chunks
+        undefined, 
+        undefined, 
+        parseGenericStreamChunks // agent-draft uses generic SSE now
+    );
+
     if (result.success) {
-      if (taskId && updateTask) updateTask({ id: taskId, status: 'success', description: 'Draft complete' });
-      return { success: true, error: null, answer: result.fullResponse };
+      console.log('Agent draft stream finished successfully.');
+      if (taskId && updateTask) updateTask({ id: taskId, status: 'success', description: 'Draft generation complete' });
+      // Return the collected content
+      return { success: true, error: null, draftContent: fullDraftContent }; 
     } else {
-      if (taskId && updateTask) updateTask({ id: taskId, status: 'error', description: `Draft failed: ${result.error?.message}` });
-      return { success: false, error: result.error, answer: undefined };
+      throw result.error || new Error('Unknown error during agent draft stream processing');
     }
   } catch (error) {
     console.error('Error in handleAgentDraftStream:', error);
-    onChunk(`Error drafting: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    // Don't call onChunk here as it was removed
+    // onChunk(`Error drafting: ${error instanceof Error ? error.message : 'Unknown error'}`);
     if (taskId && updateTask) updateTask({ id: taskId, status: 'error', description: `Draft failed: ${error instanceof Error ? error.message : 'Unknown error'}` });
-    return { success: false, error: error instanceof Error ? error : new Error('Unknown draft error'), answer: undefined };
+    return { success: false, error: error instanceof Error ? error : new Error('Unknown draft error'), draftContent: undefined };
   } finally {
     if (taskId && removeTask) removeTask(taskId);
   }
@@ -438,7 +451,14 @@ export const handleRewriteStream = async (
 
     // Use the local processSupabaseStream helper defined in this file
     // rewrite-text likely uses Vercel AI SDK format
-    const result = await processSupabaseStream('rewrite-text', invokePayload, onChunk, undefined, undefined, parseVercelAiSdkChunks);
+    const result = await processSupabaseStream(
+        'rewrite-text',
+        invokePayload, 
+        onChunk, 
+        undefined, 
+        undefined, 
+        parseGenericStreamChunks // Use the correct generic SSE parser
+    );
 
     if (result.success) {
         console.log('Rewrite stream finished successfully.');
@@ -482,7 +502,14 @@ export const handleSummarizeStream = async (
 
     // Use the local processSupabaseStream helper defined in this file
     // summarize-text likely uses Vercel AI SDK format
-    const result = await processSupabaseStream('summarize-text', invokePayload, onChunk, undefined, undefined, parseVercelAiSdkChunks);
+    const result = await processSupabaseStream(
+        'summarize-text',
+        invokePayload,
+        onChunk,
+        undefined,
+        undefined,
+        parseGenericStreamChunks // Use the correct generic SSE parser
+    );
 
     if (result.success) {
         console.log('Summarize stream finished successfully.');

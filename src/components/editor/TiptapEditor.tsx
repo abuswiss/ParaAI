@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback, forwardRef, useImperativeHandle } from 'react';
-import { useEditor, EditorContent, Editor, BubbleMenu } from '@tiptap/react';
+import { useEditor, EditorContent, Editor, BubbleMenu, FloatingMenu } from '@tiptap/react';
 import { Decoration, DecorationSet } from '@tiptap/pm/view'; 
 import { Node } from '@tiptap/pm/model'; 
 import { EditorState } from '@tiptap/pm/state';
@@ -27,13 +27,24 @@ import {
   DropdownMenuTrigger,
   DropdownMenuSeparator,
 } from "@/components/ui/DropdownMenu";
-import { PilcrowSquare, ArrowDownToLine, ArrowUpToLine, StickyNote } from 'lucide-react';
+import { PilcrowSquare, ArrowDownToLine, ArrowUpToLine, StickyNote, Bot, ChevronDown, Sparkles, FileText, Type, BookOpen, ClipboardCopy, Check } from 'lucide-react';
 import { toast } from 'sonner';
 import { Extension } from '@tiptap/core';
 import { EditorExtensionsOptions } from '@/lib/editor/extensions';
 import { HighlightInfo, HighlightPosition } from '@/components/documents/DocumentViewer';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/Dialog";
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { EditorToolbar } from '@/components/editor/toolbars/editor-toolbar';
+import { FloatingToolbar } from '@/lib/editor/extensions/FloatingToolbar';
 
-type RewriteMode = 'improve' | 'shorten' | 'expand' | 'professional' | 'formal' | 'simple';
+type RewriteMode = 'improve' | 'shorten' | 'expand' | 'professional' | 'formal' | 'simple' | 'custom';
 
 const PLACEHOLDER_REGEX = /\{\{([^}]+?)\}\}/g;
 
@@ -117,10 +128,13 @@ const TiptapEditor = forwardRef<TiptapEditorRef, TiptapEditorProps>((
   const [isSummarizing, setIsSummarizing] = useState(false);
   const [isRewriting, setIsRewriting] = useState(false);
   const isFirstChunkRef = useRef(true);
+  const [summaryResult, setSummaryResult] = useState<string | null>(null);
+  const [showSummaryDialog, setShowSummaryDialog] = useState(false);
+  const [copySuccess, setCopySuccess] = useState(false);
 
   // Memoize handleSummarize and handleRewrite with only necessary dependencies
   const handleSummarize = useCallback(async (editorInstance: Editor) => {
-    if (!caseId || !documentId || isSummarizing || !editable || !editorInstance) return;
+    if (!caseId || !documentId || isSummarizing || !editable || !editorInstance || editorInstance.isDestroyed) return;
     const { from, to, empty } = editorInstance.state.selection;
     if (empty) return;
 
@@ -129,46 +143,49 @@ const TiptapEditor = forwardRef<TiptapEditorRef, TiptapEditorProps>((
 
     console.log('Starting summarization for:', selectedText);
     setIsSummarizing(true);
-    isFirstChunkRef.current = true;
-
-    const onChunk = (chunk: string) => {
-      if (!editorInstance) return;
-      editorInstance.view.focus();
-      if (isFirstChunkRef.current) {
-        const currentSelection = editorInstance.state.selection;
-        const insertPos = (currentSelection.from === from && currentSelection.to === to) ? from : currentSelection.from;
-        try {
-             editorInstance.chain().focus(insertPos).deleteRange({ from, to }).insertContent(chunk).run();
-        } catch (e) {
-             console.warn("Error deleting range, inserting at current pos:", e);
-             editorInstance.chain().focus(insertPos).insertContent(chunk).run();
-        }
-        isFirstChunkRef.current = false;
-      } else {
-        editorInstance.chain().focus().insertContent(chunk).run();
-      }
-    };
+    setSummaryResult(null);
+    setShowSummaryDialog(false);
 
     try {
-      const result = await handleSummarizeStream(selectedText, onChunk, caseId, documentId);
-      if (!result.success) {
-        console.error('Summarization failed:', result.error);
-        if (!isFirstChunkRef.current) {
-          editorInstance?.chain().focus().insertContent(`\n\n[Error summarizing: ${result.error?.message || 'Unknown error'}]`).run();
-        }
+      // Define a dummy onChunk callback to satisfy the function signature
+      const dummyOnChunk = (chunk: string) => { 
+        // console.log("Summarize chunk (ignored):", chunk);
+      }; 
+
+      // Call the agent service with the correct arguments
+      const result = await handleSummarizeStream(
+        selectedText,
+        dummyOnChunk, // Pass the dummy callback
+        caseId, // caseId should be guaranteed by the initial check
+        documentId // documentId should be guaranteed by the initial check
+        // Optional args like surroundingContext, instructions, taskId etc. can be added if needed
+      );
+
+      console.log("Full summary received:", result.answer);
+
+      // Use result.answer and check for success
+      if (result.success && result.answer && result.answer.trim()) {
+        setSummaryResult(result.answer);
+        setShowSummaryDialog(true); // Open the dialog with the result
+      } else {
+        const errorMsg = result.error?.message || "Summarization failed to produce a result or returned empty.";
+        toast.error(errorMsg);
+        setSummaryResult(null);
       }
+
     } catch (error) {
-      console.error('Error calling handleSummarizeStream:', error);
-      if (!isFirstChunkRef.current) {
-        editorInstance?.chain().focus().insertContent(`\n\n[Error summarizing: ${error instanceof Error ? error.message : 'Unknown error'}]`).run();
-      }
+      console.error('Error during summarization stream:', error);
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      toast.error(`Summarization failed: ${message}`);
+      setSummaryResult(null); // Clear result on error
+      setShowSummaryDialog(false);
     } finally {
       setIsSummarizing(false);
     }
   }, [caseId, documentId, isSummarizing, editable]);
 
-  const handleRewrite = useCallback(async (editorInstance: Editor, mode?: string) => {
-    if (!caseId || !documentId || isRewriting || !editable || !editorInstance) return;
+  const handleRewrite = useCallback(async (mode: RewriteMode, editorInstance: Editor, customInstructions?: string) => {
+    if (!caseId || !documentId || isRewriting || !editable || !editorInstance || editorInstance.isDestroyed) return;
     const { from, to, empty } = editorInstance.state.selection;
     if (empty) return;
 
@@ -177,39 +194,43 @@ const TiptapEditor = forwardRef<TiptapEditorRef, TiptapEditorProps>((
 
     console.log(`Starting rewrite (mode: ${mode}) for:`, selectedText);
     setIsRewriting(true);
-    isFirstChunkRef.current = true;
 
-    const onChunk = (chunk: string) => {
-      if (!editorInstance) return;
-      editorInstance.view.focus();
-      if (isFirstChunkRef.current) {
-         const currentSelection = editorInstance.state.selection;
-         const insertPos = (currentSelection.from === from && currentSelection.to === to) ? from : currentSelection.from;
-        try {
-             editorInstance.chain().focus(insertPos).deleteRange({ from, to }).insertContent(chunk).run();
-        } catch (e) {
-             console.warn("Error deleting range, inserting at current pos:", e);
-             editorInstance.chain().focus(insertPos).insertContent(chunk).run();
-        }
-        isFirstChunkRef.current = false;
-      } else {
-        editorInstance.chain().focus().insertContent(chunk).run();
-      }
-    };
+    const selectionRange = { from, to };
 
     try {
-      const result = await handleRewriteStream(selectedText, onChunk, caseId, documentId, mode);
-      if (!result.success) {
-        console.error('Rewrite failed:', result.error);
-        if (!isFirstChunkRef.current) {
-          editorInstance?.chain().focus().insertContent(`\n\n[Error rewriting: ${result.error?.message || 'Unknown error'}]`).run();
-        }
+      // Define a dummy onChunk callback with explicit type
+      const dummyOnChunk: (chunk: string) => void = (chunk: string) => { 
+        // console.log("Rewrite chunk (ignored):", chunk); 
+      };
+
+      // Call the agent service with the correct arguments based on ACTUAL signature
+      const result = await handleRewriteStream(
+        selectedText,        // Arg 1
+        dummyOnChunk,        // Arg 2
+        caseId,              // Arg 3
+        documentId,          // Arg 4
+        undefined,           // Arg 5: surroundingContext (pass undefined for now)
+        customInstructions   // Arg 6: instructions (pass customInstructions here if desired, or mode-specific if needed)
+      );
+
+      console.log(`Full rewrite (mode: ${mode}) received:`, result.answer);
+
+       // Use result.answer and check for success
+      if (result.success && result.answer && result.answer.trim()) {
+         // Insert the full response, replacing the original selection
+        editorInstance.chain()
+            .focus() // Ensure editor has focus before inserting
+            .insertContentAt(selectionRange, result.answer) // Replace content at original selection
+            .run();
+      } else {
+         const errorMsg = result.error?.message || `Rewrite (mode: ${mode}) failed to produce a result or returned empty.`;
+         toast.error(errorMsg);
       }
+
     } catch (error) {
-      console.error('Error calling handleRewriteStream:', error);
-      if (!isFirstChunkRef.current) {
-        editorInstance?.chain().focus().insertContent(`\n\n[Error rewriting: ${error instanceof Error ? error.message : 'Unknown error'}]`).run();
-      }
+      console.error(`Error during rewrite stream (mode: ${mode}):`, error);
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      toast.error(`Rewrite (mode: ${mode}) failed: ${message}`);
     } finally {
       setIsRewriting(false);
     }
@@ -330,7 +351,7 @@ const TiptapEditor = forwardRef<TiptapEditorRef, TiptapEditorProps>((
 
   const handleRewriteClick = useCallback((mode: RewriteMode) => {
     if (editor) {
-      handleRewrite(editor, mode);
+      handleRewrite(mode, editor);
     }
   }, [editor, handleRewrite]);
 
@@ -441,12 +462,37 @@ const TiptapEditor = forwardRef<TiptapEditorRef, TiptapEditorProps>((
     }
   }, [editor, activeHighlightPosition]);
 
+  // Copy summary to clipboard
+  const copySummaryToClipboard = useCallback(async () => {
+    if (!summaryResult) return;
+    try {
+      await navigator.clipboard.writeText(summaryResult);
+      setCopySuccess(true);
+      setTimeout(() => setCopySuccess(false), 1500); // Reset after 1.5s
+    } catch (err) {
+      console.error('Failed to copy summary: ', err);
+      toast.error("Failed to copy summary to clipboard.");
+    }
+  }, [summaryResult]);
+
   if (!editor) {
     return <div className={cn("flex items-center justify-center min-h-[150px] border rounded-md", className)}><Spinner /></div>;
   }
 
+  // Define AI Menu Items
+  const aiMenuItems = [
+    { label: 'Improve', mode: 'improve', icon: Sparkles },
+    { label: 'Shorten', mode: 'shorten', icon: Type },
+    { label: 'Expand', mode: 'expand', icon: BookOpen },
+    { label: 'Professional', mode: 'professional', icon: Type },
+    { label: 'Formal', mode: 'formal', icon: Type },
+    { label: 'Simple', mode: 'simple', icon: Type },
+    { label: 'Summarize', action: () => handleSummarize(editor), icon: FileText, isAction: true },
+    // Add 'custom' later if needed
+  ];
+
   return (
-    <div className={cn("tiptap-editor-wrapper relative h-full border border-input rounded-md", className)}> 
+    <div className={cn("flex flex-col border border-neutral-200 dark:border-neutral-800 rounded-md overflow-hidden bg-white dark:bg-neutral-950 shadow-sm h-full", className)}>
       {(isSummarizing || isRewriting) && (
         <div className="absolute inset-0 bg-background/50 flex items-center justify-center z-50 rounded-md">
           <Spinner />
@@ -500,13 +546,17 @@ const TiptapEditor = forwardRef<TiptapEditorRef, TiptapEditorProps>((
                 <TooltipContent>AI Rewrite Options</TooltipContent>
               </Tooltip>
               <DropdownMenuContent align="start">
-                <DropdownMenuItem onSelect={() => handleRewriteClick('improve')} disabled={isSummarizing || isRewriting}>Improve Writing</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => handleRewriteClick('shorten')} disabled={isSummarizing || isRewriting}>Make Shorter</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => handleRewriteClick('expand')} disabled={isSummarizing || isRewriting}>Expand</DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onSelect={() => handleRewriteClick('professional')} disabled={isSummarizing || isRewriting}>Professional Tone</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => handleRewriteClick('formal')} disabled={isSummarizing || isRewriting}>Formal Tone</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => handleRewriteClick('simple')} disabled={isSummarizing || isRewriting}>Simplify Language</DropdownMenuItem>
+                {aiMenuItems.map((item, index) => (
+                  <DropdownMenuItem
+                    key={item.label}
+                    className="hover:bg-neutral-700 focus:bg-neutral-700 cursor-pointer"
+                    onSelect={() => item.isAction ? item.action() : handleRewrite(item.mode as RewriteMode, editor)}
+                    disabled={isRewriting || isSummarizing}
+                  >
+                    <item.icon className="w-4 h-4 mr-2" />
+                    {item.label}
+                  </DropdownMenuItem>
+                ))}
               </DropdownMenuContent>
             </DropdownMenu>
             <Separator orientation="vertical" className="h-6 mx-1" />
@@ -594,22 +644,63 @@ const TiptapEditor = forwardRef<TiptapEditorRef, TiptapEditorProps>((
                 </Tooltip>
               </TooltipProvider>
               <DropdownMenuContent align="start">
-                <DropdownMenuItem onSelect={() => handleRewriteClick('improve')} disabled={isSummarizing || isRewriting}>Improve Writing</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => handleRewriteClick('shorten')} disabled={isSummarizing || isRewriting}>Make Shorter</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => handleRewriteClick('expand')} disabled={isSummarizing || isRewriting}>Expand</DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onSelect={() => handleRewriteClick('professional')} disabled={isSummarizing || isRewriting}>Professional Tone</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => handleRewriteClick('formal')} disabled={isSummarizing || isRewriting}>Formal Tone</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => handleRewriteClick('simple')} disabled={isSummarizing || isRewriting}>Simplify Language</DropdownMenuItem>
+                {aiMenuItems.map((item, index) => (
+                  <DropdownMenuItem
+                    key={item.label}
+                    className="hover:bg-neutral-700 focus:bg-neutral-700 cursor-pointer"
+                    onSelect={() => item.isAction ? item.action() : handleRewrite(item.mode as RewriteMode, editor)}
+                    disabled={isRewriting || isSummarizing}
+                  >
+                    <item.icon className="w-4 h-4 mr-2" />
+                    {item.label}
+                  </DropdownMenuItem>
+                ))}
               </DropdownMenuContent>
             </DropdownMenu>
           </ToolbarProvider>
         </BubbleMenu>
       </TooltipProvider>
       
-      <EditorContent editor={editor} className="h-full p-2 overflow-y-auto" />
+      <ScrollArea className="flex-1">
+        <EditorContent editor={editor} className="p-4 min-h-[200px] focus:outline-none prose dark:prose-invert max-w-none prose-p:my-1 prose-headings:my-2" />
+      </ScrollArea>
+
+      {/* --- Summary Dialog --- */}
+      <Dialog open={showSummaryDialog} onOpenChange={setShowSummaryDialog}>
+        <DialogContent className="sm:max-w-lg bg-background/80 backdrop-blur-sm">
+          <DialogHeader>
+            <DialogTitle className="text-neutral-900 dark:text-neutral-100">Summary</DialogTitle>
+            <DialogDescription className="text-neutral-600 dark:text-neutral-400">
+              AI-generated summary of the selected text.
+            </DialogDescription>
+          </DialogHeader>
+          <ScrollArea className="max-h-[400px] my-4 pr-4">
+            {/* Render summaryResult as HTML */}
+            <p 
+              className="text-sm text-muted-foreground whitespace-pre-wrap"
+              dangerouslySetInnerHTML={{ __html: summaryResult || '' }}
+            />
+          </ScrollArea>
+          <DialogFooter className="sm:justify-between">
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              onClick={copySummaryToClipboard}
+              disabled={!summaryResult}
+              className="text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+            >
+              {copySuccess ? <Check className="h-4 w-4 mr-1 text-green-500" /> : <ClipboardCopy className="h-4 w-4 mr-1" />}
+              {copySuccess ? 'Copied!' : 'Copy'}
+            </Button>
+            <Button variant="outline" onClick={() => setShowSummaryDialog(false)} className="bg-white dark:bg-neutral-800 border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-700">
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      {/* --- End Summary Dialog --- */}
     </div>
   );
-}); // *** ADDED: Wrap component with forwardRef ***
+});
 
-export default TiptapEditor; // Ensure default export if not already 
+export default TiptapEditor;

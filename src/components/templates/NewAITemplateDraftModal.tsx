@@ -17,7 +17,7 @@ import {
   DialogDescription, 
   DialogFooter, 
   DialogClose 
-} from '@/components/ui/dialog';
+} from '@/components/ui/Dialog';
 import { 
   Select, 
   SelectContent, 
@@ -26,7 +26,7 @@ import {
   SelectValue 
 } from '@/components/ui/select'; // Import Select
 import { useToast } from "@/hooks/use-toast"; // Changed import from react-hot-toast
-import { Alert, AlertDescription } from '@/components/ui/alert'; // Import Alert
+import { Alert, AlertDescription } from '@/components/ui/Alert'; // Corrected casing & Import Alert
 import { cn } from '@/lib/utils';
 import { Check, Sparkles } from 'lucide-react';
 
@@ -147,11 +147,9 @@ const NewAITemplateDraftModal: React.FC<NewAITemplateDraftModalProps> = ({ isOpe
         // Update toast on success
         toast({
             description: "AI template created successfully!",
-            variant: 'success',
-            id: toastId.id,
         });
         
-        if (onSuccess) {
+        if (onSuccess && result.templateId) {
           onSuccess(result.templateId);
         }
         
@@ -170,7 +168,6 @@ const NewAITemplateDraftModal: React.FC<NewAITemplateDraftModalProps> = ({ isOpe
           title: "Error",
           description: errorMessage,
           variant: 'destructive',
-          id: toastId.id,
       });
     } finally {
       if (currentStep !== GenerationStep.Complete) {
@@ -255,68 +252,57 @@ const NewAITemplateDraftModal: React.FC<NewAITemplateDraftModalProps> = ({ isOpe
         <form onSubmit={handleSubmit}>
           {isLoading ? (
             // Show progress steps when loading
-            <div className="py-8">
+            <div className="py-8 flex items-center justify-center min-h-[200px] animate-pulse">
               <ProgressSteps />
-              
-              {currentStep === GenerationStep.Complete && (
-                <div className="flex flex-col items-center justify-center mt-4 text-center">
-                  <div className="bg-green-100 text-green-800 p-3 rounded-full mb-2">
-                    <Check className="h-6 w-6" />
-                  </div>
-                  <h3 className="text-lg font-medium">Template Created!</h3>
-                  <p className="text-sm text-muted-foreground mt-1">
-                    Your new template has been created successfully.
-                  </p>
-                </div>
-              )}
             </div>
           ) : (
             // Show form when not loading
-            <div className="grid gap-4 py-4">
-              <div className="grid grid-cols-4 items-center gap-4">
-                <Label htmlFor="category" className="text-right">
-                  Category
-                </Label>
-                {/* Shadcn Select Component */}
-                <Select 
-                  value={category}
-                  onValueChange={setCategory} 
-                  disabled={isLoading}
-                >
-                  <SelectTrigger id="category" className="col-span-3">
-                    <SelectValue placeholder="Select category" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {TEMPLATE_CATEGORIES.map((cat) => (
-                      <SelectItem key={cat} value={cat}>{cat}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+            <>
+              <div className="grid gap-4 py-4">
+                <div className="grid grid-cols-4 items-center gap-4">
+                  <Label htmlFor="category" className="text-right">
+                    Category*
+                  </Label>
+                  <Select 
+                    value={category}
+                    onValueChange={setCategory} 
+                    disabled={isLoading}
+                  >
+                    <SelectTrigger id="category" className="col-span-3">
+                      <SelectValue placeholder="Select category" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {TEMPLATE_CATEGORIES.map((cat) => (
+                        <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
 
-              <div className="grid grid-cols-4 items-start gap-4">
-                <Label htmlFor="instructions" className="text-right pt-2">
-                  Instructions
-                </Label>
-                <Textarea
-                  id="instructions"
-                  value={instructions}
-                  onChange={(e) => setInstructions(e.target.value)}
-                  placeholder="e.g., Draft a simple Non-Disclosure Agreement (NDA) between two parties..."
-                  required
-                  rows={6} // Increased rows
-                  className="col-span-3"
-                  disabled={isLoading}
-                />
-              </div>
+                <div className="grid grid-cols-4 items-start gap-4">
+                  <Label htmlFor="instructions" className="text-right pt-2">
+                    Instructions
+                  </Label>
+                  <Textarea
+                    id="instructions"
+                    value={instructions}
+                    onChange={(e) => setInstructions(e.target.value)}
+                    placeholder="e.g., Draft a simple Non-Disclosure Agreement (NDA) between two parties..."
+                    required
+                    rows={6} // Increased rows
+                    className="col-span-3"
+                    disabled={isLoading}
+                  />
+                </div>
 
-              {error && (
-                <Alert variant="destructive">
-                  <Icons.Alert className="h-4 w-4" /> 
-                  <AlertDescription>{error}</AlertDescription>
-                </Alert>
-              )}
-            </div>
+                {error && (
+                  <Alert variant="destructive">
+                    <Icons.Alert className="h-4 w-4" /> 
+                    <AlertDescription>{error}</AlertDescription>
+                  </Alert>
+                )}
+              </div>
+            </>
           )}
           
           <DialogFooter>

@@ -1,6 +1,6 @@
 import React, { useState, KeyboardEvent, useRef, useEffect, useCallback, useMemo } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Search, BarChart2, Globe, FileText, HelpCircle, Send, Upload as UploadIcon, X, DraftingCompass, Microscope, Clock, Lightbulb, Puzzle, Mic, ChevronsUpDown, Check, SearchCheck } from 'lucide-react';
+import { Search, BarChart2, Globe, FileText, HelpCircle, Send, Upload as UploadIcon, X, DraftingCompass, Microscope, Clock, Lightbulb, Puzzle, ChevronsUpDown, Check, SearchCheck } from 'lucide-react';
 import { Button } from "@/components/ui/Button";
 import { Icons } from "@/components/ui/Icons";
 import {
@@ -30,6 +30,7 @@ import TextareaAutosize from 'react-textarea-autosize';
 import { Spinner } from "@/components/ui/Spinner";
 import { SourceInfo } from '@/types/sources';
 import { ChatAgent } from '@/types/agent';
+import DocumentContextPicker from './DocumentContextPicker';
 
 interface SendMessagePayload {
   content: string;
@@ -162,7 +163,6 @@ const ChatInput: React.FC<ChatInputProps> = ({
   const [inputValue, setInputValue] = useState(initialValue || '');
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [showContextPicker, setShowContextPicker] = useState(false);
-  const [isListening, setIsListening] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
 
   const [selectedModelId, setSelectedModelId] = useState<string>(availableModels.find(m => m.id === 'default-chat')?.id || availableModels[0].id);
@@ -500,21 +500,6 @@ const ChatInput: React.FC<ChatInputProps> = ({
                     className="hidden"
                     disabled={disabled || !onFileUpload}
                 />
-
-                <Tooltip>
-                    <TooltipTrigger asChild>
-                        <Button
-                            variant="ghost"
-                            size="icon"
-                            className={cn("h-8 w-8 text-muted-foreground", isListening ? 'text-red-500' : 'hover:text-foreground')}
-                            onClick={handleVoiceInput}
-                            aria-label={isListening ? "Stop listening" : "Start voice input"}
-                        >
-                            <Mic size={16} />
-                        </Button>
-                    </TooltipTrigger>
-                    <TooltipContent><p>{isListening ? "Stop listening" : "Voice input (Placeholder)"}</p></TooltipContent>
-                </Tooltip>
             </div>
 
             <div className="flex items-center gap-2">

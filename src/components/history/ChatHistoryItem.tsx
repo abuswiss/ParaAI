@@ -59,25 +59,26 @@ const ChatHistoryItem: React.FC<ChatHistoryItemProps> = ({ conversation, onDelet
     setIsDeleting(true);
     const conversationIdToDelete = conversation.id;
     try {
-      const success = await deleteConversation(conversationIdToDelete);
+      // Call the service function and destructure the result
+      const { success, error } = await deleteConversation(conversationIdToDelete);
+
       if (success) {
         toast({
           title: "Chat Deleted",
           description: "The conversation history has been removed.",
         });
         onDeleteSuccess();
-        // If the deleted chat was the active one, reset the active ID
-        // Note: Need access to the current active ID atom value here for comparison
-        // This might be better handled in the parent component (ChatHistoryList)
-        // setActiveConversationId(prev => prev === conversationIdToDelete ? null : prev);
+        // Consider handling the active conversation state update here or in the parent
       } else {
-        throw new Error('Failed to delete conversation from service');
+        // Use the error message from the service if available
+        throw error || new Error('Failed to delete conversation from service');
       }
     } catch (error) {
       console.error("Failed to delete conversation:", error);
       toast({
         title: "Error",
-        description: "Could not delete the conversation. Please try again.",
+        // Display the specific error message if it exists
+        description: error instanceof Error ? error.message : "Could not delete the conversation. Please try again.",
         variant: "destructive",
       });
     } finally {

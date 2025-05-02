@@ -466,6 +466,10 @@ export const createDocument = async (
 
     const finalFilename = initialData.filename || 'Untitled Document';
 
+    // Infer file_type from filename
+    const fileExtension = finalFilename.includes('.') ? finalFilename.split('.').pop()?.toLowerCase() : 'txt';
+    const inferredFileType = fileExtension || 'txt'; // Default to txt if extension is missing
+
     // Insert record into documents table
     const { data, error: insertError } = await supabase
       .from('documents')
@@ -474,13 +478,15 @@ export const createDocument = async (
         case_id: caseId || null,
         filename: finalFilename,
         content_type: 'text/plain', // Content is provided directly
-        size: initialData.content?.length || 0,
+        file_type: inferredFileType, // ADDED: Infer file type from filename
+        file_size: initialData.content?.length || 0, // CORRECTED: Use file_size
         extracted_text: initialData.content || '',
         edited_content: initialData.content || '', // Start with same content
         processing_status: 'completed' as ProcessingStatus,
         is_deleted: false,
         uploaded_at: new Date().toISOString(),
         // No storage path needed initially for text-based creation
+        storage_path: 'ai-generated' // ADDED: Provide a placeholder for non-null constraint
       })
       .select('id')
       .single();

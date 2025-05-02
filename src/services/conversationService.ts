@@ -130,6 +130,34 @@ export const addDocumentToConversation = async (
   }
 };
 
+/**
+ * Delete a conversation by ID
+ */
+export const deleteConversation = async (
+  conversationId: string
+): Promise<{ success: boolean; error: Error | null }> => {
+  try {
+    const { error } = await supabase
+      .from('conversations')
+      .delete()
+      .eq('id', conversationId);
+
+    if (error) {
+      console.error('Error deleting conversation:', error);
+      throw error;
+    }
+
+    // Optionally, you might want to delete related messages or context here too
+    // e.g., delete messages associated with this conversationId
+
+    console.log(`Conversation ${conversationId} deleted successfully.`);
+    return { success: true, error: null };
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error deleting conversation';
+    console.error('Error in deleteConversation:', message);
+    return { success: false, error: error instanceof Error ? error : new Error(message) };
+  }
+};
 
 /**
  * Fetches a list of conversations for the current user, optionally filtered by case ID.

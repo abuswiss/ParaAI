@@ -64,7 +64,7 @@ interface RawDocumentTemplate {
     is_favorite?: boolean | null; // From potential join
     use_count?: number | null;    // From potential join
     last_used?: string | null;     // From potential join
-    creator_id: string;
+    user_id: string; // Standardized to user_id
 }
 
 // Interface for template usage history data
@@ -87,7 +87,7 @@ export const getAvailableTemplates = async (
     let query = supabase
       .from('document_templates')
       .select<string, RawDocumentTemplate>('*') // Specify Raw type
-      .or(`is_public.eq.true,creator_id.eq.${user.id}`);
+      .or(`is_public.eq.true,user_id.eq.${user.id}`);
 
     if (category) {
       // Explicitly cast the category string to the ENUM type
@@ -201,7 +201,7 @@ export const createTemplate = async (
         created_at: now,
         updated_at: now,
         is_public: templateData.isPublic,
-        creator_id: user.id
+        user_id: user.id
       };
 
     const { data, error } = await supabase
@@ -1032,7 +1032,7 @@ export const updateTemplate = async (
 
     // Prepare data for update, matching DB column names
     // Use a more specific type based on RawDocumentTemplate + updated_at
-    const dataToUpdate: Partial<Omit<RawDocumentTemplate, 'id' | 'created_at' | 'creator_id'> & { updated_at: string }> = {
+    const dataToUpdate: Partial<Omit<RawDocumentTemplate, 'id' | 'created_at' | 'user_id'> & { updated_at: string }> = {
       name: templateData.name,
       description: templateData.description,
       category: templateData.category,
@@ -1154,7 +1154,7 @@ export const createAITemplateDraft = async (
         created_at: now,
         updated_at: now,
         is_public: false, 
-        creator_id: user.id
+        user_id: user.id
       };
 
     console.log(`Attempting to insert AI generated template draft: ${name} with category: ${category}`);
@@ -1201,7 +1201,7 @@ export const searchTemplatesByName = async (
     const { data, error } = await supabase
       .from('document_templates')
       .select<string, RawDocumentTemplate>('*')
-      .or(`is_public.eq.true,creator_id.eq.${user.id}`) // User can see public or their own
+      .or(`is_public.eq.true,user_id.eq.${user.id}`) // User can see public or their own
       // Search in name OR description
       .or(`name.ilike.${searchPattern},description.ilike.${searchPattern}`)
       .limit(limit)

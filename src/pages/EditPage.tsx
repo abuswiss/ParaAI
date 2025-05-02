@@ -490,16 +490,16 @@ const EditPage: React.FC = () => {
 
   const navigateBack = () => {
     // Determine where to navigate back to
-    if (type === 'document' && editorItem?.id && activeCaseId) {
-      navigate(`/cases/${activeCaseId}/documents/${editorItem.id}`); // Go to document view
-    } else if (type === 'document' && activeCaseId) {
-       navigate(`/cases/${activeCaseId}`); // Go to case dashboard if new/no ID
+    if (type === 'document' && activeCaseId) {
+      // Go back to the file manager with the current case selected
+      navigate(`/files?caseId=${activeCaseId}`);
     } else if (type === 'template' && editorItem?.id) {
-       navigate(`/templates/${editorItem.id}`); // Go to template view
+       navigate(`/templates/${editorItem.id}`); // Go to template view (assuming this route exists)
     } else if (type === 'template') {
         navigate('/templates'); // Go to template list
     } else {
-      navigate(-1); // Fallback to previous page
+      // Default fallback (e.g., if type is missing or caseId missing for document)
+      navigate('/files');
     }
   };
 

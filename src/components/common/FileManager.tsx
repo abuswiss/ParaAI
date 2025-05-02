@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, DragEvent, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useAtom, useSetAtom } from 'jotai';
 import { 
     activeCaseIdAtom, 
@@ -123,7 +123,7 @@ const GridItem: React.FC<GridItemProps> = ({ id, label, icon, typeLabel, date, o
             <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-2">
                 <div className="flex items-center gap-2 overflow-hidden mr-2">
                     <div className="flex-shrink-0">{icon}</div>
-                    <CardTitle className="text-sm font-medium truncate">{label}</CardTitle>
+                    <CardTitle className="text-sm font-medium truncate flex-shrink min-w-0">{label}</CardTitle>
                 </div>
                 <DropdownMenu>
                     <DropdownMenuTrigger asChild>
@@ -156,6 +156,7 @@ const GridItem: React.FC<GridItemProps> = ({ id, label, icon, typeLabel, date, o
 
 const FileManager: React.FC<FileManagerProps> = () => {
     const navigate = useNavigate();
+    const location = useLocation();
     const [activeCaseId, setActiveCaseId] = useAtom(activeCaseIdAtom);
     const [activeCase, setActiveCase] = useState<Case | null>(null); // State for active case details
     const [isUploadModalOpen, setIsUploadModalOpen] = useAtom(uploadModalOpenAtom); // Read and write atom state
@@ -198,6 +199,19 @@ const FileManager: React.FC<FileManagerProps> = () => {
 
     const [isCaseRequiredDialogOpen, setIsCaseRequiredDialogOpen] = useState(false);
     const [pendingTemplateId, setPendingTemplateId] = useState<string | null>(null);
+
+    // Read caseId from URL query parameters when component mounts
+    useEffect(() => {
+        const queryParams = new URLSearchParams(location.search);
+        const caseIdFromURL = queryParams.get('caseId');
+        
+        if (caseIdFromURL) {
+            console.log('Selecting case from URL parameter:', caseIdFromURL);
+            setSelectedItemId(caseIdFromURL);
+            setSelectedItemType('case');
+            setActiveCaseId(caseIdFromURL);
+        }
+    }, [location.search, setActiveCaseId]);
 
     // --- Drag and Drop Handlers ---
     const handleDragEnter = (e: DragEvent<HTMLDivElement>) => {
@@ -317,6 +331,32 @@ const FileManager: React.FC<FileManagerProps> = () => {
         }
     }, [setIsUploadModalOpen, activeCaseId, fetchCaseAndDocs]);
 
+    // Helper to refresh lists after mutation
+    const refreshData = useCallback(async (mutatedItemType: ItemType, currentSelectedCaseId: string | null) => {
+        if (mutatedItemType === 'document' && selectedItemType === 'case' && currentSelectedCaseId) {
+            setIsDocumentsLoading(true);
+            const { data, error } = await documentService.getUserDocuments(currentSelectedCaseId);
+            setDocuments((data || []) as Document[]); 
+            setCurrentDocuments((data || []) as any); // Update shared atom
+            if(error) {
+                setDocumentsError(error.message);
+                // Don't show toast here, error is displayed in the main area
+            }
+            setIsDocumentsLoading(false);
+        } else if (mutatedItemType === 'template') {
+            setIsTemplatesLoading(true);
+            const { data, error } = await templateService.getAvailableTemplates();
+            setTemplates(data || []);
+            setCurrentDocuments([]); // Also clear documents if viewing templates
+            if(error) {
+                setTemplatesError(error.message);
+                // Don't show toast here, error is displayed in the sidebar
+            } 
+            setIsTemplatesLoading(false);
+        }
+        // Optionally refresh cases if case actions are added
+    }, [selectedItemType, setCurrentDocuments]); // Added setCurrentDocuments dependency
+
     // --- NEW: Handler for closing the AI Document Draft modal ---
     const handleAIDraftModalClose = useCallback((refreshNeeded?: boolean) => {
         setIsNewAIDocumentDraftModalOpen(false); // Close the correct modal
@@ -324,7 +364,17 @@ const FileManager: React.FC<FileManagerProps> = () => {
             console.log('Refresh triggered after AI draft generation for case:', activeCaseId);
             fetchCaseAndDocs(activeCaseId); // Refresh documents if needed
         }
-    }, [setIsNewAIDocumentDraftModalOpen, activeCaseId, fetchCaseAndDocs]);
+    }, [setIsNewAIDocumentDraftModalOpen, activeCaseId, fetchCaseAndDocs]); // fetchCaseAndDocs depends on setCurrentDocuments
+
+    // --- Handler for closing the AI Template Draft modal ---
+    const handleAITemplateModalClose = useCallback((refreshNeeded?: boolean) => {
+        setIsNewAITemplateModalOpen(false); // Close the template modal
+        if (refreshNeeded) {
+            console.log('Refresh triggered after AI Template generation.');
+            // Call refreshData specifically for templates
+            refreshData('template', activeCaseId); // Pass 'template' type
+        }
+    }, [setIsNewAITemplateModalOpen, activeCaseId, refreshData]); // Add refreshData to dependencies
 
     // Handle sidebar item selection
     const handleSelectItem = (id: string, type: ItemType) => {
@@ -512,30 +562,6 @@ const FileManager: React.FC<FileManagerProps> = () => {
         } finally {
             setActionState({ actionType: null, itemId: null, itemType: null }); // Close dialog
         }
-    };
-
-    // Helper to refresh lists after mutation
-    const refreshData = async (mutatedItemType: ItemType, currentSelectedCaseId: string | null) => {
-        if (mutatedItemType === 'document' && selectedItemType === 'case' && currentSelectedCaseId) {
-            setIsDocumentsLoading(true);
-            const { data, error } = await documentService.getUserDocuments(currentSelectedCaseId);
-            setDocuments((data || []) as Document[]);
-            if(error) {
-                setDocumentsError(error.message);
-                // Don't show toast here, error is displayed in the main area
-            }
-            setIsDocumentsLoading(false);
-        } else if (mutatedItemType === 'template') {
-            setIsTemplatesLoading(true);
-            const { data, error } = await templateService.getAvailableTemplates();
-            setTemplates(data || []);
-            if(error) {
-                setTemplatesError(error.message);
-                // Don't show toast here, error is displayed in the sidebar
-            } 
-            setIsTemplatesLoading(false);
-        }
-        // Optionally refresh cases if case actions are added
     };
 
     // Helper to refresh only the cases list
@@ -990,7 +1016,7 @@ const FileManager: React.FC<FileManagerProps> = () => {
             />
             <NewAITemplateDraftModal
                 isOpen={isNewAITemplateModalOpen}
-                onClose={() => setIsNewAITemplateModalOpen(false)}
+                onClose={handleAITemplateModalClose}
             />
             <NewAIDocumentDraftModal 
                 isOpen={isNewAIDocumentDraftModalOpen}
