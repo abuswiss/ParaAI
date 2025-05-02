@@ -18,6 +18,8 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/Tooltip"
+import ChatHistoryList from "@/components/history/ChatHistoryList"
+import CaseSelector from "./CaseSelector"
 
 const SIDEBAR_COOKIE_NAME = "sidebar:state"
 const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7
@@ -164,64 +166,68 @@ type SidebarProps = React.ComponentProps<"div"> & {
     side?: "left" | "right"
     variant?: "sidebar" | "floating" | "inset"
     collapsible?: "offcanvas" | "icon" | "none"
-    forceState?: "expanded" | "collapsed" // New prop
 }
 
-const Sidebar = React.forwardRef<HTMLDivElement, SidebarProps>( // Use updated type
+const Sidebar = React.forwardRef<HTMLDivElement, SidebarProps>(
   (
     {
       side = "left",
       variant = "sidebar",
       collapsible = "offcanvas",
-      forceState, // Get the new prop
       className,
       children,
       ...props
     },
     ref
   ) => {
-    const isMobile = useIsMobile(); 
-
-    const effectiveState = forceState;
+    const isMobile = useIsMobile();
+    const { state } = useSidebar();
 
     if (isMobile) {
-       // Remove context usage here - this breaks mobile sheet for now
-       // const { openMobile, setOpenMobile } = useSidebar(); 
-       // Temporarily render nothing on mobile to avoid context error
-       // TODO: Re-implement mobile sheet using props or local state if needed
-       return null; 
-       // return (
-       //   <Sheet open={openMobile} onOpenChange={setOpenMobile} {...props}>
-       //       <SheetContent
-       //           data-sidebar=\"sidebar\"
-       //           data-mobile=\"true\"
-       //           className=\"w-[--sidebar-width] bg-surface p-0 text-secondary [&>button]:hidden\"
-       //           style={
-       //           {
-       //               \"--sidebar-width\": SIDEBAR_WIDTH_MOBILE,
-       //           } as React.CSSProperties
-       //           }
-       //           side={side}
-       //       >
-       //           <div className=\"flex h-full w-full flex-col\">{children}</div>
-       //       </SheetContent>
-       //   </Sheet>
-       // );
+       return null;
     }
 
-    // Desktop View - Use effectiveState for data-state
+    // Desktop View
     return (
       <div
         ref={ref}
-        data-state={effectiveState} // Use the state passed via prop
+        data-state={state}
         className={cn(
-          // Removed 'hidden md:flex' to always render the div, relying on parent for layout
-          "h-full flex-col bg-surface text-secondary border-r overflow-y-auto",
+          "relative h-full flex flex-col bg-surface text-secondary border-r",
+          state === 'expanded' ? 'w-[var(--sidebar-width)]' : 'w-[var(--sidebar-width-icon)]',
+          "transition-all duration-300 ease-in-out overflow-hidden",
           className
         )}
         {...props}
       >
-        {children}
+        <div className="flex-1 overflow-y-auto overflow-x-hidden p-2 space-y-4">
+            <div className={cn("px-2", state === 'collapsed' && "px-0")}> 
+                <CaseSelector />
+            </div>
+
+            {/* Section 1: Main Navigation Links (Original Children) - Always Render */}
+            <div className="flex-shrink-0">
+                 {children}
+            </div>
+
+            {/* Render Separator and Chat History only when expanded */}
+            {state === 'expanded' && (
+              <>
+                <Separator className="my-2" />
+                <div className="flex-grow min-h-0 overflow-y-auto">
+                    <ChatHistoryList />
+                </div>
+              </>
+            )}
+
+            {/* Add a flexible space filler when collapsed to push footer items down (if footer exists) */}
+             {state === 'collapsed' && <div className="flex-grow"></div>}
+        </div>
+
+        {/* Sidebar Footer (Optional) */}
+        <div className="mt-auto p-2 border-t"> 
+          {/* Footer content goes here if needed */}
+        </div>
       </div>
     )
   }

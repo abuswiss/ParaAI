@@ -1,8 +1,8 @@
 "use client"; // If using Next.js App Router or similar client-side features
 
 import React, { useState, useCallback, ChangeEvent, useEffect } from 'react';
-import { useAtomValue, useSetAtom } from 'jotai';
-import { activeCaseIdAtom, addTaskAtom, updateTaskAtom, removeTaskAtom } from '@/atoms/appAtoms';
+import { useAtom, useAtomValue, useSetAtom } from 'jotai';
+import { activeCaseIdAtom, addTaskAtom, updateTaskAtom, removeTaskAtom, initialFilesForUploadAtom, activeDocumentContextIdAtom } from '@/atoms/appAtoms';
 import { v4 as uuidv4 } from 'uuid';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
@@ -21,8 +21,15 @@ import {
   DialogDescription // Optional for adding more text
 } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/Badge'; // For status display
-import { Alert, AlertDescription } from '@/components/ui/alert';
-import { toast } from '@/components/ui/use-toast';
+import { Alert, AlertDescription } from '@/components/ui/Alert';
+import { useToast } from "@/hooks/use-toast";
+import { Clock, FileText, XCircle, CheckCircle, AlertTriangle } from 'lucide-react'; // Added for processing icon
+import { Progress } from '@/components/ui/progress'; // Import Progress
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger
+} from '@/components/ui/tooltip';
 
 interface UploadModalProps {
   isOpen: boolean;
@@ -31,9 +38,10 @@ interface UploadModalProps {
 
 interface UploadFileStatus {
     file: File;
-    status: 'pending' | 'uploading' | 'processing' | 'error' | 'complete';
+    status: 'pending' | 'uploading' | 'processing_started' | 'error' | 'complete';
     taskId?: string;
     error?: string;
+    progress?: number; // Add progress field
 }
 
 const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose }) => {
@@ -43,19 +51,43 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose }) => {
   const [dragActive, setDragActive] = useState(false);
   
   const activeCaseId = useAtomValue(activeCaseIdAtom);
+  const [initialFiles, setInitialFiles] = useAtom(initialFilesForUploadAtom);
   const addTask = useSetAtom(addTaskAtom);
   const updateTask = useSetAtom(updateTaskAtom);
   const removeTask = useSetAtom(removeTaskAtom);
+  const setActiveDocumentContextId = useSetAtom(activeDocumentContextIdAtom);
+  const { toast } = useToast();
 
-  // Reset state when modal is reopened
+  // Reset state and handle initial files when modal is opened
   useEffect(() => {
     if (isOpen) {
+        // Reset local state first
         setFilesToUpload([]);
         setOverallError(null);
         setIsUploading(false);
         setDragActive(false);
+
+        // Check for initial files from drag-and-drop
+        if (initialFiles.length > 0) {
+            console.log('Processing initial files from atom:', initialFiles);
+            const newFileStatuses = initialFiles.map(file => ({
+                file,
+                status: 'pending'
+            } as UploadFileStatus));
+            setFilesToUpload(newFileStatuses);
+            // Clear the atom immediately after processing
+            setInitialFiles([]); 
+        }
+    } else {
+        // Optionally clear local state when closing if not handled elsewhere
+        setFilesToUpload([]);
+        setOverallError(null);
+        // Clear the atom on close as well, just in case
+        if (initialFiles.length > 0) {
+             setInitialFiles([]);
+        }
     }
-  }, [isOpen]);
+  }, [isOpen, initialFiles, setInitialFiles]);
 
   const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
     if (event.target.files) {
@@ -123,13 +155,18 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose }) => {
         // Update state immutably for the specific file being processed
         setFilesToUpload(prev => 
             prev.map((f, idx) => 
-                idx === currentIndex ? { ...f, status: 'uploading', taskId: taskId } : f
+                idx === currentIndex ? { ...f, status: 'uploading', taskId: taskId, progress: 0 } : f
             )
         );
 
         try {
-            // Simulate progress during the single file upload call
-            updateTask({ id: taskId, progress: 30, description: `Uploading ${currentFileStatus.file.name}...` });
+            // Simulate initial progress update
+            setFilesToUpload(prev =>
+                prev.map((f, idx) =>
+                    idx === currentIndex ? { ...f, progress: 10 } : f
+                )
+            );
+            updateTask({ id: taskId, progress: 10 }); // Update global task too
 
             const { data: uploadResult, error: uploadError } = await uploadAndProcessDocument(currentFileStatus.file, activeCaseId);
             
@@ -137,19 +174,28 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose }) => {
                 throw uploadError || new Error('Upload initiation failed.');
             }
 
+            // Set context immediately after successful upload initiation
+            setActiveDocumentContextId(uploadResult.id);
+
             // Update task status upon successful initiation (backend handles rest)
             updateTask({ 
                 id: taskId, 
                 status: 'success', // Mark as success for frontend (backend processing continues)
                 progress: 100, 
-                description: `${currentFileStatus.file.name}: Processing started` 
+                description: `${currentFileStatus.file.name}: Processing started...`
             });
             setFilesToUpload(prev => 
                 prev.map((f, idx) => 
-                    idx === currentIndex ? { ...f, status: 'complete' } : f // Mark as 'complete' in modal UI
+                    idx === currentIndex ? { ...f, status: 'processing_started', progress: 100 } : f
                 )
             );
             refreshNeeded = true;
+
+            // Updated toast message
+            toast({
+                title: "Upload Successful",
+                description: `Document "${currentFileStatus.file.name}" is processing. You can interact with it in chat shortly.`,
+            });
 
             // Auto-remove task from status bar after a delay
             setTimeout(() => removeTask(taskId), 5000);
@@ -167,7 +213,7 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose }) => {
 
             setFilesToUpload(prev => 
                 prev.map((f, idx) => 
-                    idx === currentIndex ? { ...f, status: 'error', error: errorMessage } : f
+                    idx === currentIndex ? { ...f, status: 'error', error: errorMessage, progress: undefined } : f // Clear progress on error
                 )
             );
         }
@@ -179,8 +225,7 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose }) => {
     } else if (uploadErrors > 0) {
         setOverallError(`${uploadErrors} file(s) failed to upload. Others initiated processing.`);
     } else if (refreshNeeded) {
-        // Close modal automatically if all uploads initiated successfully
-        toast.success(`${filesToUpload.length} file(s) uploaded successfully and are processing.`);
+        // Close modal automatically if all uploads initiated successfully (toast moved earlier)
         onClose(true); // Signal refresh needed
     } else {
         // Should not happen if logic is correct, but handle just in case
@@ -233,6 +278,10 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose }) => {
                 </p>
                 <p className="text-xs text-muted-foreground/80">PDF, DOCX, DOC, TXT, MD</p>
             </div>
+            {/* Supported formats text */}
+            <p className="text-xs text-muted-foreground/70 absolute bottom-2 left-1/2 transform -translate-x-1/2">
+                Supported: PDF, DOCX, DOC, TXT, MD
+            </p>
             <Input 
                 id="file-upload-input" 
                 type="file" 
@@ -246,36 +295,63 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose }) => {
         
         {/* File List */}
         {filesToUpload.length > 0 && (
-            <div className="mt-4 max-h-60 overflow-y-auto space-y-2 pr-2 border-t pt-4">
-                <h4 className="text-sm font-medium mb-2">Files to upload:</h4>
+            <div className="mt-4 space-y-3 max-h-60 overflow-y-auto pr-2">
                 {filesToUpload.map((fileStatus, index) => (
-                    <div key={index} className="flex items-center justify-between p-2 bg-muted/50 rounded text-sm">
-                        <div className="flex items-center space-x-2 overflow-hidden min-w-0">
-                            <Icons.FileText className="h-4 w-4 flex-shrink-0 text-muted-foreground"/>
-                            <span className="text-foreground truncate flex-1" title={fileStatus.file.name}>
-                                {fileStatus.file.name}
-                            </span>
-                            <span className="text-muted-foreground ml-2 flex-shrink-0">
-                                ({(fileStatus.file.size / 1024).toFixed(1)} KB)
-                            </span>
-                        </div>
-                        <div className="flex items-center space-x-2 flex-shrink-0 pl-2">
-                            {/* Status Indicator using Badge */}
-                            {fileStatus.status === 'pending' && <Badge>Pending</Badge>}
-                            {fileStatus.status === 'uploading' && <Badge><Spinner size="xs" className="mr-1"/>Uploading</Badge>}
-                            {fileStatus.status === 'processing' && <Badge>Processing</Badge>}
-                            {fileStatus.status === 'error' && <Badge>Error</Badge>}
+                    <div key={index} className="flex items-center justify-between p-2 border rounded-md bg-muted/30">
+                         <div className="flex items-center space-x-3 flex-grow min-w-0"> {/* Ensure text truncates */}
+                            {/* Icon based on status */}
+                            {fileStatus.status === 'pending' && <FileText className="h-5 w-5 text-muted-foreground flex-shrink-0" />}
+                            {fileStatus.status === 'uploading' && <Spinner size="sm" className="text-primary flex-shrink-0" />}
+                            {fileStatus.status === 'processing_started' && <Clock className="h-5 w-5 text-blue-500 flex-shrink-0" />}
+                            {fileStatus.status === 'complete' && <CheckCircle className="h-5 w-5 text-green-500 flex-shrink-0" />}
+                            {fileStatus.status === 'error' && <AlertTriangle className="h-5 w-5 text-destructive flex-shrink-0" />}
 
-                            <Button 
-                                variant="ghost" 
-                                size="sm" // Changed from icon_xs
-                                onClick={() => removeFile(index)} 
-                                disabled={isUploading} 
-                                className="text-muted-foreground hover:text-destructive h-6 w-6 p-1" // Adjusted padding/size
-                            >
-                                <Icons.Close className="h-3 w-3" />
-                                <span className="sr-only">Remove</span>
-                            </Button>
+                            {/* File Name & Size */}
+                            <div className="flex flex-col min-w-0"> {/* Ensure text truncates */}
+                                <span className="text-sm font-medium truncate" title={fileStatus.file.name}>
+                                    {fileStatus.file.name}
+                                </span>
+                                <span className="text-xs text-muted-foreground">
+                                    {(fileStatus.file.size / (1024 * 1024)).toFixed(2)} MB
+                                </span>
+                            </div>
+                         </div>
+
+                        {/* Progress Bar & Status/Actions */}
+                        <div className="flex items-center space-x-2 flex-shrink-0 ml-2">
+                            {fileStatus.status === 'uploading' && fileStatus.progress !== undefined && (
+                                <div className="w-24 flex flex-col items-end">
+                                     <Progress value={fileStatus.progress} className="h-1.5 w-full" />
+                                     <span className="text-xs text-muted-foreground mt-0.5">{fileStatus.progress}%</span>
+                                </div>
+                            )}
+                            {fileStatus.status === 'processing_started' && (
+                                <Badge variant="outline" className="text-xs border-blue-500/50 text-blue-600 dark:text-blue-400">Processing</Badge>
+                            )}
+                            {fileStatus.status === 'complete' && (
+                                <Badge variant="outline" className="text-xs border-green-500/50 text-green-600 dark:text-green-400">Complete</Badge>
+                            )}
+                             {fileStatus.status === 'error' && (
+                                <Tooltip>
+                                    <TooltipTrigger>
+                                        <Badge variant="destructive" className="text-xs cursor-help">Error</Badge>
+                                    </TooltipTrigger>
+                                    <TooltipContent>
+                                        <p className="max-w-xs">{fileStatus.error || 'Unknown error'}</p>
+                                    </TooltipContent>
+                                </Tooltip>
+                             )}
+                             {(fileStatus.status === 'pending' || fileStatus.status === 'error') && !isUploading && (
+                                <Button
+                                    variant="ghost"
+                                    size="icon_xs"
+                                    onClick={() => removeFile(index)}
+                                    className="text-muted-foreground hover:text-destructive"
+                                    aria-label="Remove file"
+                                >
+                                    <XCircle className="h-4 w-4" />
+                                </Button>
+                             )}
                         </div>
                     </div>
                 ))}

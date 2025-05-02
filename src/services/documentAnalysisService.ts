@@ -123,57 +123,88 @@ export const analyzeDocument = async ({
   removeTask: (taskId: string) => void;
 }): Promise<{ data: StructuredAnalysisResult | null; error: Error | null; analysisId?: string }> => {
   const taskId = uuidv4();
-  const taskDescription = `Analyzing ${analysisType} for document...`; // Simplified desc
+  const taskDescription = `Analyzing ${analysisType} for document...`;
 
   try {
-    console.log(`Invoking analyze-document function for Doc ID: ${documentId}, Type: ${analysisType}`);
+    console.log(`[SVC] Invoking analyze-document function for Doc ID: ${documentId}, Type: ${analysisType}`);
     
     addTask({ 
         id: taskId, 
         description: taskDescription, 
-        status: 'running', // Use 'running'
+        status: 'running',
         progress: 0 
     });
 
-    const { data, error } = await supabase.functions.invoke<BackendAnalysisResponse>('analyze-document', {
-      body: { documentId, analysisType, customPrompt },
+    // First, get the document text
+    const { data: docData, error: docError } = await supabase
+      .from('documents')
+      .select('extracted_text')
+      .eq('id', documentId)
+      .single();
+
+    if (docError) {
+      console.error('[SVC] Failed to fetch document text:', docError);
+      updateTask({ id: taskId, status: 'error', description: `Failed to fetch document text: ${docError.message}` });
+      setTimeout(() => removeTask(taskId), 15000);
+      return { data: null, error: new Error(`Failed to fetch document text: ${docError.message}`), analysisId: undefined };
+    }
+
+    if (!docData || !docData.extracted_text) {
+      console.error('[SVC] Document has no extracted text');
+      updateTask({ id: taskId, status: 'error', description: 'Document has no extracted text to analyze' });
+      setTimeout(() => removeTask(taskId), 15000);
+      return { data: null, error: new Error('Document has no extracted text to analyze'), analysisId: undefined };
+    }
+
+    // Now call the function with the document text
+    const { data: invokeData, error: invokeError } = await supabase.functions.invoke<BackendAnalysisResponse>('analyze-document', {
+      body: { 
+        documentId, 
+        analysisType, 
+        customPrompt,
+        documentText: docData.extracted_text 
+      },
     });
 
-    if (error) {
-      console.error('Error invoking analyze-document function:', error);
-      updateTask({ id: taskId, status: 'error', description: `Function invocation failed: ${error.message}` });
+    console.log('[SVC] Raw response from invoke:', { invokeData, invokeError });
+
+    if (invokeError) {
+      console.error('[SVC] Error invoking analyze-document function:', invokeError);
+      updateTask({ id: taskId, status: 'error', description: `Function invocation failed: ${invokeError.message}` });
       setTimeout(() => removeTask(taskId), 15000);
-      throw new Error(`Function invocation failed: ${error.message}`);
+      return { data: null, error: new Error(`Function invocation failed: ${invokeError.message}`), analysisId: undefined };
     }
 
-    if (!data) { 
+    if (!invokeData) { 
+         console.error('[SVC] Analysis function returned OK status but no data object.');
          updateTask({ id: taskId, status: 'error', description: 'Analysis function returned no data.' });
          setTimeout(() => removeTask(taskId), 15000);
-         throw new Error('Analysis function returned no data.');
+         return { data: null, error: new Error('Analysis function returned no data object.'), analysisId: undefined }; 
     }
-    if (!data.success) {
-        const backendErrorMsg = (data.result as AnalysisErrorResult)?.error || (data as any)?.error || 'Analysis function reported failure.';
-        console.error('Backend analysis function failed:', backendErrorMsg);
-        if ((data.result as AnalysisErrorResult)?.rawResponse) {
-            console.error('Raw response from failed analysis:', (data.result as AnalysisErrorResult).rawResponse);
+    
+    if (!invokeData.success) {
+        const backendErrorMsg = (invokeData.result as AnalysisErrorResult)?.error || (invokeData as any)?.error || 'Analysis function reported failure.';
+        console.error('[SVC] Backend analysis function failed:', backendErrorMsg);
+        if ((invokeData.result as AnalysisErrorResult)?.rawResponse) {
+            console.error('[SVC] Raw response from failed analysis:', (invokeData.result as AnalysisErrorResult).rawResponse);
         }
         updateTask({ id: taskId, status: 'error', description: `Analysis failed: ${backendErrorMsg}` });
         setTimeout(() => removeTask(taskId), 15000);
-        throw new Error(backendErrorMsg);
+        return { data: null, error: new Error(backendErrorMsg), analysisId: undefined }; 
     }
 
-    console.log(`Analysis successful for Doc ID: ${documentId}, Analysis ID: ${data.analysisId}`);
-    updateTask({ id: taskId, status: 'success', progress: 100, description: `Analysis complete for ${analysisType}` }); // Use 'success'
+    console.log(`[SVC] Analysis successful. Returning result:`, invokeData.result);
+    updateTask({ id: taskId, status: 'success', progress: 100, description: `Analysis complete for ${analysisType}` });
     setTimeout(() => removeTask(taskId), 5000); 
 
-    return { data: data.result, error: null, analysisId: data.analysisId };
+    return { data: invokeData.result, error: null, analysisId: invokeData.analysisId };
 
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Unknown error during document analysis request';
-    console.error(`Error in analyzeDocument for ${documentId}:`, message);
-     updateTask({ id: taskId, status: 'error', description: `Error: ${message}` }); // Use 'error'
+    console.error(`[SVC] Unexpected error in analyzeDocument for ${documentId}:`, message);
+     updateTask({ id: taskId, status: 'error', description: `Client-side error: ${message}` });
      setTimeout(() => removeTask(taskId), 15000);
-    return { data: null, error: error instanceof Error ? error : new Error(message) };
+    return { data: null, error: error instanceof Error ? error : new Error(message), analysisId: undefined }; 
   }
 };
 

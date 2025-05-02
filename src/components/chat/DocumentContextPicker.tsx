@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { useAtomValue } from 'jotai';
+import { useAtomValue, useSetAtom } from 'jotai';
 import { DocumentMetadata } from '@/services/documentService';
 import * as documentService from '@/services/documentService';
+import { activeDocumentContextIdAtom } from '@/atoms/appAtoms';
 import { 
     Dialog, 
     DialogContent, 
@@ -25,23 +26,21 @@ import { cn } from '@/lib/utils';
 interface DocumentContextPickerProps {
     isOpen: boolean;
     onOpenChange: (isOpen: boolean) => void;
-    onSelectContext: (contextId: string | null) => void;
     activeCaseId: string | null;
-    currentContextId: string | null;
 }
 
 const DocumentContextPicker: React.FC<DocumentContextPickerProps> = ({ 
     isOpen,
     onOpenChange,
-    onSelectContext,
     activeCaseId, 
-    currentContextId
  }) => {
-  const [selectedContextId, setSelectedContextId] = useState<string | null>(currentContextId);
+  const currentGlobalContextId = useAtomValue(activeDocumentContextIdAtom);
+  const [selectedContextIdInModal, setSelectedContextIdInModal] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [caseDocuments, setCaseDocuments] = useState<DocumentMetadata[]>([]);
+  const setActiveDocumentContextId = useSetAtom(activeDocumentContextIdAtom);
   
   useEffect(() => {
     if (isOpen && activeCaseId) {
@@ -52,7 +51,7 @@ const DocumentContextPicker: React.FC<DocumentContextPickerProps> = ({
              const { data, error: fetchError } = await documentService.getUserDocuments(activeCaseId); 
              if (fetchError) throw fetchError;
              setCaseDocuments(data || []);
-             setSelectedContextId(currentContextId);
+             setSelectedContextIdInModal(currentGlobalContextId);
         } catch (err: any) {
              console.error("Error fetching documents for context picker:", err);
              setError("Failed to load documents.");
@@ -65,9 +64,9 @@ const DocumentContextPicker: React.FC<DocumentContextPickerProps> = ({
     } else {
         setSearchTerm('');
         setCaseDocuments([]);
-        setSelectedContextId(null);
+        setSelectedContextIdInModal(null);
     }
-  }, [isOpen, activeCaseId, currentContextId]);
+  }, [isOpen, activeCaseId, currentGlobalContextId]);
 
   const filteredDocuments = useMemo(() => {
     if (!caseDocuments) return [];
@@ -77,14 +76,12 @@ const DocumentContextPicker: React.FC<DocumentContextPickerProps> = ({
   }, [caseDocuments, searchTerm]);
 
   const handleSelection = (docId: string) => {
-    setSelectedContextId(docId);
-    onSelectContext(docId);
+    setActiveDocumentContextId(docId);
     onOpenChange(false);
   };
 
   const handleClearSelection = () => {
-    setSelectedContextId(null);
-    onSelectContext(null);
+    setActiveDocumentContextId(null);
     onOpenChange(false);
   };
 
@@ -127,7 +124,7 @@ const DocumentContextPicker: React.FC<DocumentContextPickerProps> = ({
                         onClick={handleClearSelection}
                         className={cn(
                             "w-full justify-start px-2 py-1.5 text-sm",
-                            !selectedContextId ? "text-primary font-medium" : "text-muted-foreground"
+                            !selectedContextIdInModal ? "text-primary font-medium" : "text-muted-foreground"
                         )}
                      >
                         <X className="h-4 w-4 mr-2"/> No Context
@@ -139,7 +136,7 @@ const DocumentContextPicker: React.FC<DocumentContextPickerProps> = ({
                             onClick={() => handleSelection(doc.id)}
                             className={cn(
                                 "w-full justify-start px-2 py-1.5 text-sm",
-                                selectedContextId === doc.id ? "bg-accent text-accent-foreground font-medium" : "text-muted-foreground"
+                                selectedContextIdInModal === doc.id ? "bg-accent text-accent-foreground font-medium" : "text-muted-foreground"
                              )}
                          >
                              <FileText className="h-4 w-4 mr-2 flex-shrink-0"/> 

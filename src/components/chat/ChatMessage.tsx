@@ -6,7 +6,6 @@ import { cn } from "@/lib/utils";
 import { Textarea } from "@/components/ui/Textarea";
 import { CourtListenerSnippet, PerplexitySource, SourceInfo } from '@/types/sources';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/Tooltip";
-import { Avatar } from "../ui/Avatar";
 import { Badge } from "@/components/ui/Badge";
 import { DocumentAnalysisResult } from '@/services/documentAnalysisService'; 
 import { RiskAssessment } from '../documents/RiskAssessment'; 
@@ -22,6 +21,7 @@ export interface Message {
   analysisContext?: DocumentAnalysisResult; // Add analysisContext type
   isEditing?: boolean; // Add isEditing flag
   sources?: SourceInfo[]; 
+  isError?: boolean; // Added optional error flag
 }
 
 interface ChatMessageProps {
@@ -46,6 +46,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
   const editTextareaRef = useRef<HTMLTextAreaElement>(null);
 
   const isUser = message.role === 'user';
+  const isAssistant = message.role === 'assistant';
   const isError = message.role === 'error';
   const isRiskAnalysis = message.analysisContext?.analysisType === 'risks';
   const isKeyClauses = message.analysisContext?.analysisType === 'clauses';
@@ -106,58 +107,75 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
     }
   };
 
-  const messageBgClass = cn(
-    'group relative rounded-lg px-4 py-3 transition-colors duration-150 w-full', // Apply py-3 baseline
+  // Conditional styling based on role
+  const messageContainerClass = cn(
+    'flex w-full', 
+    isUser ? 'justify-end' : 'justify-start'
+  );
+
+  const messageContentClass = cn(
+    'group relative transition-colors duration-150', // Base styles
+    'max-w-[85%]', // Max width 
     isUser 
-      ? 'bg-primary/10' 
+      ? 'bg-primary/10 rounded-lg px-4 py-3 ml-auto' // User bubble
       : isError
-        ? 'bg-destructive/10'
-        : message.analysisContext
-          ? 'bg-blue-500/5' // Subtle background for analysis results
-          : 'bg-muted/30',
-    isHovered && !isUser && !isError && 'bg-muted/50', // Slightly darker hover for assistant
-    isHovered && isUser && 'bg-primary/15' // Slightly darker hover for user
+        ? 'bg-destructive/10 rounded-lg px-4 py-3 mr-auto' // Error bubble
+        : isAssistant
+          ? 'px-0 py-1 mr-auto' // Assistant: No background/padding, allow full width basically
+          : 'bg-muted/30 rounded-lg px-4 py-3 mr-auto' // Default bubble (system? though system shouldn't be displayed)
   );
 
   return (
     <div 
-        className={cn('flex', isUser ? 'justify-end' : 'justify-start', 'w-full')} 
+        className={messageContainerClass}
         onMouseEnter={() => setIsHovered(true)} 
         onMouseLeave={() => setIsHovered(false)}
     > 
       <TooltipProvider delayDuration={100}> 
-           {/* Apply max-width and margin based on role */} 
-           <div className={cn(
-               messageBgClass, 
-               'max-w-[85%]', // Max width for message bubble
-               isUser ? 'ml-auto' : 'mr-auto' // Push to right/left
-            )}> 
-               <div className="flex items-start space-x-3">
-                   {/* Avatar/Icon */}
-                   <Avatar 
-                       name={isUser ? 'User' : 'AI'} 
-                       size="sm"
-                       className="flex-shrink-0 mt-1"
-                   />
-                   {/* Message content */}
-                   <div className="flex-1 min-w-0">
-                       <div className="flex items-center space-x-2">
-                           <span className="text-sm font-medium text-foreground">
-                               {isUser ? 'You' : 'Paralegal AI'}
-                           </span>
-                           <span className="text-xs text-muted-foreground">
-                               {new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                           </span>
-                           {isStreaming && !isUser && (
-                               <span className="text-xs text-primary animate-pulse">typing...</span>
-                           )}
+           {/* Apply role-specific styling to the content container */}
+           <div className={messageContentClass}> 
+               {/* Layout: Icon/Label first, then content+actions */} 
+               <div className={cn(
+                   'flex items-start',
+                   isAssistant ? 'space-x-2' : 'space-x-3' // Smaller space for AI label
+               )}>
+                   {/* Avatar/Icon/Label */}
+                   {!isUser && (
+                       <div className={cn(
+                           'flex-shrink-0 mt-1 font-medium text-xs uppercase tracking-wider',
+                           isAssistant ? 'text-muted-foreground' : 'hidden' // Show 'AI' label for assistant, hide otherwise
+                       )}>
+                           AI
                        </div>
+                   )}
+                   {isUser && (
+                       <div className={cn(
+                           'flex-shrink-0 mt-1 font-medium text-xs uppercase tracking-wider text-primary'
+                       )}>
+                           You
+                       </div>
+                   )}
+
+                   {/* Message Content & Actions Container */}
+                   <div className="flex-1 min-w-0">
+                       {/* Only show timestamp for non-assistant messages, or adjust styling */}
+                       {!isAssistant && (
+                           <div className="flex items-center space-x-2 mb-0.5">
+                               <span className="text-xs text-muted-foreground">
+                                   {new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                               </span>
+                               {/* Keep streaming indicator if needed for user edits? Unlikely. */}
+                           </div>
+                       )}
                        
                        {/* Context Indicators */} 
                        {/* ... (Keep existing context indicator rendering) ... */} 
 
-                       {/* Message Content Body */} 
-                       <div className="mt-1 text-sm text-foreground prose prose-sm dark:prose-invert max-w-none prose-p:my-1 prose-ul:my-1 prose-li:my-0.5">
+                       {/* Message Content Body */}
+                       <div className={cn(
+                           'text-sm text-foreground prose prose-sm dark:prose-invert max-w-none prose-p:my-1 prose-ul:my-1 prose-li:my-0.5',
+                           isAssistant ? 'mt-0' : 'mt-1' // Reduce top margin for assistant
+                        )}>
                          {isStreaming && !isUser ? (
                            <div className="whitespace-pre-wrap">
                              {message.content}
@@ -168,7 +186,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                              </span>
                            </div>
                          ) : message.isEditing && isUser ? (
-                            <div className="relative my-1"> {/* Reduced margin for edit mode */} 
+                            <div className="relative my-1"> 
                                <Textarea
                                    ref={editTextareaRef}
                                    value={editedContent}
@@ -179,7 +197,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                                />
                                <div className="flex space-x-1 mt-1 justify-end">
                                    <Button onClick={() => { setEditedContent(message.content); onEditMessage(message.id, message.content); }} variant="ghost" size="sm">Cancel</Button>
-                                   <Button onClick={handleEdit} variant="secondary" size="sm">Save</Button> {/* Use secondary variant */} 
+                                   <Button onClick={handleEdit} variant="secondary" size="sm">Save</Button>
                                </div>
                            </div>
                          ) : isError ? ( 
@@ -191,36 +209,20 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                          )}
                        </div>
                         
-                       {/* Source Rendering - ENHANCED */}
+                       {/* Source Rendering - Keep as is */}
                        {!isUser && message.sources && message.sources.length > 0 && (
                            <div className="mt-3 pt-2 border-t border-border/50 text-xs"> 
                                <h4 className="font-semibold text-muted-foreground mb-1">Sources:</h4>
                                <ul className="space-y-1">
                                    {message.sources.map((source, index) => {
-                                       // Check if it's a CourtListenerSnippet to access date
                                        const isCourtListener = 'case_name' in source || ('date' in source && source.url.includes('courtlistener'));
                                        const snippetDate = isCourtListener ? (source as CourtListenerSnippet).date : undefined;
-
                                        return (
                                           <li key={index} className="flex items-start space-x-1.5 text-muted-foreground">
                                              <span className="flex-shrink-0 pt-0.5">{index + 1}.</span>
                                              <div className="flex-1 min-w-0">
-                                                 <a 
-                                                    href={source.url} 
-                                                    target="_blank" 
-                                                    rel="noopener noreferrer" 
-                                                    className="text-blue-600 dark:text-blue-400 hover:underline truncate block text-sm"
-                                                    title={source.title || source.url} 
-                                                 >
-                                                     {source.title || new URL(source.url).hostname}
-                                                 </a>
-                                                 {snippetDate && (
-                                                     <span className="text-xs block text-muted-foreground/80">
-                                                         Filed: {new Date(snippetDate).toLocaleDateString()}
-                                                     </span>
-                                                 )}
-                                                 {/* Optional: Show snippet text if needed */} 
-                                                 {/* {source.snippet && <p className="text-xs text-gray-500 mt-0.5 italic truncate">{source.snippet}</p>} */} 
+                                                 <a href={source.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 dark:text-blue-400 hover:underline truncate block text-sm" title={source.title || source.url}>{source.title || new URL(source.url).hostname}</a>
+                                                 {snippetDate && (<span className="text-xs block text-muted-foreground/80">Filed: {new Date(snippetDate).toLocaleDateString()}</span>)}
                                              </div>
                                           </li>
                                        );
@@ -229,80 +231,62 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                            </div>
                         )}
 
-                   </div>
-                    
-                   {/* Action Buttons (Absolute Positioned within the message bubble) */} 
-                   {(isHovered || message.isEditing) && !isStreaming && !isError && ( 
-                       <div className="absolute top-1 right-1 flex items-center space-x-0.5 bg-background/80 backdrop-blur-sm p-0.5 rounded border border-border/50 opacity-100"> {/* Simpler styling, always visible on hover */} 
-                           {/* Edit Button */} 
-                           {isUser && !message.isEditing && ( 
-                               <Tooltip>
-                                   <TooltipTrigger asChild>
-                                        <Button 
-                                            variant="ghost" 
-                                            size="sm"
-                                            className="h-5 w-5 p-0.5 text-muted-foreground hover:text-foreground"
-                                            onClick={() => onEditMessage(message.id, message.content)} // Trigger edit mode
-                                        >
-                                            <Icons.Edit className="h-3 w-3" />
-                                        </Button>
-                                    </TooltipTrigger>
-                                    <TooltipContent>Edit</TooltipContent>
-                                </Tooltip>
-                           )}
-                            {/* Regenerate Button - Corrected Condition */} 
-                           {!isUser && onRegenerateResponse && ( 
+                       {/* Action Buttons (Show below content for Assistant, or on hover for User) */}
+                       {/* Modify positioning and visibility based on role */} 
+                       <div className={cn(
+                           'flex items-center space-x-1 mt-1.5',
+                           isUser ? 'absolute top-1 right-1 bg-background/80 backdrop-blur-sm p-0.5 rounded border border-border/50 opacity-0 group-hover:opacity-100 transition-opacity' : 'opacity-70 hover:opacity-100' // Always visible but dimmer for AI, fades in for User
+                       )}>
+                           {/* Regenerate Button (Assistant only) */} 
+                           {isAssistant && !isStreaming && ( 
                                 <Tooltip>
-                                    <TooltipTrigger asChild>
-                                        <Button 
-                                            variant="ghost" 
-                                            size="sm"
-                                            className="h-5 w-5 p-0.5 text-muted-foreground hover:text-foreground"
-                                            onClick={() => onRegenerateResponse(message.id)}
-                                        >
+                                   <TooltipTrigger asChild>
+                                        <Button variant="ghost" size="sm" className="h-5 w-5 p-0.5 text-muted-foreground hover:text-foreground" onClick={() => onRegenerateResponse(message.id)}>
                                             <Icons.Refresh className="h-3 w-3" />
                                         </Button>
                                     </TooltipTrigger>
                                     <TooltipContent>Regenerate</TooltipContent>
                                 </Tooltip>
-                            )}
-                            {/* Copy Button */} 
-                           {onCopyContent && ( 
-                                <Tooltip>
-                                    <TooltipTrigger asChild>
-                                         <Button 
-                                            variant="ghost" 
-                                            size="sm"
-                                            className="h-5 w-5 p-0.5 text-muted-foreground hover:text-foreground"
-                                            onClick={handleCopy}
-                                        >
+                           )} 
+                           {/* Edit Button (User only) */} 
+                           {isUser && !message.isEditing && ( 
+                               <Tooltip>
+                                   <TooltipTrigger asChild>
+                                        <Button variant="ghost" size="sm" className="h-5 w-5 p-0.5 text-muted-foreground hover:text-foreground" onClick={() => onEditMessage(message.id, message.content)}>
+                                            <Icons.Edit className="h-3 w-3" />
+                                        </Button>
+                                    </TooltipTrigger>
+                                    <TooltipContent>Edit</TooltipContent>
+                                </Tooltip>
+                           )} 
+                           {/* Copy Button (All non-streaming/non-editing) */} 
+                           {!isStreaming && !message.isEditing && (
+                               <Tooltip>
+                                   <TooltipTrigger asChild>
+                                        <Button variant="ghost" size="sm" className="h-5 w-5 p-0.5 text-muted-foreground hover:text-foreground" onClick={handleCopy}>
                                             <Icons.Copy className="h-3 w-3" />
                                         </Button>
                                     </TooltipTrigger>
                                     <TooltipContent>Copy</TooltipContent>
                                 </Tooltip>
                            )}
-                            {/* Insert Button */} 
-                           {!isUser && onInsertContent && ( 
-                                <Tooltip>
-                                    <TooltipTrigger asChild>
-                                         <Button 
-                                            variant="ghost" 
-                                            size="sm" 
-                                            className="h-5 w-5 p-0.5 text-muted-foreground hover:text-foreground"
-                                            onClick={handleInsert}
-                                        >
-                                            <Icons.Plus className="h-3 w-3" />
+                           {/* Insert Button (If handler provided, non-user, non-streaming) */} 
+                           {onInsertContent && !isUser && !isStreaming && !message.isEditing && (
+                               <Tooltip>
+                                   <TooltipTrigger asChild>
+                                        <Button variant="ghost" size="sm" className="h-5 w-5 p-0.5 text-muted-foreground hover:text-foreground" onClick={handleInsert}>
+                                            <Icons.Insert className="h-3 w-3" /> 
                                         </Button>
-                                    </TooltipTrigger>
-                                    <TooltipContent>Insert into Editor</TooltipContent>
+                                   </TooltipTrigger>
+                                   <TooltipContent>Insert into Editor</TooltipContent>
                                 </Tooltip>
                            )}
                        </div>
-                   )} 
-               </div> 
-           </div> 
-       </TooltipProvider> 
+
+                   </div>
+               </div>
+           </div>
+       </TooltipProvider>
     </div>
   );
 };

@@ -1,12 +1,13 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { motion } from 'framer-motion';
 import { Link, useNavigate } from 'react-router-dom';
-import { useSetAtom } from 'jotai';
+import { useSetAtom, useAtom, useAtomValue } from 'jotai';
 import {
   uploadModalOpenAtom,
   resetChatTriggerAtom,
   commandPaletteOpenAtom,
   selectTemplateModalOpenAtom,
+  activeCaseIdAtom,
 } from '@/atoms/appAtoms';
 import { Button } from '@/components/ui/Button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/Card';
@@ -17,19 +18,30 @@ import {
   FileTextIcon
 } from '@/components/ui/Icons';
 import { FolderPlus, MessageSquarePlus, Upload, FileText, Search } from 'lucide-react';
+import TemplateSelectorModal from '@/components/templates/TemplateSelectorModal';
+import { toast } from 'sonner';
+import { useTemplate } from '@/lib/templateUtils';
+import CaseRequiredDialog from '@/components/common/CaseRequiredDialog';
+import { useCases } from '@/hooks/useCases';
 
 const DashboardPage: React.FC = () => {
   const navigate = useNavigate();
   const setUploadModalOpen = useSetAtom(uploadModalOpenAtom);
   const triggerChatReset = useSetAtom(resetChatTriggerAtom);
   const setCommandPaletteOpen = useSetAtom(commandPaletteOpenAtom);
-  const setShowSelectTemplateModal = useSetAtom(selectTemplateModalOpenAtom);
+  const [isTemplateModalOpen, setIsTemplateModalOpen] = useAtom(selectTemplateModalOpenAtom);
+  const activeCaseId = useAtomValue(activeCaseIdAtom);
+  const [isCaseRequiredDialogOpen, setIsCaseRequiredDialogOpen] = useState(false);
 
   const handleNewCase = () => {
     navigate('/files', { state: { action: 'createCase' } });
   };
 
   const handleUploadDocument = () => {
+    if (!activeCaseId) {
+      setIsCaseRequiredDialogOpen(true);
+      return;
+    }
     setUploadModalOpen(true);
   };
 
@@ -37,12 +49,26 @@ const DashboardPage: React.FC = () => {
     triggerChatReset(c => c + 1);
   };
 
-  const handleUseTemplate = () => {
-    setShowSelectTemplateModal(true);
+  const handleUseTemplateClick = () => {
+    if (!activeCaseId) {
+      setIsCaseRequiredDialogOpen(true);
+      return;
+    }
+    setIsTemplateModalOpen(true);
   };
 
   const handleGlobalSearch = () => {
     setCommandPaletteOpen(true);
+  };
+
+  const handleTemplateSelected = (templateId: string) => {
+    const success = useTemplate(navigate, templateId, activeCaseId, () => {
+      setIsTemplateModalOpen(false);
+    });
+    
+    if (!success) {
+      setIsTemplateModalOpen(false);
+    }
   };
 
   return (
@@ -110,7 +136,7 @@ const DashboardPage: React.FC = () => {
             <CardDescription>Draft new documents efficiently using your templates.</CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col sm:flex-row gap-2">
-            <Button variant="outline" className="flex-1" onClick={handleUseTemplate}>
+            <Button variant="outline" className="flex-1" onClick={handleUseTemplateClick}>
               <PlusIcon className="mr-2 h-4 w-4" /> Use Template
             </Button>
             <Button variant="outline" className="flex-1" onClick={() => navigate('/files', { state: { view: 'templates' } })}> 
@@ -134,6 +160,18 @@ const DashboardPage: React.FC = () => {
           </CardContent>
         </Card>
       </div>
+
+      <TemplateSelectorModal
+        isOpen={isTemplateModalOpen}
+        onClose={() => setIsTemplateModalOpen(false)}
+        onTemplateSelect={handleTemplateSelected}
+      />
+
+      <CaseRequiredDialog
+        isOpen={isCaseRequiredDialogOpen}
+        onClose={() => setIsCaseRequiredDialogOpen(false)}
+        action={activeCaseId ? "" : "proceed"}
+      />
     </div>
   );
 };

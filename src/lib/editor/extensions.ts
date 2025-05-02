@@ -5,22 +5,20 @@ import Link from '@tiptap/extension-link'; // Keep Link for potential use
 import Underline from '@tiptap/extension-underline';
 import TextStyle from '@tiptap/extension-text-style';
 import { Color } from '@tiptap/extension-color';
+import { Editor } from '@tiptap/react'; // Import Editor type
 
 // Import the custom extensions (ensure paths are correct)
-import { FloatingToolbar } from './extensions/FloatingToolbar';
+import { FloatingToolbar, FloatingToolbarOptions as ActualFloatingToolbarOptions } from './extensions/FloatingToolbar'; // Import the actual options type
 import { FloatingMenuExtension } from './extensions/FloatingMenu';
 
-// Placeholder for AI function types (replace with actual types)
-type AIFunction = (text: string) => Promise<string>;
+// Remove old AIFunction type if no longer used elsewhere
+// type AIFunction = (text: string) => Promise<string>;
 
-// Define options type for FloatingToolbar
-interface FloatingToolbarOptions {
-  onSummarize?: AIFunction;
-  onRewrite?: AIFunction;
-}
+// Define options type passed to getEditorExtensions, referencing the actual type from FloatingToolbar
+interface ConfigurableFloatingToolbarOptions extends ActualFloatingToolbarOptions {}
 
 // Function to configure extensions, allowing options to be passed
-export const getEditorExtensions = (options?: { floatingToolbar?: FloatingToolbarOptions }) => [
+export const getEditorExtensions = (options?: { floatingToolbar?: ConfigurableFloatingToolbarOptions }) => [
   StarterKit.configure({
     // Configure StarterKit options if needed
      heading: {
@@ -48,14 +46,15 @@ export const getEditorExtensions = (options?: { floatingToolbar?: FloatingToolba
   Color.configure({
     // types: ['textStyle'], // Usually not needed with TextStyle included
   }),
-  // Add the floating menu and toolbar extensions
-  // We assume FloatingToolbar will be modified to accept options like onSummarize/onRewrite
+  // Configure FloatingToolbar with the passed options
   FloatingToolbar.configure(options?.floatingToolbar), // Pass options here
   FloatingMenuExtension, // Assuming FloatingMenu doesn't need options for now
 ];
 
+// Type definition for easier use
+// Ensure this reflects the updated options structure if needed
+export type EditorExtensionsOptions = { floatingToolbar?: ConfigurableFloatingToolbarOptions };
+export type EditorExtensions = (options?: EditorExtensionsOptions) => any[]; // Adjust return type if needed
+
 // Keep the original export if needed elsewhere, but prefer the configurable function
 // export const editorExtensions = getEditorExtensions(); 
-
-// Type definition for easier use
-export type EditorExtensions = typeof getEditorExtensions; 

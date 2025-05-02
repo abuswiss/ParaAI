@@ -1,18 +1,19 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, DragEvent } from 'react';
+import React, { useState, useEffect, useCallback, DragEvent, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAtom, useSetAtom } from 'jotai';
 import { 
     activeCaseIdAtom, 
     uploadModalOpenAtom, 
     newAITemplateDraftModalOpenAtom, 
-    fillTemplateModalTriggerAtom,
     templateImportModalOpenAtom,
-    currentCaseDocumentsAtom
+    currentCaseDocumentsAtom,
+    newAIDocumentDraftModalOpenAtom,
+    initialFilesForUploadAtom
 } from '@/atoms/appAtoms';
 import { cn } from "@/lib/utils";
-import { Folder, FileText, LayoutGrid, List, Plus, Upload, FolderPlus, FilePlus, Sparkles, Edit, FileUp } from 'lucide-react';
+import { Folder, FileText, LayoutGrid, List, Plus, Upload, FolderPlus, FilePlus, Sparkles, Edit, FileUp, Play } from 'lucide-react';
 import { Button, buttonVariants } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -54,6 +55,12 @@ import Breadcrumb from '../common/Breadcrumb';
 import { Label } from "@/components/ui/Label"
 import { toast } from "sonner"
 import { MoreHorizontal } from 'lucide-react';
+import CaseManagementModal from '../cases/CaseManagementModal';
+import UploadModal from '@/components/documents/UploadModal';
+import NewAITemplateDraftModal from '../templates/NewAITemplateDraftModal';
+import NewAIDocumentDraftModal from '../documents/NewAIDocumentDraftModal';
+import { useTemplate } from '@/lib/templateUtils';
+import CaseRequiredDialog from '@/components/common/CaseRequiredDialog';
 
 // Basic types for the file manager
 type ItemType = 'case' | 'document' | 'template';
@@ -105,15 +112,19 @@ interface GridItemProps {
     onClick: (id: string, type: ItemType) => void;
     onAction: (action: 'rename' | 'delete' | 'download' | 'view' | 'edit', id: string, type: ItemType) => void;
     type: ItemType;
+    itemSubActions?: { label: string; icon: React.ReactNode; action: () => void; disabled?: boolean }[];
 }
 
-const GridItem: React.FC<GridItemProps> = ({ id, label, icon, typeLabel, date, onClick, onAction, type }) => {
+const GridItem: React.FC<GridItemProps> = ({ id, label, icon, typeLabel, date, onClick, onAction, type, itemSubActions }) => {
     return (
-        <Card className="cursor-pointer hover:shadow-md transition-shadow" onClick={() => onClick(id, type)}>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium truncate flex items-center gap-2">
-                    {icon} {label}
-                </CardTitle>
+        <Card 
+            className="cursor-pointer hover:shadow-md transition-shadow flex flex-col h-40"
+            onClick={() => onClick(id, type)}>
+            <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-2">
+                <div className="flex items-center gap-2 overflow-hidden mr-2">
+                    <div className="flex-shrink-0">{icon}</div>
+                    <CardTitle className="text-sm font-medium truncate">{label}</CardTitle>
+                </div>
                 <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                         <Button variant="ghost" size="icon" className="h-6 w-6 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
@@ -122,16 +133,20 @@ const GridItem: React.FC<GridItemProps> = ({ id, label, icon, typeLabel, date, o
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
                         {type === 'document' && <DropdownMenuItem onClick={(e: React.MouseEvent) => { e.stopPropagation(); onAction('view', id, type); }}>View</DropdownMenuItem>}
-                        {type === 'template' && <DropdownMenuItem onClick={(e: React.MouseEvent) => { e.stopPropagation(); onAction('edit', id, type); }}>Edit</DropdownMenuItem>}
-                        {type === 'template' && <DropdownMenuItem onClick={(e: React.MouseEvent) => { e.stopPropagation(); onClick(id, type); }}>Use Template</DropdownMenuItem>}
+                        {type === 'document' && <DropdownMenuItem onClick={(e: React.MouseEvent) => { e.stopPropagation(); onAction('edit', id, type); }}>Edit</DropdownMenuItem>}
+                        {type === 'template' && itemSubActions?.map((action, index) => (
+                            <DropdownMenuItem key={`${id}-${action.label}`} onSelect={action.action} disabled={action.disabled}>
+                                {action.label}
+                            </DropdownMenuItem>
+                        ))}
                         <DropdownMenuItem onClick={(e: React.MouseEvent) => { e.stopPropagation(); onAction('rename', id, type); }}>Rename</DropdownMenuItem>
                         {type === 'document' && <DropdownMenuItem onClick={(e: React.MouseEvent) => { e.stopPropagation(); onAction('download', id, type); }}>Download</DropdownMenuItem>}
                         <DropdownMenuItem className="text-red-600" onClick={(e: React.MouseEvent) => { e.stopPropagation(); onAction('delete', id, type); }}>Delete</DropdownMenuItem>
                     </DropdownMenuContent>
                 </DropdownMenu>
             </CardHeader>
-            <CardContent className="pb-2">
-                <div className="text-xs text-muted-foreground">{typeLabel}</div>
+            <CardContent className="pb-3 flex-grow">
+                <div className="text-xs text-muted-foreground mb-1">{typeLabel}</div>
                  {date && <div className="text-xs text-muted-foreground">{date}</div>}
             </CardContent>
             {/* Optional: Footer for more info? */}
@@ -143,12 +158,15 @@ const FileManager: React.FC<FileManagerProps> = () => {
     const navigate = useNavigate();
     const [activeCaseId, setActiveCaseId] = useAtom(activeCaseIdAtom);
     const [activeCase, setActiveCase] = useState<Case | null>(null); // State for active case details
-    const setIsUploadModalOpen = useSetAtom(uploadModalOpenAtom); // Hook to open modal
-    const setIsNewAITemplateModalOpen = useSetAtom(newAITemplateDraftModalOpenAtom);
-    const triggerFillTemplateModal = useSetAtom(fillTemplateModalTriggerAtom);
+    const [isUploadModalOpen, setIsUploadModalOpen] = useAtom(uploadModalOpenAtom); // Read and write atom state
+    const [isNewAITemplateModalOpen, setIsNewAITemplateModalOpen] = useAtom(newAITemplateDraftModalOpenAtom);
+    const [isNewAIDocumentDraftModalOpen, setIsNewAIDocumentDraftModalOpen] = useAtom(newAIDocumentDraftModalOpenAtom); // Use the new atom
     const setIsTemplateImportModalOpen = useSetAtom(templateImportModalOpenAtom);
-    const setCurrentDocuments = useSetAtom(currentCaseDocumentsAtom); // Get setter for the shared atom
+    const setCurrentDocuments = useSetAtom(currentCaseDocumentsAtom as any); // Get setter for the shared atom
     const [isDraggingOver, setIsDraggingOver] = useState(false); // State for visual feedback
+
+    // State for managing case management modal
+    const [isManageCasesModalOpen, setIsManageCasesModalOpen] = useState(false);
 
     // State for fetched data
     const [cases, setCases] = useState<Case[]>([]);
@@ -175,6 +193,11 @@ const FileManager: React.FC<FileManagerProps> = () => {
 
     // NEW state for template fetching loader
     const [isFetchingTemplateContent, setIsFetchingTemplateContent] = useState<boolean>(false);
+
+    const setInitialFiles = useSetAtom(initialFilesForUploadAtom); // Get setter for the atom
+
+    const [isCaseRequiredDialogOpen, setIsCaseRequiredDialogOpen] = useState(false);
+    const [pendingTemplateId, setPendingTemplateId] = useState<string | null>(null);
 
     // --- Drag and Drop Handlers ---
     const handleDragEnter = (e: DragEvent<HTMLDivElement>) => {
@@ -207,8 +230,9 @@ const FileManager: React.FC<FileManagerProps> = () => {
         const files = Array.from(e.dataTransfer.files);
         if (files.length > 0) {
             console.log('Files dropped:', files);
-            // TODO: If UploadModal can accept initial files, pass them here.
-            // For now, just open the modal. The user will select files again inside.
+            // Set the dropped files in the atom
+            setInitialFiles(files);
+            // Open the modal
             setIsUploadModalOpen(true);
         }
     };
@@ -248,31 +272,32 @@ const FileManager: React.FC<FileManagerProps> = () => {
     }, [fetchInitialData]);
 
     // Fetch documents and case details when selected item changes to a case
+    const fetchCaseAndDocs = useCallback(async (caseId: string) => {
+        // Fetch case details
+        const { data: caseData } = await caseService.getCaseById(caseId);
+        setActiveCase(caseData);
+
+        setIsDocumentsLoading(true);
+        setDocumentsError(null);
+        setDocuments([]); 
+        setCurrentDocuments([]); // Clear shared atom too
+        try {
+            const { data: docData, error } = await documentService.getUserDocuments(caseId);
+            if (error) throw error;
+            const fetchedDocs = docData || [];
+            setDocuments(fetchedDocs as Document[]); 
+            setCurrentDocuments(fetchedDocs as any); // Update shared atom
+        } catch (err: unknown) { 
+            console.error(`Error fetching documents for case ${caseId}:`, err);
+            setDocumentsError(err instanceof Error ? err.message : String(err)); 
+            setCurrentDocuments([]); // Clear shared atom on error
+        } finally {
+            setIsDocumentsLoading(false);
+        }
+    }, [setCurrentDocuments]); // Removed selectedItemId, selectedItemType from deps, keep setCurrentDocuments
+
     useEffect(() => {
         if (selectedItemType === 'case' && selectedItemId) {
-            const fetchCaseAndDocs = async (caseId: string) => {
-                // Fetch case details
-                const { data: caseData } = await caseService.getCaseById(caseId);
-                setActiveCase(caseData);
-
-                setIsDocumentsLoading(true);
-                setDocumentsError(null);
-                setDocuments([]); 
-                setCurrentDocuments([]); // Clear shared atom too
-                try {
-                    const { data: docData, error } = await documentService.getUserDocuments(caseId);
-                    if (error) throw error;
-                    const fetchedDocs = docData || [];
-                    setDocuments(fetchedDocs); 
-                    setCurrentDocuments(fetchedDocs); // Update shared atom
-                } catch (err: unknown) { 
-                    console.error(`Error fetching documents for case ${caseId}:`, err);
-                    setDocumentsError(err instanceof Error ? err.message : String(err)); 
-                    setCurrentDocuments([]); // Clear shared atom on error
-                } finally {
-                    setIsDocumentsLoading(false);
-                }
-            };
             fetchCaseAndDocs(selectedItemId);
         } else {
             // Clear local and shared state if no case is selected
@@ -281,7 +306,25 @@ const FileManager: React.FC<FileManagerProps> = () => {
             setDocumentsError(null);
             setActiveCase(null);
         }
-    }, [selectedItemId, selectedItemType, setCurrentDocuments]); // Add setCurrentDocuments dependency
+    }, [selectedItemId, selectedItemType, fetchCaseAndDocs, setCurrentDocuments]);
+
+    // Handle closing the upload modal and refreshing if needed
+    const handleUploadModalClose = useCallback((refreshNeeded?: boolean) => {
+        setIsUploadModalOpen(false); // Close the modal
+        if (refreshNeeded && activeCaseId) {
+            console.log('Refresh triggered after upload for case:', activeCaseId);
+            fetchCaseAndDocs(activeCaseId);
+        }
+    }, [setIsUploadModalOpen, activeCaseId, fetchCaseAndDocs]);
+
+    // --- NEW: Handler for closing the AI Document Draft modal ---
+    const handleAIDraftModalClose = useCallback((refreshNeeded?: boolean) => {
+        setIsNewAIDocumentDraftModalOpen(false); // Close the correct modal
+        if (refreshNeeded && activeCaseId) {
+            console.log('Refresh triggered after AI draft generation for case:', activeCaseId);
+            fetchCaseAndDocs(activeCaseId); // Refresh documents if needed
+        }
+    }, [setIsNewAIDocumentDraftModalOpen, activeCaseId, fetchCaseAndDocs]);
 
     // Handle sidebar item selection
     const handleSelectItem = (id: string, type: ItemType) => {
@@ -300,27 +343,35 @@ const FileManager: React.FC<FileManagerProps> = () => {
         if (itemType === 'document') {
             navigate(`/view/document/${itemId}`);
         } else if (itemType === 'template') {
-            // Fetch template content and trigger the fill modal
-            setIsFetchingTemplateContent(true);
-            const toastId = toast.loading('Loading template...');
-            try {
-                const { data: template, error: fetchError } = await templateService.getTemplateById(itemId);
-                if (fetchError) throw fetchError;
-                if (!template || !template.content) {
-                    throw new Error('Selected template content not found.');
-                }
-                triggerFillTemplateModal({ id: template.id, name: template.name, content: template.content });
-                toast.dismiss(toastId);
-            } catch (err: any) {
-                console.error("Error fetching template to use:", err);
-                toast.error(`Failed to load template content: ${err.message}`, { id: toastId });
-            } finally {
-                setIsFetchingTemplateContent(false);
+            // Store the template ID in case we need to use it after case selection
+            setPendingTemplateId(itemId);
+            
+            if (!activeCaseId) {
+                setIsCaseRequiredDialogOpen(true);
+                return;
             }
+            
+            useTemplate(navigate, itemId, activeCaseId);
         }
-        // Add case navigation if needed (maybe clicking case title in breadcrumb?)
+        // Add case navigation if needed
     };
     
+    // Handle case required dialog close
+    const handleCaseRequiredDialogClose = () => {
+        setIsCaseRequiredDialogOpen(false);
+        setPendingTemplateId(null);
+    };
+    
+    // Handle case selection from dialog
+    const handleCaseSelected = (selectedCaseId: string) => {
+        if (pendingTemplateId && selectedCaseId) {
+            // Navigate to template with newly selected case
+            useTemplate(navigate, pendingTemplateId, selectedCaseId);
+            setPendingTemplateId(null);
+        }
+        setIsCaseRequiredDialogOpen(false);
+    };
+
     // Action handler (rename, delete, download, edit)
     const handleItemAction = async (action: 'rename' | 'delete' | 'download' | 'view' | 'edit', itemId: string, itemType: ItemType) => {
         console.log('Action:', action, 'Item:', itemId, 'Type:', itemType);
@@ -331,9 +382,11 @@ const FileManager: React.FC<FileManagerProps> = () => {
                     handleItemClick(itemId, itemType); // Navigate to view page
                 }
                 break;
-            case 'edit': // Only for templates now
+            case 'edit': 
                 if (itemType === 'template') {
-                     navigate(`/edit/template/${itemId}`);
+                    navigate(`/edit/template/${itemId}`);
+                } else if (itemType === 'document') {
+                    navigate(`/edit/document/${itemId}`); // Added navigation for document
                 }
                 break;
             case 'rename':
@@ -466,7 +519,7 @@ const FileManager: React.FC<FileManagerProps> = () => {
         if (mutatedItemType === 'document' && selectedItemType === 'case' && currentSelectedCaseId) {
             setIsDocumentsLoading(true);
             const { data, error } = await documentService.getUserDocuments(currentSelectedCaseId);
-            setDocuments(data || []);
+            setDocuments((data || []) as Document[]);
             if(error) {
                 setDocumentsError(error.message);
                 // Don't show toast here, error is displayed in the main area
@@ -484,6 +537,22 @@ const FileManager: React.FC<FileManagerProps> = () => {
         }
         // Optionally refresh cases if case actions are added
     };
+
+    // Helper to refresh only the cases list
+    const refreshCases = useCallback(async () => {
+        setIsCasesLoading(true);
+        setCasesError(null);
+        try {
+            const { data, error } = await caseService.getUserCases();
+            if (error) throw error;
+            setCases(data || []);
+        } catch (err: any) {
+            console.error("Failed to refresh cases:", err);
+            setCasesError(`Failed to reload cases: ${err.message}`);
+        } finally {
+            setIsCasesLoading(false);
+        }
+    }, []);
 
     // Render functions for table rows (kept for list view)
     const renderDocumentRow = (doc: Document) => (
@@ -503,6 +572,7 @@ const FileManager: React.FC<FileManagerProps> = () => {
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
                         <DropdownMenuItem onClick={(e: React.MouseEvent) => { e.stopPropagation(); handleItemAction('view', doc.id, 'document'); }}>View</DropdownMenuItem>
+                        <DropdownMenuItem onClick={(e: React.MouseEvent) => { e.stopPropagation(); handleItemAction('edit', doc.id, 'document'); }}>Edit</DropdownMenuItem>
                         <DropdownMenuItem onClick={(e: React.MouseEvent) => { e.stopPropagation(); handleItemAction('rename', doc.id, 'document'); }}>Rename</DropdownMenuItem>
                         <DropdownMenuItem onClick={(e: React.MouseEvent) => { e.stopPropagation(); handleItemAction('download', doc.id, 'document'); }}>Download</DropdownMenuItem>
                         <DropdownMenuItem className="text-red-600" onClick={(e: React.MouseEvent) => { e.stopPropagation(); handleItemAction('delete', doc.id, 'document'); }}>Delete</DropdownMenuItem>
@@ -528,10 +598,12 @@ const FileManager: React.FC<FileManagerProps> = () => {
                         </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={(e: React.MouseEvent) => { e.stopPropagation(); handleItemAction('edit', template.id, 'template'); }}><Edit className="mr-2 h-4 w-4"/>Edit</DropdownMenuItem>
-                        <DropdownMenuItem onClick={(e: React.MouseEvent) => { e.stopPropagation(); handleItemClick(template.id, 'template'); }}>Use Template</DropdownMenuItem>
-                        <DropdownMenuItem onClick={(e: React.MouseEvent) => { e.stopPropagation(); handleItemAction('rename', template.id, 'template'); }}>Rename</DropdownMenuItem>
-                        <DropdownMenuItem className="text-red-600" onClick={(e: React.MouseEvent) => { e.stopPropagation(); handleItemAction('delete', template.id, 'template'); }}>Delete</DropdownMenuItem>
+                        <DropdownMenuItem onSelect={() => handleItemClick(template.id, 'template')} disabled={!activeCaseId}>
+                            <Play className="mr-2 h-4 w-4"/>Use Template
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onSelect={() => handleItemAction('edit', template.id, 'template')}><Edit className="mr-2 h-4 w-4"/>Edit Details</DropdownMenuItem>
+                        <DropdownMenuItem onSelect={() => handleItemAction('rename', template.id, 'template')}>Rename</DropdownMenuItem>
+                        <DropdownMenuItem className="text-destructive" onSelect={() => handleItemAction('delete', template.id, 'template')}>Delete</DropdownMenuItem>
                     </DropdownMenuContent>
                 </DropdownMenu>
             </td>
@@ -565,12 +637,20 @@ const FileManager: React.FC<FileManagerProps> = () => {
     const { breadcrumbItems } = getTitleAndBreadcrumbs();
 
     // Filtering logic based on search term
-    const displayedDocuments = documents.filter(doc => 
-        doc.filename.toLowerCase().includes(searchTerm.toLowerCase())
-    ); 
-    const displayedTemplates = templates.filter(template => 
-        template.name.toLowerCase().includes(searchTerm.toLowerCase())
-    ); 
+    const filteredCases = useMemo(() => 
+        cases.filter(c => c.name.toLowerCase().includes(searchTerm.toLowerCase())),
+        [cases, searchTerm]
+    );
+
+    const filteredTemplates = useMemo(() => 
+        templates.filter(t => t.name.toLowerCase().includes(searchTerm.toLowerCase())),
+        [templates, searchTerm]
+    );
+
+    const filteredDocuments = useMemo(() => 
+        documents.filter(d => d.filename?.toLowerCase().includes(searchTerm.toLowerCase())),
+        [documents, searchTerm]
+    );
 
     // Placeholder handler for AI Document Generation
     const handleGenerateAIDocument = () => {
@@ -578,11 +658,73 @@ const FileManager: React.FC<FileManagerProps> = () => {
             toast.error("Please select a case first to generate a document.");
             return;
         }
-        // TODO: Implement opening the correct AI Document Generation modal
-        // Potentially set a context atom and open a generic modal
-        // setAiDraftContext('document'); 
-        // setGenericAIModalOpen(true);
-        toast.info(`AI Document Generation for case ${selectedItemId} (Not Implemented Yet)`);
+        // Open the new AI Document Draft modal
+        setIsNewAIDocumentDraftModalOpen(true);
+    };
+
+    // --- Render Logic ---
+    const renderGridContent = () => {
+        // Grid items for templates
+        const templateItems = filteredTemplates.map(template => (
+            <GridItem 
+                key={`template-${template.id}`}
+                id={template.id}
+                label={template.name}
+                icon={<FileText className="h-4 w-4 text-primary flex-shrink-0" />}
+                typeLabel={template.category || 'Template'}
+                date={`Updated: ${new Date(template.updatedAt || '').toLocaleDateString()}`}
+                onClick={handleItemClick}
+                onAction={handleItemAction}
+                type="template"
+                itemSubActions={[
+                    { 
+                        label: 'Use Template', 
+                        icon: <Play className="h-4 w-4" />, 
+                        action: () => handleItemClick(template.id, 'template'), 
+                        disabled: !activeCaseId 
+                    },
+                    { 
+                        label: 'Edit Details', 
+                        icon: <Edit className="h-4 w-4" />, 
+                        action: () => handleItemAction('edit', template.id, 'template') 
+                    },
+                ]}
+            />
+        ));
+
+        // Grid items for documents
+        const documentItems = filteredDocuments.map(doc => (
+            <GridItem 
+                key={`document-${doc.id}`}
+                id={doc.id}
+                label={doc.filename || `Document ${doc.id}`}
+                icon={<FileText className="h-4 w-4 text-blue-500 flex-shrink-0" />}
+                typeLabel={doc.contentType || 'Document'}
+                date={`Created: ${doc.uploadedAt ? new Date(doc.uploadedAt).toLocaleDateString() : 'N/A'}`}
+                onClick={handleItemClick}
+                onAction={handleItemAction}
+                type="document"
+            />
+        ));
+
+        // Combine items
+        const allItems = [...templateItems, ...documentItems];
+
+        if (isTemplatesLoading || isDocumentsLoading) {
+            return <div className="flex justify-center items-center h-64"><Spinner /></div>;
+        }
+        if (templatesError || documentsError) {
+            return <Alert variant="destructive"><AlertDescription>{templatesError || documentsError}</AlertDescription></Alert>;
+        }
+        if (allItems.length === 0) {
+            return <p className="text-center text-muted-foreground py-8">No {activeCaseId ? 'documents or templates' : 'templates'} found{searchTerm ? ' matching search' : ''}.</p>;
+        }
+
+        return (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {allItems}
+            </div>
+        );
     };
 
     return (
@@ -594,7 +736,7 @@ const FileManager: React.FC<FileManagerProps> = () => {
                  <div className="pl-1 space-y-1 mb-4">
                      {isCasesLoading && <Spinner size="sm" className="mx-auto" />}
                      {casesError && <Alert variant="destructive" className="text-xs p-1"><AlertDescription>{casesError}</AlertDescription></Alert>}
-                     {!isCasesLoading && !casesError && cases.map(c => (
+                     {!isCasesLoading && !casesError && filteredCases.map(c => (
                          <ListItem 
                              key={c.id} 
                              id={c.id} 
@@ -605,10 +747,15 @@ const FileManager: React.FC<FileManagerProps> = () => {
                              type='case'
                          />
                      ))}
-                     {!isCasesLoading && !casesError && cases.length === 0 && (
+                     {!isCasesLoading && !casesError && filteredCases.length === 0 && (
                         <p className="text-xs text-muted-foreground italic px-2 py-2">No cases found.</p>
                      )}
-                     <Button variant="ghost" size="sm" className="w-full justify-start text-muted-foreground hover:text-foreground mt-1" onClick={() => navigate('/cases')}> 
+                     <Button 
+                        variant="ghost" 
+                        size="sm" 
+                        className="w-full justify-start text-muted-foreground hover:text-foreground mt-1" 
+                        onClick={() => setIsManageCasesModalOpen(true)}
+                     >
                          <FolderPlus className="h-4 w-4 mr-2"/> Manage Cases...
                      </Button>
                  </div>
@@ -757,42 +904,7 @@ const FileManager: React.FC<FileManagerProps> = () => {
                          <> 
                              {isDocumentsLoading && <div className="flex justify-center items-center pt-10"><Spinner size="lg" /></div>}
                              {documentsError && <Alert variant="destructive" className="m-4"><AlertDescription>{documentsError}</AlertDescription></Alert>}
-                             {!isDocumentsLoading && !documentsError && displayedDocuments.length > 0 && (
-                                viewMode === 'list' ? (
-                                    <table className="w-full text-sm">
-                                        <thead>
-                                            <tr className="border-b">
-                                                <th className="text-left p-2 font-medium text-muted-foreground">Name</th>
-                                                <th className="text-left p-2 font-medium text-muted-foreground">Date Added</th>
-                                                <th className="text-left p-2 font-medium text-muted-foreground">Type</th>
-                                                <th className="text-right p-2 font-medium text-muted-foreground">Actions</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {displayedDocuments.map(renderDocumentRow)}
-                                        </tbody>
-                                    </table>
-                                ) : (
-                                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                                         {displayedDocuments.map(doc => (
-                                             <GridItem 
-                                                 key={doc.id}
-                                                 id={doc.id}
-                                                 label={doc.filename}
-                                                 icon={<FileText className="h-4 w-4 text-muted-foreground flex-shrink-0" />}
-                                                 typeLabel="Document"
-                                                 date={doc.uploadedAt ? `Added: ${new Date(doc.uploadedAt).toLocaleDateString()}` : undefined}
-                                                 onClick={handleItemClick}
-                                                 onAction={handleItemAction}
-                                                 type='document'
-                                             />
-                                         ))}
-                                     </div>
-                                )
-                             )}
-                             {!isDocumentsLoading && !documentsError && displayedDocuments.length === 0 && (
-                                <p className="text-center text-muted-foreground italic py-10">No documents {searchTerm ? 'matching search' : 'in this case'}.</p>
-                             )}
+                             {!isDocumentsLoading && !documentsError && renderGridContent()}
                          </>
                      )}
 
@@ -801,42 +913,7 @@ const FileManager: React.FC<FileManagerProps> = () => {
                          <>
                              {isTemplatesLoading && <div className="flex justify-center items-center pt-10"><Spinner size="lg" /></div>}
                              {templatesError && <Alert variant="destructive" className="m-4"><AlertDescription>{templatesError}</AlertDescription></Alert>}
-                             {!isTemplatesLoading && !templatesError && displayedTemplates.length > 0 && (
-                                viewMode === 'list' ? (
-                                    <table className="w-full text-sm">
-                                        <thead>
-                                            <tr className="border-b">
-                                                <th className="text-left p-2 font-medium text-muted-foreground">Name</th>
-                                                <th className="text-left p-2 font-medium text-muted-foreground">Category</th>
-                                                <th className="text-left p-2 font-medium text-muted-foreground">Date Created</th>
-                                                <th className="text-right p-2 font-medium text-muted-foreground">Actions</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {displayedTemplates.map(renderTemplateRow)}
-                                        </tbody>
-                                    </table>
-                                ) : (
-                                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                                        {displayedTemplates.map(tmpl => (
-                                             <GridItem 
-                                                 key={tmpl.id}
-                                                 id={tmpl.id}
-                                                 label={tmpl.name}
-                                                 icon={<FileText className="h-4 w-4 text-muted-foreground flex-shrink-0" />}
-                                                 typeLabel={tmpl.category || 'Template'}
-                                                 date={tmpl.createdAt ? `Created: ${new Date(tmpl.createdAt).toLocaleDateString()}` : undefined}
-                                                 onClick={handleItemClick}
-                                                 onAction={handleItemAction}
-                                                 type='template'
-                                             />
-                                         ))}
-                                     </div>
-                                )
-                             )}
-                              {!isTemplatesLoading && !templatesError && displayedTemplates.length === 0 && (
-                                <p className="text-center text-muted-foreground italic py-10">No templates {searchTerm ? 'matching search' : 'found'}.</p>
-                             )}
+                             {!isTemplatesLoading && !templatesError && renderGridContent()}
                          </>
                      )}
 
@@ -900,6 +977,35 @@ const FileManager: React.FC<FileManagerProps> = () => {
                     </AlertDialogFooter>
                 </AlertDialogContent>
             </AlertDialog>
+
+            {/* Modals Section */}
+            <CaseManagementModal 
+                isOpen={isManageCasesModalOpen} 
+                onClose={() => setIsManageCasesModalOpen(false)} 
+                onCasesUpdated={refreshCases}
+            />
+            <UploadModal 
+                isOpen={isUploadModalOpen}
+                onClose={handleUploadModalClose} 
+            />
+            <NewAITemplateDraftModal
+                isOpen={isNewAITemplateModalOpen}
+                onClose={() => setIsNewAITemplateModalOpen(false)}
+            />
+            <NewAIDocumentDraftModal 
+                isOpen={isNewAIDocumentDraftModalOpen}
+                onClose={handleAIDraftModalClose} // Use the new, correct handler
+                activeCaseId={activeCaseId} // Pass the active case ID
+                onSuccess={(newDocId) => { // Added onSuccess handler
+                    // Navigate or refresh based on new doc
+                    navigate(`/edit/document/${newDocId}`);
+                }}
+            />
+            <CaseRequiredDialog
+                isOpen={isCaseRequiredDialogOpen}
+                onClose={handleCaseRequiredDialogClose}
+                action="use this template"
+            />
         </div>
     );
 };

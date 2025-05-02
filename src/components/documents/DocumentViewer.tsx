@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
-import { useSetAtom } from 'jotai';
-import { addTaskAtom, updateTaskAtom, removeTaskAtom } from '@/atoms/appAtoms';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { useSetAtom, useAtomValue } from 'jotai';
+import { addTaskAtom, updateTaskAtom, removeTaskAtom, chatPreloadContextAtom, activeEditorItemAtom, activeDocumentContextIdAtom } from '@/atoms/appAtoms';
 import { getDocumentById, getDocumentUrl, DocumentMetadata } from '@/services/documentService';
 import {
   analyzeDocument, 
@@ -18,7 +18,7 @@ import { Spinner } from '@/components/ui/Spinner';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/Alert";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/Tabs";
 import { TextSelect, Users, ListChecks, ShieldAlert, CalendarDays, FileWarning, Download, FileSearch, Image as ImageIcon, StickyNote, Info, Gavel, Play } from 'lucide-react';
-import TiptapEditor from '../editor/TiptapEditor';
+import TiptapEditor, { TiptapEditorRef } from '../editor/TiptapEditor';
 import ReactMarkdown from 'react-markdown';
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge, BadgeVariant } from "@/components/ui/Badge";
@@ -34,10 +34,26 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import DocumentAnalyzer from './DocumentAnalyzer';
 
 interface DocumentViewerProps {
   documentId: string;
 }
+
+// *** ADDED & EXPORTED: Define type for highlight position ***
+export interface HighlightPosition {
+    start: number;
+    end: number;
+}
+
+// *** ADDED & EXPORTED: Define type for a single highlight item ***
+export interface HighlightInfo extends HighlightPosition {
+    type: AnalysisType;
+    details: any; // Contains the specific entity, clause, risk etc.
+}
+
+// *** EXPORTED AnalysisType ***
+export type { AnalysisType };
 
 const analysisOptions: { value: AnalysisType; label: string; icon?: React.ElementType }[] = [
   { value: 'summary', label: 'Summary', icon: StickyNote },
@@ -61,14 +77,139 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ documentId }) => {
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [summaryContent, setSummaryContent] = useState<string | null>(null);
   const [activeCase, setActiveCase] = useState<Case | null>(null);
+  // *** ADDED: State for active highlight ***
+  const [activeHighlightPosition, setActiveHighlightPosition] = useState<HighlightPosition | null>(null);
 
   const addTask = useSetAtom(addTaskAtom);
   const updateTask = useSetAtom(updateTaskAtom);
   const removeTask = useSetAtom(removeTaskAtom);
+  const setChatPreloadContext = useSetAtom(chatPreloadContextAtom);
+  const setActiveEditorItem = useSetAtom(activeEditorItemAtom);
+  const setActiveDocumentContextId = useSetAtom(activeDocumentContextIdAtom);
+
+  // *** ADDED: Ref for the TiptapEditor instance ***
+  const editorRef = useRef<TiptapEditorRef>(null);
+
+  // *** ADDED: Memoize the consolidated list of highlights ***
+  const allHighlights = useMemo(() => {
+    if (!analysisHistory) return [];
+    
+    const highlights: HighlightInfo[] = [];
+    
+    try {
+      // Process each analysis result in history
+      analysisHistory.forEach(analysis => {
+        // Skip if analysis result is null or not an object
+        if (!analysis || typeof analysis !== 'object') return;
+        
+        // Process entities
+        if ('entities' in analysis && Array.isArray(analysis.entities)) {
+          analysis.entities.forEach(entity => {
+            if (typeof entity.start === 'number' && typeof entity.end === 'number' && entity.start < entity.end) {
+              highlights.push({
+                type: 'entities',
+                start: entity.start,
+                end: entity.end,
+                details: {
+                  text: entity.text,
+                  type: entity.type,
+                  explanation: entity.explanation
+                }
+              });
+            }
+          });
+        }
+        
+        // Process clauses
+        if ('clauses' in analysis && Array.isArray(analysis.clauses)) {
+          analysis.clauses.forEach(clause => {
+            if (typeof clause.start === 'number' && typeof clause.end === 'number' && clause.start < clause.end) {
+              highlights.push({
+                type: 'clauses',
+                start: clause.start,
+                end: clause.end,
+                details: {
+                  title: clause.title,
+                  text: clause.text,
+                  analysis: clause.analysis
+                }
+              });
+            }
+          });
+        }
+        
+        // Process risks
+        if ('risks' in analysis && Array.isArray(analysis.risks)) {
+          analysis.risks.forEach(risk => {
+            if (typeof risk.start === 'number' && typeof risk.end === 'number' && risk.start < risk.end) {
+              highlights.push({
+                type: 'risks',
+                start: risk.start,
+                end: risk.end,
+                details: {
+                  explanation: risk.explanation,
+                  severity: risk.severity,
+                  suggestion: risk.suggestion
+                }
+              });
+            }
+          });
+        }
+        
+        // Process timeline
+        if ('timeline' in analysis && Array.isArray(analysis.timeline)) {
+          analysis.timeline.forEach(event => {
+            if (typeof event.start === 'number' && typeof event.end === 'number' && event.start < event.end) {
+              highlights.push({
+                type: 'timeline',
+                start: event.start,
+                end: event.end,
+                details: {
+                  date: event.date,
+                  event: event.event,
+                  type: event.type
+                }
+              });
+            }
+          });
+        }
+        
+        // Process privileged terms
+        if ('privilegedTerms' in analysis && Array.isArray(analysis.privilegedTerms)) {
+          analysis.privilegedTerms.forEach(term => {
+            if (typeof term.start === 'number' && typeof term.end === 'number' && term.start < term.end) {
+              highlights.push({
+                type: 'privilegedTerms',
+                start: term.start,
+                end: term.end,
+                details: {
+                  text: term.text,
+                  category: term.category,
+                  explanation: term.explanation
+                }
+              });
+            }
+          });
+        }
+      });
+      
+      // Filter out any duplicates (same start and end position)
+      const uniqueHighlights = highlights.filter((highlight, index, self) => 
+        index === self.findIndex(h => h.start === highlight.start && h.end === highlight.end)
+      );
+      
+      return uniqueHighlights;
+    } catch (error) {
+      console.error('Error processing highlights:', error);
+      return [];
+    }
+  }, [analysisHistory]);
 
   useEffect(() => {
     const fetchAllData = async () => {
+      let isMounted = true; // Flag to handle async operations after unmount
       try {
+        // Reset state at the beginning
         setLoading(true);
         setError(null);
         setDocument(null);
@@ -80,36 +221,60 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ documentId }) => {
         setAnalysisError(null);
         setSummaryContent(null);
 
+        // Set the global document context ID when this document is viewed
+        // Ensure this happens only if the component is still mounted
+        if (isMounted) {
+            setActiveDocumentContextId(documentId);
+        }
+
         const { data: docData, error: docError } = await getDocumentById(documentId);
         if (docError) throw docError;
         if (!docData) throw new Error('Document not found');
+        if (!isMounted) return; // Check after async call
         setDocument(docData);
+        setActiveEditorItem({ type: 'document', id: documentId });
 
         if (docData.caseId) {
-          try {
-            const { data: caseData, error: caseError } = await getCaseById(docData.caseId);
-            if (caseError) console.warn('Could not fetch case details:', caseError);
-            else setActiveCase(caseData);
-          } catch (caseFetchErr) {
-            console.warn('Error fetching case for breadcrumb:', caseFetchErr);
-          }
+           const { data: caseData, error: caseError } = await getCaseById(docData.caseId);
+           if (!isMounted) return; // Check after async call
+           if (caseError) console.warn('Could not fetch case details:', caseError);
+           else setActiveCase(caseData);
         }
-        
+
         const { data: historyData, error: historyError } = await getDocumentAnalyses(documentId);
+        if (!isMounted) return; // Check after async call
         if (historyError) console.warn('Could not fetch analysis history:', historyError);
         const validHistory = historyData || [];
         setAnalysisHistory(validHistory);
         
+        // Refined: Handle both string and object summary results from history
         const latestSummary = validHistory.find((a: DocumentAnalysisResult) => a.analysisType === 'summary');
         let initialTab: 'text' | 'preview' | 'summary' = 'text';
-        if (latestSummary && typeof latestSummary.result === 'string') {
-             setSummaryContent(latestSummary.result);
-             initialTab = 'summary';
-        } else if (docData.extractedText) {
-             initialTab = 'text';
-        } else if (docData.storagePath) {
-            initialTab = 'preview';
+        let initialSummaryAnalysisResult: StructuredAnalysisResult | null = null;
+
+        if (latestSummary) {
+            if (typeof latestSummary.result === 'object' && latestSummary.result !== null && 'summary' in latestSummary.result && 'summaryAnalysis' in latestSummary.result) {
+                // Handle structured summary object
+                setSummaryContent(latestSummary.result.summary); // Set tab content
+                initialSummaryAnalysisResult = latestSummary.result; // Set for analyzer panel
+                initialTab = 'summary';
+            } else if (typeof latestSummary.result === 'string') {
+                // Handle legacy string summary
+                setSummaryContent(latestSummary.result);
+                initialSummaryAnalysisResult = latestSummary.result; // Pass string to analyzer too?
+                initialTab = 'summary';
+            }
         }
+
+        // Determine initial tab based on priority: summary > text > preview
+        if (initialTab !== 'summary') {
+           if (docData.extractedText) {
+               initialTab = 'text';
+           } else if (docData.storagePath) {
+               initialTab = 'preview';
+           }
+        }
+
         setActiveTab(initialTab);
 
         if (initialTab === 'preview' && docData.storagePath) {
@@ -122,20 +287,67 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ documentId }) => {
              }
         }
 
-        if (initialTab !== 'summary' && latestSummary) {
+        // If we have a summary result from history (and didn't set the tab to summary),
+        // pre-select 'summary' in the dropdown and set the analysis panel content
+        if (initialSummaryAnalysisResult) { 
              setSelectedAnalysisType('summary');
-             setCurrentAnalysisResult(latestSummary.result);
+             setCurrentAnalysisResult(initialSummaryAnalysisResult);
         } 
 
+        if (!latestSummary && docData.processingStatus === 'completed') { 
+             console.log('No existing summary found, automatically triggering summary analysis...');
+             handleRunAnalysis('summary'); 
+        }
+
+        if (!isMounted) return; // Final check before setting derived state
+
+        // ... Set activeTab, documentUrl, summaryContent, currentAnalysisResult etc. ...
+
+        // Auto-trigger summary if needed
+        if (!validHistory.some((a: DocumentAnalysisResult) => a.analysisType === 'summary') && docData.processingStatus === 'completed' && isMounted) {
+          console.log('No existing summary found, automatically triggering summary analysis...');
+          handleRunAnalysis('summary'); // Assuming handleRunAnalysis checks isMounted internally or is safe
+        }
+
       } catch (err) {
-        console.error('Error loading document or history:', err);
-        setError(err instanceof Error ? err.message : 'Failed to load document data.');
+        if (isMounted) { // Only update state if mounted
+          console.error('Error loading document or history:', err);
+          setError(err instanceof Error ? err.message : 'Failed to load document data.');
+        }
       } finally {
-        setLoading(false);
+        if (isMounted) { // Only update state if mounted
+          setLoading(false);
+        }
       }
     };
+
     fetchAllData();
-  }, [documentId]);
+
+    // --- ADD CLEANUP FUNCTION --- 
+    return () => {
+      isMounted = false; // Set flag
+      // Clear context when component unmounts or documentId prop changes
+      console.log(`DocumentViewer cleanup for ${documentId}, clearing context.`);
+      setActiveDocumentContextId(null);
+    };
+    // Add setActiveDocumentContextId to dependency array
+  }, [documentId, setActiveEditorItem, setActiveDocumentContextId]);
+
+  // *** ADDED: useEffect for scrolling to active highlight ***
+  useEffect(() => {
+    if (activeHighlightPosition && editorRef.current) {
+      const editorInstance = editorRef.current.getEditor();
+      if (editorInstance) {
+        console.log('Scrolling to highlight:', activeHighlightPosition);
+        editorInstance
+          .chain()
+          .focus() // Focus the editor first
+          .setTextSelection(activeHighlightPosition) // Set selection to highlight bounds
+          .scrollIntoView() // Scroll the selection into view
+          .run();
+      }
+    }
+  }, [activeHighlightPosition]); // Run when activeHighlightPosition changes
 
   useEffect(() => {
     if (activeTab === 'preview' && !documentUrl && document?.storagePath && !loading) {
@@ -167,6 +379,8 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ documentId }) => {
     console.log(`Running analysis type: ${type} for doc: ${document.id}`);
 
     try {
+      // --- TEMPORARILY COMMENT OUT HISTORY CHECK ---
+      /*
       const existingResult = analysisHistory.find((a: DocumentAnalysisResult) => a.analysisType === type);
       if (existingResult) {
         console.log('Using existing analysis result from history.');
@@ -177,6 +391,8 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ documentId }) => {
         setIsAnalysisLoading(false);
         return; 
       }
+      */
+      // --- END TEMPORARY COMMENT ---
 
       const { data, error: analysisErr, analysisId } = await analyzeDocument({
         documentId: document.id,
@@ -192,8 +408,17 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ documentId }) => {
       console.log(`Analysis result for ${type}:`, data);
       setCurrentAnalysisResult(data);
 
-      if (type === 'summary' && typeof data === 'string') {
-        setSummaryContent(data);
+      // Refined: Handle both string and object summary results upon completion
+      if (type === 'summary') {
+          if (typeof data === 'object' && data !== null && 'summary' in data && 'summaryAnalysis' in data) {
+             // Handle structured summary object
+             setSummaryContent(data.summary); // Set tab content
+             // setCurrentAnalysisResult(data) was already called, so analyzer gets the object
+          } else if (typeof data === 'string') {
+             // Handle legacy string summary
+             setSummaryContent(data);
+             // setCurrentAnalysisResult(data) was already called, so analyzer gets the string
+          }
       }
 
       if (analysisId) {
@@ -219,6 +444,55 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ documentId }) => {
     }
   };
 
+  // Function to handle initiating chat from an analysis item
+  const handleInitiateChat = (analysisItem: any, analysisType: AnalysisType) => {
+    if (!document?.extractedText) {
+        console.warn('Cannot initiate chat without document text.');
+        // Maybe show a toast notification?
+        return; 
+    }
+    console.log(`Initiating chat for ${analysisType}:`, analysisItem);
+    setChatPreloadContext({
+      analysisItem,
+      analysisType,
+      documentText: document.extractedText,
+    });
+    // Maybe add logic here to switch focus to a chat panel if it's separate?
+  };
+
+  // *** ADDED: Callback for handling clicks on findings in the analyzer panel ***
+  const handleFindingClick = useCallback((position: HighlightPosition | null) => {
+    // Update active highlight position state
+    setActiveHighlightPosition(position);
+    
+    // If we're clearing the selection, just return
+    if (!position) return;
+    
+    // Add visual feedback that informs the user where to look
+    // This will be a brief flash of the highlight area
+    const flashTimeout = setTimeout(() => {
+      const editorInstance = editorRef.current?.getEditor();
+      if (editorInstance) {
+        try {
+          // Set selection to the position to give immediate visual feedback
+          editorInstance.commands.setTextSelection({
+            from: position.start,
+            to: position.end
+          });
+          
+          // Then clear the selection after a moment to return to normal view
+          setTimeout(() => {
+            editorInstance.commands.blur();
+          }, 800);
+        } catch (err) {
+          console.error('Error setting text selection:', err);
+        }
+      }
+    }, 100);
+    
+    return () => clearTimeout(flashTimeout);
+  }, []);
+
   // --- Render Functions ---
 
   const renderLoading = () => (
@@ -239,121 +513,22 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ documentId }) => {
   );
 
   const renderAnalysisPanel = () => {
-    if (isAnalysisLoading) {
+    if (isAnalysisLoading && !currentAnalysisResult) {
       return <div className="p-4 text-center"><Spinner size="sm" /> Loading analysis...</div>;
     }
-    if (analysisError) {
-      return <Alert variant="destructive" className="m-4"><AlertDescription>{analysisError}</AlertDescription></Alert>;
-    }
-    if (!currentAnalysisResult) {
+    if (!selectedAnalysisType && !isAnalysisLoading) {
       return <div className="p-4 text-center text-muted-foreground">Select an analysis type to run.</div>;
     }
 
-    // Handle different analysis types
-    switch (selectedAnalysisType) {
-      case 'entities':
-        const entities = (currentAnalysisResult as any)?.entities as Entity[];
-        if (!entities || entities.length === 0) return <div className="p-4 text-muted-foreground">No entities found.</div>;
-        return (
-          <ScrollArea className="h-full">
-            <ul className="p-4 space-y-2 text-sm">
-              {entities.map((entity, index) => (
-                <li key={index} className="border-b pb-1 mb-1">
-                  <span className="font-medium">{entity.text}</span> 
-                  <Badge variant="secondary" className="ml-2">{entity.type}</Badge>
-                </li>
-              ))}
-            </ul>
-          </ScrollArea>
-        );
-      case 'clauses':
-        const clauses = (currentAnalysisResult as any)?.clauses as Clause[];
-        if (!clauses || clauses.length === 0) return <div className="p-4 text-muted-foreground">No key clauses identified.</div>;
-        return (
-          <ScrollArea className="h-full">
-            <ul className="p-4 space-y-3 text-sm">
-              {clauses.map((clause, index) => (
-                <li key={index} className="border rounded p-2 bg-muted/30">
-                  <p className="font-semibold mb-1">{clause.title || `Clause ${index + 1}`}</p>
-                  <p className="text-xs text-muted-foreground truncate">{clause.text}</p>
-                </li>
-              ))}
-            </ul>
-          </ScrollArea>
-        );
-      case 'risks':
-        const risks = (currentAnalysisResult as any)?.risks as Risk[];
-        if (!risks || risks.length === 0) return <div className="p-4 text-muted-foreground">No risks identified.</div>;
-        
-        const getRiskBadgeVariant = (severity: Risk['severity']): BadgeVariant => {
-            switch (severity) {
-                case 'Critical': return 'danger';
-                case 'High': return 'danger';
-                case 'Medium': return 'warning';
-                case 'Low': return 'success';
-                default: return 'secondary';
-            }
-        };
-        const getRiskIconColor = (severity: Risk['severity']): string => {
-             switch (severity) {
-                case 'Critical': return 'text-red-600';
-                case 'High': return 'text-orange-500';
-                case 'Medium': return 'text-yellow-500';
-                case 'Low': return 'text-green-500';
-                default: return 'text-muted-foreground';
-            }
-        };
-
-        return (
-          <ScrollArea className="h-full">
-            <ul className="p-4 space-y-3 text-sm">
-              {risks.map((risk, index) => (
-                <li key={index} className="border rounded p-2">
-                  <p className="font-medium mb-1 flex items-center">
-                     <ShieldAlert size={14} className={cn('mr-1.5', getRiskIconColor(risk.severity))} />
-                     {risk.explanation}
-                  </p>
-                  <Badge variant={getRiskBadgeVariant(risk.severity)} className="text-xs capitalize">{risk.severity}</Badge>
-                   {(risk as any).suggestion && <p className="text-xs text-muted-foreground mt-1 pl-5 italic">Suggestion: {(risk as any).suggestion}</p>} 
-                </li>
-              ))}
-            </ul>
-          </ScrollArea>
-        );
-       case 'timeline':
-        const timelineEvents = (currentAnalysisResult as any)?.timeline as TimelineEvent[];
-        if (!timelineEvents || timelineEvents.length === 0) return <div className="p-4 text-muted-foreground">No timeline events extracted.</div>;
-        return (
-           <ScrollArea className="h-full">
-              <ul className="p-4 space-y-3 text-sm">
-                {timelineEvents.sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime()).map((event, index) => (
-                  <li key={index} className="border-b pb-2">
-                     <p className="font-semibold mb-0.5">{new Date(event.date).toLocaleDateString()}</p>
-                     {(event as any).type && <p className="text-muted-foreground text-xs mb-1">{(event as any).type}</p>}
-                     <p>{event.event}</p>
-                  </li>
-                ))}
-              </ul>
-           </ScrollArea>
-         );
-       case 'privilegedTerms':
-         const terms = (currentAnalysisResult as any)?.result as string[]; 
-         if (!terms || !Array.isArray(terms) || terms.length === 0) return <div className="p-4 text-muted-foreground">No potentially privileged terms detected.</div>;
-         return (
-            <ScrollArea className="h-full">
-               <ul className="p-4 space-y-1 text-sm">
-                 <p className="text-xs text-muted-foreground mb-2">The following terms were flagged as potentially privileged. Review them in context.</p>
-                 {terms.map((term, index) => (
-                   <li key={index} className="border-b py-1">
-                     <span className="font-mono text-primary">{term}</span>
-                   </li>
-                 ))}
-               </ul>
-            </ScrollArea>
-          );
-      default:
-        return <div className="p-4 text-muted-foreground">Selected analysis type cannot be displayed here.</div>;
-    }
+    return (
+      <DocumentAnalyzer
+        resultData={currentAnalysisResult}
+        isLoading={isAnalysisLoading}
+        error={analysisError}
+        onInitiateChat={handleInitiateChat}
+        onFindingClick={handleFindingClick}
+      />
+    );
   };
 
   const renderTextContent = () => {
@@ -373,21 +548,16 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ documentId }) => {
       <div className="flex h-full">
         <div className="flex-1 h-full border-r overflow-hidden"> 
           <TiptapEditor
+              ref={editorRef} 
               content={document.extractedText || ''} 
               editable={false}
               className="h-full border-0 shadow-none rounded-none"
               placeholder="Loading document text..."
+              allHighlights={allHighlights}
+              activeHighlightPosition={activeHighlightPosition}
               analysisResult={selectedAnalysisType === 'privilegedTerms' ? { type: 'privilegedTerms', result: (currentAnalysisResult as any)?.result } : undefined}
           />
         </div>
-        <ScrollArea className="w-[350px] flex-shrink-0 border-l overflow-y-auto bg-muted/10">
-            <div className="p-2 sticky top-0 bg-background z-10 border-b">
-                <h3 className="text-sm font-semibold mb-1">Analysis Results</h3>
-            </div>
-            <div className="p-2">
-                {renderAnalysisPanel()}
-            </div>
-        </ScrollArea>
       </div>
     );
   };
@@ -421,6 +591,7 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ documentId }) => {
              <div className="flex h-full">
                 <div className="flex-1 h-full p-1">
                   <TiptapEditor
+                      ref={editorRef}
                       content={document.extractedText}
                       editable={false}
                       className="h-full border-0 shadow-none"
@@ -502,6 +673,14 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ documentId }) => {
        </div>
       </div>
 
+      {/* Chat Hint */}
+      {!loading && !error && document && (
+          <p className="text-sm text-muted-foreground italic text-center mb-3 -mt-2">
+              <Info className="h-3.5 w-3.5 mr-1 inline-block relative -top-px"/>
+              Need insights? Ask about this document in the AI Chat.
+          </p>
+      )}
+
       {/* Main Content Area */} 
       <div className="flex-grow flex overflow-hidden">
           {/* Left Panel: Editor/Preview */} 
@@ -557,10 +736,6 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ documentId }) => {
                            </div>
                          )}
                        </ScrollArea>
-                     </TabsContent>
-
-                     <TabsContent value="analysis" className="flex-1 h-full overflow-hidden mt-0 border rounded-b-md bg-muted/30">
-                        {renderAnalysisPanel()} 
                      </TabsContent>
                  </Tabs>
               )}

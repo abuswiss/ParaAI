@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { handleGenerateTimelineStream } from '@/services/chatService'; 
+import { handleGenerateTimelineStream } from '@/services/timelineService'; 
 import { Button } from '@/components/ui/Button';
 import { Spinner } from '@/components/ui/Spinner';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/Alert";

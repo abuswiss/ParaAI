@@ -131,7 +131,7 @@ export const uploadDocument = async (
             storage_path: filePath,
             content_type: file.type,
             file_type: file.name.split('.').pop() || '',
-            size: file.size,
+            file_size: file.size,
             processing_status: 'uploaded' as ProcessingStatus, // Use the defined type
             is_deleted: false,
             uploaded_at: new Date().toISOString()

@@ -28,3 +28,4 @@ export * from './radio-group';
 export * from './breadcrumb';
 export * from './skeleton';
 export * from './Modal';
+export { Progress } from './progress';

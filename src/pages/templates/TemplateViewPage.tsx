@@ -1,21 +1,28 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, Link } from 'react-router-dom';
-import { useSetAtom } from 'jotai';
+import { useParams, Link, useNavigate } from 'react-router-dom';
+import { useSetAtom, useAtomValue } from 'jotai';
 import * as templateService from '@/services/templateService';
 import { DocumentTemplate } from '@/services/templateService';
 import { Button } from '@/components/ui/Button';
 import { Spinner } from '@/components/ui/Spinner';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { AlertCircle, ArrowLeft, Edit, Play } from 'lucide-react';
 import ReadOnlyEditor from '@/components/documents/ReadOnlyEditor';
-import { fillTemplateModalTriggerAtom } from '@/atoms/appAtoms';
+import { activeCaseIdAtom } from '@/atoms/appAtoms';
+import { toast } from 'sonner';
+import { templateCreateDraftModalTriggerAtom } from '@/atoms/templateAtoms';
 
 const TemplateViewPage: React.FC = () => {
   const { templateId } = useParams<{ templateId: string }>();
+  const navigate = useNavigate();
   const [template, setTemplate] = useState<DocumentTemplate | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const triggerFillTemplateModal = useSetAtom(fillTemplateModalTriggerAtom);
+  const activeCaseId = useAtomValue(activeCaseIdAtom);
+  const triggerCreateDraftModal = useSetAtom(
+    templateCreateDraftModalTriggerAtom
+  );
 
   useEffect(() => {
     if (!templateId) {
@@ -42,14 +49,15 @@ const TemplateViewPage: React.FC = () => {
 
   const handleUseTemplate = () => {
       if (template) {
-          console.log('[TemplateViewPage] Triggering fill modal for:', template.name);
-          triggerFillTemplateModal({ 
-              id: template.id, 
-              name: template.name, 
-              content: template.content 
-          });
+          if (!activeCaseId) {
+              toast.error("Please select an active case before using a template.");
+              return;
+          }
+          console.log(`Navigating to create document from template: ${template.id} for case: ${activeCaseId}`);
+          navigate(`/edit/document/new?templateId=${template.id}&caseId=${activeCaseId}`);
       } else {
           console.error('Cannot use template, data not loaded.');
+          toast.error('Template data is not loaded, cannot use template.');
       }
   };
 
@@ -109,11 +117,13 @@ const TemplateViewPage: React.FC = () => {
             </div>
         </div>
         <div className="flex space-x-2 flex-shrink-0 mt-1">
-             <Button variant="secondary" asChild>
-                 <Link to={`/edit/template/${template.id}`}><Edit className="mr-2 h-4 w-4"/> Edit</Link>
+             <Button onClick={() => navigate(`/edit/template/${templateId}`)} size="sm" variant="outline" disabled={isLoading || !!error}>
+                <Edit className="h-4 w-4 mr-1" />
+                Edit Details
              </Button>
-             <Button variant="primary" onClick={handleUseTemplate}>
-                 <Play className="mr-2 h-4 w-4"/> Use Template
+             <Button onClick={handleUseTemplate} size="sm" variant="default" disabled={isLoading || !!error || !activeCaseId} title={!activeCaseId ? "Select a case first" : "Use Template"}>
+                 <Play className="h-4 w-4 mr-1" />
+                 Use Template
              </Button>
         </div>
       </div>

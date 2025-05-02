@@ -6,10 +6,11 @@ import {
   handleFindClauseStream,
   handleExplainTermStream,
   handleFlagPrivilegedTermsStream,
-  handlePerplexityAgent, 
+  handlePerplexityAgent,
   handleRewriteStream,
   handleSummarizeStream,
-} from '../services/chatService';
+  handleGenericChatStream,
+} from '../services/agentService';
 import { analyzeDocument } from '../services/documentAnalysisService';
 import * as templateService from '../services/templateService';
 import { NavigateFunction } from 'react-router-dom';
@@ -18,12 +19,14 @@ import { TaskStatus } from '@/atoms/appAtoms';
 import { PerplexitySource } from '@/types/sources'; 
 import { v4 as uuidv4 } from 'uuid'; 
 
-// Define type for the params object
+// Define type for the params object including new fields
 interface DispatcherParams {
   wsContext?: (type: string, payload: any) => void; 
   addTask?: (task: Omit<BackgroundTask, 'createdAt'>) => void;
   updateTask?: (update: { id: string; status?: TaskStatus; progress?: number; description?: string }) => void;
   removeTask?: (taskId: string) => void;
+  modelId?: string;
+  useWebSearch?: boolean;
 }
 
 // Define a specific return type for dispatcher actions
@@ -60,12 +63,22 @@ export async function handleUserTurn({
   params: DispatcherParams; 
 }): Promise<DispatcherResponse> {
   try {  
-    console.log("Dispatcher received task:", task, "with caseId:", caseId);
+    console.log("Dispatcher received task:", task, "with caseId:", caseId, "Params:", params);
 
-    // Extract task atom setters from params, providing dummy fallbacks if missing
-    const addTask = params.addTask || (() => console.warn('addTask not provided to dispatcher'));
-    const updateTask = params.updateTask || (() => console.warn('updateTask not provided to dispatcher'));
-    const removeTask = params.removeTask || (() => console.warn('removeTask not provided to dispatcher'));
+    // Extract task atom setters and model/search params
+    const addTask = params.addTask || (() => console.warn('addTask not provided'));
+    const updateTask = params.updateTask || (() => console.warn('updateTask not provided'));
+    const removeTask = params.removeTask || (() => console.warn('removeTask not provided'));
+    const modelId = params.modelId;
+    const useWebSearch = params.useWebSearch ?? false;
+    
+    // Ensure documentContext is always an array or undefined for consistency
+    const finalDocumentContext = Array.isArray(documentContext) 
+        ? documentContext 
+        : (documentContext ? [documentContext] : undefined);
+
+    // Generate a unique ID for potential background task tracking
+    const taskId = (typeof addTask === 'function' && typeof updateTask === 'function' && typeof removeTask === 'function') ? uuidv4() : undefined;
 
     // Determine target document ID from task or context
     const getTargetDocId = (): string | null => {
@@ -406,9 +419,23 @@ export async function handleUserTurn({
       }
     }
 
-    console.warn("Dispatcher couldn't handle task:", task);
-    onChunk('Sorry, I could not process that request.');
-    return { success: false, error: new Error('Unhandled task type') };
+    // 2. Handle Generic Chat (if no specific command matched)
+    console.log("Routing to handleGenericChatStream");
+    if (taskId) {
+      addTask({ id: taskId, status: 'running', description: `Generating response (${modelId || 'default'})...` });
+    }
+    return await handleGenericChatStream(
+      message,
+      conversationId,
+      onChunk,
+      modelId,
+      useWebSearch,
+      caseId,
+      finalDocumentContext,
+      taskId,
+      updateTask,
+      removeTask
+    );
 
   } catch (error) {
     console.error("Error in handleUserTurn:", error);

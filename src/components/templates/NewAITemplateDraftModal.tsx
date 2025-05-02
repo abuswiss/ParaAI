@@ -25,14 +25,26 @@ import {
   SelectTrigger, 
   SelectValue 
 } from '@/components/ui/select'; // Import Select
-import { toast } from 'react-hot-toast';
+import { useToast } from "@/hooks/use-toast"; // Changed import from react-hot-toast
 import { Alert, AlertDescription } from '@/components/ui/alert'; // Import Alert
+import { cn } from '@/lib/utils';
+import { Check, Sparkles } from 'lucide-react';
 
 // Define common legal template types/categories
 const TEMPLATE_CATEGORIES = [
   'Contract', 'Motion', 'Pleading', 'Letter', 'Memorandum', 
   'Agreement', 'Affidavit', 'Discovery Request', 'Order', 'Other'
 ];
+
+// Enum for tracking generation progress steps
+enum GenerationStep {
+  NotStarted = 0,
+  ProcessingPrompt = 1,
+  GeneratingTemplate = 2,
+  ExtractingPlaceholders = 3,
+  SavingTemplate = 4,
+  Complete = 5
+}
 
 interface NewAITemplateDraftModalProps {
   isOpen: boolean;
@@ -46,7 +58,9 @@ const NewAITemplateDraftModal: React.FC<NewAITemplateDraftModalProps> = ({ isOpe
   const [instructions, setInstructions] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [currentStep, setCurrentStep] = useState<GenerationStep>(GenerationStep.NotStarted);
   const { user } = useAuth(); // Get user for function call
+  const { toast } = useToast(); // Added useToast hook call
 
   // Reset state when modal opens
   useEffect(() => {
@@ -55,11 +69,20 @@ const NewAITemplateDraftModal: React.FC<NewAITemplateDraftModalProps> = ({ isOpe
       setInstructions('');
       setIsLoading(false);
       setError(null);
+      setCurrentStep(GenerationStep.NotStarted);
     } else {
         // Clear potentially sensitive data when closing
         setInstructions(''); 
     }
   }, [isOpen]);
+
+  // Helper to update progress state with delay to improve UX
+  const updateProgress = (step: GenerationStep) => {
+    // Small delay to make progress feel more natural
+    setTimeout(() => {
+      setCurrentStep(step);
+    }, 400);
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -71,17 +94,24 @@ const NewAITemplateDraftModal: React.FC<NewAITemplateDraftModalProps> = ({ isOpe
         setError('Please select a template category.');
         return;
     }
-     if (!user) {
+    if (!user) {
         setError('User not authenticated. Please log in.');
         return;
     }
 
     setIsLoading(true);
     setError(null);
-    const toastId = toast.loading('Generating AI template...');
+    setCurrentStep(GenerationStep.ProcessingPrompt);
+    
+    const toastId = toast({ 
+        description: "Starting AI template generation...", 
+    });
 
     try {
       console.log("Invoking create-template-from-ai function...");
+      
+      // Simulate brief processing time
+      updateProgress(GenerationStep.GeneratingTemplate);
       
       const { data, error: invokeError } = await supabase.functions.invoke(
           'create-template-from-ai',
@@ -92,38 +122,126 @@ const NewAITemplateDraftModal: React.FC<NewAITemplateDraftModalProps> = ({ isOpe
 
       if (invokeError) throw invokeError;
       
+      // Once we get data back, update to extracting placeholders step
+      updateProgress(GenerationStep.ExtractingPlaceholders);
+      
       const result = data as { success: boolean, templateId?: string, error?: string };
 
       if (!result || !result.success) {
           throw new Error(result?.error || 'AI template creation failed.');
       }
       
+      // Show saving step before success state
+      updateProgress(GenerationStep.SavingTemplate);
+      
       if (!result.templateId) {
           throw new Error('Template created, but ID was not returned.');
       }
 
-      console.log("AI template created successfully:", result.templateId);
-      toast.success('AI template created!', { id: toastId });
-
-      if (onSuccess) {
-        onSuccess(result.templateId);
-      }
-      handleClose(true); // Close and indicate refresh needed
-
+      // Small delay before showing completion to improve perceived responsiveness
+      setTimeout(() => {
+        updateProgress(GenerationStep.Complete);
+        
+        console.log("AI template created successfully:", result.templateId);
+        
+        // Update toast on success
+        toast({
+            description: "AI template created successfully!",
+            variant: 'success',
+            id: toastId.id,
+        });
+        
+        if (onSuccess) {
+          onSuccess(result.templateId);
+        }
+        
+        // Small delay before closing to let user see completion state
+        setTimeout(() => handleClose(true), 1000);
+      }, 600);
+      
     } catch (err) {
       console.error('Error during AI template creation:', err);
       const errorMessage = err instanceof Error ? err.message : 'An unknown error occurred.';
       setError(errorMessage);
-      toast.error(`Error: ${errorMessage}`, { id: toastId });
+      setCurrentStep(GenerationStep.NotStarted);
+      
+      // Update toast on error
+      toast({
+          title: "Error",
+          description: errorMessage,
+          variant: 'destructive',
+          id: toastId.id,
+      });
     } finally {
-      setIsLoading(false);
+      if (currentStep !== GenerationStep.Complete) {
+        setIsLoading(false);
+      }
     }
   };
   
   const handleClose = useCallback((refreshNeeded = false) => {
-      if (isLoading) return; 
+      if (isLoading && currentStep !== GenerationStep.Complete) return; 
       onClose(refreshNeeded);
-  }, [isLoading, onClose]);
+  }, [isLoading, onClose, currentStep]);
+
+  // Progress steps display component
+  const ProgressSteps = () => {
+    const steps = [
+      { label: "Processing Prompt", step: GenerationStep.ProcessingPrompt },
+      { label: "Generating Template", step: GenerationStep.GeneratingTemplate },
+      { label: "Extracting Placeholders", step: GenerationStep.ExtractingPlaceholders },
+      { label: "Saving Template", step: GenerationStep.SavingTemplate },
+    ];
+    
+    return (
+      <div className="w-full py-4">
+        <div className="flex justify-between mb-2">
+          {steps.map((step, index) => (
+            <div key={index} className="flex flex-col items-center">
+              <div 
+                className={cn(
+                  "w-8 h-8 rounded-full flex items-center justify-center text-sm border",
+                  currentStep >= step.step
+                    ? "bg-primary text-primary-foreground border-primary"
+                    : "bg-muted border-muted-foreground text-muted-foreground"
+                )}
+              >
+                {currentStep > step.step ? (
+                  <Check className="h-4 w-4" />
+                ) : currentStep === step.step ? (
+                  <Spinner size="xs" />
+                ) : (
+                  index + 1
+                )}
+              </div>
+              <span className={cn(
+                "text-xs mt-1 text-center", 
+                currentStep >= step.step ? "text-primary" : "text-muted-foreground"
+              )}>
+                {step.label}
+              </span>
+            </div>
+          ))}
+        </div>
+        <div className="relative mt-2">
+          <div className="absolute inset-0 flex items-center">
+            <div className="w-full border-t border-muted-foreground/30"></div>
+          </div>
+          <div className="relative flex justify-between">
+            {steps.map((step, index) => (
+              <div 
+                key={index}
+                className={cn(
+                  "w-4 h-0.5",
+                  currentStep > step.step ? "bg-primary" : "bg-muted-foreground/30"
+                )}
+              />
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && handleClose()}> 
@@ -135,62 +253,93 @@ const NewAITemplateDraftModal: React.FC<NewAITemplateDraftModalProps> = ({ isOpe
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit}>
-          <div className="grid gap-4 py-4">
-            
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="category" className="text-right">
-                Category
-              </Label>
-              {/* Shadcn Select Component */}
-              <Select 
-                value={category}
-                onValueChange={setCategory} 
-                disabled={isLoading}
-              >
-                <SelectTrigger id="category" className="col-span-3">
-                  <SelectValue placeholder="Select category" />
-                </SelectTrigger>
-                <SelectContent>
-                  {TEMPLATE_CATEGORIES.map((cat) => (
-                    <SelectItem key={cat} value={cat}>{cat}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+          {isLoading ? (
+            // Show progress steps when loading
+            <div className="py-8">
+              <ProgressSteps />
+              
+              {currentStep === GenerationStep.Complete && (
+                <div className="flex flex-col items-center justify-center mt-4 text-center">
+                  <div className="bg-green-100 text-green-800 p-3 rounded-full mb-2">
+                    <Check className="h-6 w-6" />
+                  </div>
+                  <h3 className="text-lg font-medium">Template Created!</h3>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    Your new template has been created successfully.
+                  </p>
+                </div>
+              )}
             </div>
+          ) : (
+            // Show form when not loading
+            <div className="grid gap-4 py-4">
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label htmlFor="category" className="text-right">
+                  Category
+                </Label>
+                {/* Shadcn Select Component */}
+                <Select 
+                  value={category}
+                  onValueChange={setCategory} 
+                  disabled={isLoading}
+                >
+                  <SelectTrigger id="category" className="col-span-3">
+                    <SelectValue placeholder="Select category" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {TEMPLATE_CATEGORIES.map((cat) => (
+                      <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
 
-            <div className="grid grid-cols-4 items-start gap-4">
-              <Label htmlFor="instructions" className="text-right pt-2">
-                Instructions
-              </Label>
-              <Textarea
-                id="instructions"
-                value={instructions}
-                onChange={(e) => setInstructions(e.target.value)}
-                placeholder="e.g., Draft a simple Non-Disclosure Agreement (NDA) between two parties..."
-                required
-                rows={6} // Increased rows
-                className="col-span-3"
-                disabled={isLoading}
-              />
-            </div>
+              <div className="grid grid-cols-4 items-start gap-4">
+                <Label htmlFor="instructions" className="text-right pt-2">
+                  Instructions
+                </Label>
+                <Textarea
+                  id="instructions"
+                  value={instructions}
+                  onChange={(e) => setInstructions(e.target.value)}
+                  placeholder="e.g., Draft a simple Non-Disclosure Agreement (NDA) between two parties..."
+                  required
+                  rows={6} // Increased rows
+                  className="col-span-3"
+                  disabled={isLoading}
+                />
+              </div>
 
-            {error && (
+              {error && (
                 <Alert variant="destructive">
-                    <Icons.Alert className="h-4 w-4" /> 
-                    <AlertDescription>{error}</AlertDescription>
+                  <Icons.Alert className="h-4 w-4" /> 
+                  <AlertDescription>{error}</AlertDescription>
                 </Alert>
-            )}
-          </div>
+              )}
+            </div>
+          )}
+          
           <DialogFooter>
-            <DialogClose asChild>
-                 <Button type="button" variant="outline" disabled={isLoading}>
-                     Cancel
-                 </Button>
-            </DialogClose>
-            <Button type="submit" disabled={isLoading}>
-              {isLoading ? <Spinner size="sm" className="mr-2" /> : <Icons.Sparkles className="mr-2 h-4 w-4" />}
-              Generate Template
-            </Button>
+            {!isLoading && (
+              <>
+                <DialogClose asChild>
+                  <Button type="button" variant="outline" disabled={isLoading}>
+                    Cancel
+                  </Button>
+                </DialogClose>
+                <Button type="submit" disabled={isLoading}>
+                  <Sparkles className="mr-2 h-4 w-4" />
+                  Generate Template
+                </Button>
+              </>
+            )}
+            
+            {isLoading && currentStep === GenerationStep.Complete && (
+              <Button type="button" onClick={() => handleClose(true)}>
+                <Check className="mr-2 h-4 w-4" />
+                Close
+              </Button>
+            )}
           </DialogFooter>
         </form>
       </DialogContent>

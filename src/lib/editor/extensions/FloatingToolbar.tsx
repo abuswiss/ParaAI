@@ -52,8 +52,10 @@ interface AIState {
 }
 
 export interface FloatingToolbarOptions {
-  onSummarize?: AIFunction;
-  onRewrite?: (text: string, instructions?: string, context?: string, mode?: RewriteMode) => Promise<string>;
+  onSummarize?: (editor: Editor) => Promise<void> | void;
+  onRewrite?: (editor: Editor, mode?: RewriteMode) => Promise<void> | void;
+  isSummarizing?: boolean;
+  isRewriting?: boolean;
 }
 
 type RewriteMode = 'improve' | 'shorten' | 'expand' | 'professional' | 'formal' | 'simple';
@@ -62,54 +64,21 @@ const FloatingToolbarComponent: React.FC<{ editor: Editor, options: FloatingTool
     editor, 
     options 
 }) => {
-  const { onSummarize, onRewrite } = options;
+  const { onSummarize, onRewrite, isSummarizing, isRewriting } = options;
   const { triggerSuggestion, suggestionState } = useInlineSuggestions();
   const isMobile = useMediaQuery("(max-width: 640px)")
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
-  const handleAIAction = useCallback(async (action: 'summarize' | 'rewrite', params?: { mode?: RewriteMode }) => {
-    if (!editor) return;
-    
-    let aiFunction: AIFunction | undefined;
-    if (action === 'summarize') aiFunction = onSummarize;
-    else if (action === 'rewrite' && onRewrite) aiFunction = (text) => onRewrite(text, undefined, undefined, params?.mode);
-    else return;
+  const handleSummarizeClick = useCallback(() => {
+      if (editor && onSummarize) {
+          onSummarize(editor);
+      }
+  }, [editor, onSummarize]);
 
-    const { state } = editor;
-    const { from, to } = state.selection;
-    if (from === to) return;
-    const selectedText = state.doc.textBetween(from, to);
-    if (!selectedText) return;
-    
-    setIsLoading(true);
-    setError(null);
-
-    try {
-        let result;
-         if (action === 'rewrite' && onRewrite) {
-            result = await onRewrite(selectedText, undefined, undefined, params?.mode);
-        } else if (action === 'summarize' && onSummarize) {
-            result = await onSummarize(selectedText);
-        } else {
-            throw new Error('No AI function provided for action');
-        }
-        
-        if (action === 'rewrite' && result) {
-            triggerSuggestion({ from, to }, selectedText, result);
-        } else if (action === 'summarize' && result) {
-            console.log("Summary result:", result);
-        } else {
-            throw new Error('AI returned empty content.');
-        }
-
-    } catch (err: any) {
-        console.error(`Error during AI ${action}:`, err);
-        setError(err.message || `Failed to ${action}`);
-    } finally {
-        setIsLoading(false);
-    } 
-  }, [editor, onSummarize, onRewrite, triggerSuggestion]);
+  const handleRewriteClick = useCallback((mode: RewriteMode) => {
+      if (editor && onRewrite) {
+          onRewrite(editor, mode);
+      }
+  }, [editor, onRewrite]);
 
   useEffect(() => {
     if (!editor?.options.element || !isMobile) return
@@ -128,8 +97,8 @@ const FloatingToolbarComponent: React.FC<{ editor: Editor, options: FloatingTool
     if (!editor || !editor.isEditable) return false;
     const { from, to } = editor.state.selection;
     const showForSelection = from !== to;
-    return showForSelection && !suggestionState.isActive && !isLoading && !error;
-  }, [editor, suggestionState.isActive, isLoading, error]);
+    return showForSelection && !suggestionState.isActive;
+  }, [editor, suggestionState.isActive]);
 
   if (!editor) return null
 
@@ -145,7 +114,7 @@ const FloatingToolbarComponent: React.FC<{ editor: Editor, options: FloatingTool
         <OrderedListToolbar />
         <BlockquoteToolbar />
         <Separator orientation="vertical" className="h-6 mx-1" /> 
-        <SummarizeButton onClick={() => handleAIAction('summarize')} disabled={!onSummarize || isLoading} />
+        <SummarizeButton onClick={handleSummarizeClick} disabled={!onSummarize || isSummarizing || isRewriting} />
         <DropdownMenu>
             <TooltipProvider>
               <Tooltip>
@@ -155,7 +124,7 @@ const FloatingToolbarComponent: React.FC<{ editor: Editor, options: FloatingTool
                         variant="ghost" 
                         size="sm" 
                         className="h-8 w-8 p-1.5" 
-                        disabled={!onRewrite || isLoading}
+                        disabled={!onRewrite || isSummarizing || isRewriting}
                         aria-label="Rewrite options"
                     >
                         <PilcrowSquare className="h-4 w-4" />
@@ -168,13 +137,13 @@ const FloatingToolbarComponent: React.FC<{ editor: Editor, options: FloatingTool
               </Tooltip>
             </TooltipProvider>
             <DropdownMenuContent align="start">
-                 <DropdownMenuItem onSelect={() => handleAIAction('rewrite', { mode: 'improve' })} disabled={isLoading}>Improve Writing</DropdownMenuItem>
-                 <DropdownMenuItem onSelect={() => handleAIAction('rewrite', { mode: 'shorten' })} disabled={isLoading}>Make Shorter</DropdownMenuItem>
-                 <DropdownMenuItem onSelect={() => handleAIAction('rewrite', { mode: 'expand' })} disabled={isLoading}>Expand</DropdownMenuItem>
+                 <DropdownMenuItem onSelect={() => handleRewriteClick('improve')} disabled={isSummarizing || isRewriting}>Improve Writing</DropdownMenuItem>
+                 <DropdownMenuItem onSelect={() => handleRewriteClick('shorten')} disabled={isSummarizing || isRewriting}>Make Shorter</DropdownMenuItem>
+                 <DropdownMenuItem onSelect={() => handleRewriteClick('expand')} disabled={isSummarizing || isRewriting}>Expand</DropdownMenuItem>
                  <DropdownMenuSeparator />
-                 <DropdownMenuItem onSelect={() => handleAIAction('rewrite', { mode: 'professional' })} disabled={isLoading}>Professional Tone</DropdownMenuItem>
-                 <DropdownMenuItem onSelect={() => handleAIAction('rewrite', { mode: 'formal' })} disabled={isLoading}>Formal Tone</DropdownMenuItem>
-                 <DropdownMenuItem onSelect={() => handleAIAction('rewrite', { mode: 'simple' })} disabled={isLoading}>Simplify Language</DropdownMenuItem>
+                 <DropdownMenuItem onSelect={() => handleRewriteClick('professional')} disabled={isSummarizing || isRewriting}>Professional Tone</DropdownMenuItem>
+                 <DropdownMenuItem onSelect={() => handleRewriteClick('formal')} disabled={isSummarizing || isRewriting}>Formal Tone</DropdownMenuItem>
+                 <DropdownMenuItem onSelect={() => handleRewriteClick('simple')} disabled={isSummarizing || isRewriting}>Simplify Language</DropdownMenuItem>
             </DropdownMenuContent>
         </DropdownMenu>
     </ToolbarProvider>
@@ -216,8 +185,20 @@ export const FloatingToolbar = Extension.create<FloatingToolbarOptions>({
     return {
       onSummarize: undefined,
       onRewrite: undefined,
+      isSummarizing: false,
+      isRewriting: false,
     };
   },
+
+  addProseMirrorPlugins() {
+    return [];
+  },
+
+  // This function is needed to render the component with React
+  onCreate() {
+    // The extension is now created and can be used
+    console.log('FloatingToolbar extension created');
+  }
 });
 
 export { FloatingToolbarComponent };

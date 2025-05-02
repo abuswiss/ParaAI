@@ -12,10 +12,28 @@ import {
 } from 'lucide-react';
 import './DocumentEditor.css';
 import InlineAIPopup from '@/components/editor/InlineAIPopup';
-import { handleRewriteStream, handleSummarizeStream } from '@/services/chatService';
+import { handleRewriteStream, handleSummarizeStream } from '@/services/agentService';
 import { toast } from 'sonner';
 import { EditorToolbar } from '@/components/editor/EditorToolbar';
 import { Button } from "@/components/ui/Button";
+
+/**
+ * DocumentEditor
+ *
+ * This component provides a rich text editor for legal documents, with integrated AI-powered features.
+ *
+ * Key AI Features:
+ * - When the user selects text, a contextual popup (InlineAIPopup) can appear, offering:
+ *    - "Ask AI" (send selection to chat)
+ *    - "Rewrite" (stream AI rewrite of selection)
+ *    - "Summarize" (stream AI summary of selection)
+ * - The popup manages its own loading, error, and content state, and allows the user to replace or copy the AI-generated text.
+ * - Popup position is dynamically calculated based on the current selection.
+ * - All AI actions are streamed and update the popup in real time.
+ *
+ * The logic for showing, hiding, and updating the popup is managed via local state and several useCallback handlers.
+ * This design keeps the editor responsive and interactive, while encapsulating AI interactions in a single, user-friendly UI element.
+ */
 
 export type ActiveEditorItem = AppActiveEditorItem | { type: 'template'; id: string };
 
@@ -80,6 +98,30 @@ const DocumentEditor = forwardRef<DocumentEditorRef, DocumentEditorProps>(
       },
     });
 
+    useEffect(() => {
+        if (editor && initialContent !== editor.getHTML()) {
+            editor.commands.setContent(initialContent);
+            onDirtyChange(false); 
+        }
+    }, [initialContent, editor]);
+
+    useEffect(() => {
+      if (!currentSelectionRange && showAIPopup) {
+        handleCloseAIPopup();
+      }
+    }, [currentSelectionRange, showAIPopup, handleCloseAIPopup]);
+
+    useEffect(() => {
+      if (!editor) return;
+      const handleBlur = () => {
+        handleCloseAIPopup();
+      };
+      editor.on('blur', handleBlur);
+      return () => {
+        editor.off('blur', handleBlur);
+      };
+    }, [editor, handleCloseAIPopup]);
+
     useImperativeHandle(ref, () => ({
       insertContent: (content: string) => {
         editor?.chain().focus().insertContent(content).run();
@@ -89,13 +131,6 @@ const DocumentEditor = forwardRef<DocumentEditorRef, DocumentEditorProps>(
       },
       editor: editor,
     }), [editor]);
-
-    useEffect(() => {
-        if (editor && initialContent !== editor.getHTML()) {
-            editor.commands.setContent(initialContent);
-            onDirtyChange(false); 
-        }
-    }, [initialContent, editor, onDirtyChange]);
 
     const calculatePopupPosition = useCallback(() => {
       if (!editor || !editor.view || !currentSelectionRange) return;
@@ -128,7 +163,11 @@ const DocumentEditor = forwardRef<DocumentEditorRef, DocumentEditorProps>(
 
       try {
           const handleChunk = (chunk: string) => {
-              setAiPopupContent((prev) => (prev ?? '') + chunk);
+              if (typeof chunk === 'string') {
+                  setAiPopupContent((prev) => (prev ?? '') + chunk);
+              } else {
+                  console.warn('Received non-string chunk from AI:', chunk);
+              }
           };
           const result = await handleRewriteStream(selectedText, handleChunk);
           if (!result.success || result.error) {
@@ -155,7 +194,11 @@ const DocumentEditor = forwardRef<DocumentEditorRef, DocumentEditorProps>(
 
       try {
           const handleSummaryChunk = (chunk: string) => {
-              setAiPopupContent((prev) => (prev ?? '') + chunk);
+              if (typeof chunk === 'string') {
+                  setAiPopupContent((prev) => (prev ?? '') + chunk);
+              } else {
+                  console.warn('Received non-string chunk from AI:', chunk);
+              }
           };
           const result = await handleSummarizeStream(selectedText, handleSummaryChunk, undefined, "Summarize concisely.");
           if (!result.success || result.error) {

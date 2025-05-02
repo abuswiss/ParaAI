@@ -19,7 +19,7 @@ import TemplateViewPage from './pages/TemplateViewPage';
 import FileManager from './components/common/FileManager'; // Import the actual component
 // import FileManagerPage from './pages/FileManagerPage'; // Remove import for the missing page
 import SettingsPage from './pages/SettingsPage'; // Import the new Settings page
-// import ChatInterface from './components/chat/ChatInterface'; // Import removed as it's no longer a route element
+import ChatInterface from './components/chat/ChatInterface'; // Re-add import
 
 const router = createBrowserRouter([
   {
@@ -42,8 +42,13 @@ const router = createBrowserRouter([
             path: 'documents',
             element: <FileManager />,
           },
-           {
+          {
             path: 'files',
+            element: <FileManager />,
+          },
+          {
+            // Route for templates, using FileManager
+            path: 'templates',
             element: <FileManager />,
           },
           {
@@ -55,14 +60,13 @@ const router = createBrowserRouter([
             path: 'cases/:id',
             element: <CaseDetail />,
           },
-          // --- Add Chat Route --- // Removed Chat route section
+          // --- Remove Chat Routes --- 
           // {
-          //   path: 'chat', // Base chat route
+          //   path: 'chat', 
           //   element: <ChatInterface />,
           // },
-          // Optional: Add route for specific chat later if needed
           // {
-          //   path: 'chat/:conversationId',
+          //   path: 'chat/:conversationId', 
           //   element: <ChatInterface />,
           // },
           {

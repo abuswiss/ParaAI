@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai'; // Use correct Jotai hooks
-import { activeCaseIdAtom, activeCaseAtom } from '@/atoms/appAtoms'; // Import atoms
+import { activeCaseIdAtom, activeCaseAtom, activeDocumentContextIdAtom } from '@/atoms/appAtoms'; // Import atoms
 // import { useAppStore } from '@/store/appStore'; // Remove Zustand import
 import * as caseService from '@/services/caseService';
 import { useAuth } from '@/context/AuthContext';
@@ -13,6 +13,7 @@ const CaseSelector: React.FC<CaseSelectorProps> = ({ showCreateOption = true }) 
   const { user } = useAuth();
   const [cases, setCases] = useState<caseService.Case[]>([]);
   const [activeCaseId, setActiveCaseId] = useAtom(activeCaseIdAtom); // Get ID and setter
+  const setActiveDocumentContextId = useSetAtom(activeDocumentContextIdAtom);
   const activeCaseData = useAtomValue(activeCaseAtom); // Read derived case data
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -57,7 +58,8 @@ const CaseSelector: React.FC<CaseSelectorProps> = ({ showCreateOption = true }) 
   }, [user, activeCaseId, setActiveCaseId]);
 
   const handleCaseSelect = (selectedCaseId: string | null) => {
-    setActiveCaseId(selectedCaseId); // Only set the ID atom
+    setActiveCaseId(selectedCaseId); // Set the selected case ID
+    setActiveDocumentContextId(null); // Clear the active document context
     // activeCaseData will update automatically via the derived atom
   };
 

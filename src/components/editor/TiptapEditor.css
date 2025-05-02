@@ -10,6 +10,7 @@
   --highlight-clause-bg: rgba(144, 238, 144, var(--highlight-opacity)); /* Light green */
   --highlight-risk-bg: rgba(255, 192, 203, var(--highlight-opacity)); /* Light pink */
   --highlight-timeline-bg: rgba(216, 191, 216, var(--highlight-opacity)); /* Thistle */
+  --highlight-privileged-bg: rgba(255, 100, 100, 0.3); /* Reddish for privileged terms */
 
   /* Risk Severity */
   --highlight-risk-low-border: 2px solid rgba(60, 179, 113, 0.7);
@@ -61,8 +62,7 @@
     border-radius: inherit;
 }
 
-/* Add styles for analysis highlights */
-/* CONSOLIDATED AND REFINED HIGHLIGHT STYLES */
+/* --------- CONSOLIDATED HIGHLIGHT STYLES --------- */
 
 /* Base style for all analysis highlights */
 .analysis-highlight {
@@ -74,174 +74,197 @@
   transition: var(--highlight-transition);
   opacity: var(--highlight-opacity);
   border-bottom: 1px solid transparent; /* Default border */
+  position: relative; /* For tooltip positioning */
 }
 
 .analysis-highlight:hover {
   opacity: var(--highlight-opacity-hover);
 }
 
-/* Type-specific base styles */
-.highlight-entity {
+/* Type-specific styles */
+.analysis-highlight.type-entities {
   background-color: var(--highlight-entity-bg);
+  border-bottom-color: rgba(59, 130, 246, 0.6); /* Blue */
 }
 
-.highlight-clause {
+.analysis-highlight.type-clauses {
   background-color: var(--highlight-clause-bg);
-}
-.highlight-clause-key { /* Specifically for key clauses */
-  border-bottom: 1px dashed darkgreen;
+  border-bottom-color: rgba(234, 179, 8, 0.7); /* Yellow */
 }
 
-.highlight-risk {
+.analysis-highlight.type-risks {
   background-color: var(--highlight-risk-bg);
+  border-bottom-color: rgba(239, 68, 68, 0.6); /* Red */
 }
 
-.highlight-timeline {
+.analysis-highlight.type-timeline {
   background-color: var(--highlight-timeline-bg);
-}
-.highlight-timeline-event { /* Specifically for timeline events */
-   border-bottom: 1px dotted purple;
+  border-bottom-color: rgba(34, 197, 94, 0.6); /* Green */
 }
 
-/* --- Risk severity specific styles --- */
-.highlight-risk-low {
+.analysis-highlight.type-privilegedTerms {
+  background-color: var(--highlight-privileged-bg);
+  border-bottom-color: rgba(168, 85, 247, 0.6); /* Purple */
+  border-style: dashed;
+}
+
+/* Risk severity modifiers */
+.analysis-highlight.risk-low {
   border-bottom: var(--highlight-risk-low-border);
 }
-.highlight-risk-medium {
+
+.analysis-highlight.risk-medium {
   border-bottom: var(--highlight-risk-medium-border);
 }
-.highlight-risk-high {
+
+.analysis-highlight.risk-high {
   background-color: var(--highlight-risk-high-bg);
   border-bottom: var(--highlight-risk-high-border);
   font-weight: 500;
 }
-.highlight-risk-critical {
+
+.analysis-highlight.risk-critical {
   background-color: var(--highlight-risk-critical-bg);
   border-bottom: var(--highlight-risk-critical-border);
   font-weight: 600;
 }
 
-/* --- Specific entity type styles (Examples) --- */
-.highlight-entity-person {
-   background-color: var(--highlight-entity-person-bg);
-}
-.highlight-entity-organization {
-    background-color: var(--highlight-entity-organization-bg);
-    border-bottom: var(--highlight-entity-organization-border);
-}
-.highlight-entity-date {
-    border-bottom: var(--highlight-entity-date-border);
-}
-.highlight-entity-location {
-    background-color: var(--highlight-entity-location-bg);
-}
-.highlight-entity-legal_term {
-    background-color: var(--highlight-entity-legal_term-bg);
-    border-bottom: var(--highlight-entity-legal_term-border);
-    font-style: italic;
-}
-/* Add more entity types as needed, using variables or specific values */
-/* .highlight-entity-financial_term { ... } */
-
-/* Style for template placeholders (ensure this doesn't conflict if using <mark>) */
-/* Keep this if standard Tiptap highlight mark is used elsewhere */
-.highlight {
-    background-color: #ffe066;
-    padding: 1px 3px;
-    border-radius: 3px;
-    box-decoration-break: clone;
+/* Active highlight styling */
+.analysis-highlight.active-highlight {
+  background-color: rgba(115, 180, 255, 0.3); /* Slightly brighter blue background */
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.5), 0 0 10px rgba(59, 130, 246, 0.5); /* Blue outline with glow */
+  position: relative;
+  animation: highlight-pulse 1.5s ease-in-out infinite;
+  z-index: 5; /* Ensure active highlight is on top */
 }
 
-/* Base Highlight Styles */
-.highlight {
-  background-color: transparent;
-  /* transition: background-color 0.3s ease; */ /* Optional smooth transition */
-  border-radius: 2px;
-  padding: 0.5px 1px;
-  margin: -0.5px -1px;
-  box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.1); /* Subtle underline */
+@keyframes highlight-pulse {
+  0%, 100% { box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.5), 0 0 5px rgba(59, 130, 246, 0.3); }
+  50% { box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.7), 0 0 10px rgba(59, 130, 246, 0.5); }
 }
 
-/* Entity Highlighting */
-.highlight-person {
-  background-color: rgba(153, 217, 234, 0.4); /* Light blue */
-  box-shadow: inset 0 -1px 0 rgba(153, 217, 234, 0.8);
-}
-.highlight-organization {
-  background-color: rgba(174, 214, 148, 0.4); /* Light green */
-  box-shadow: inset 0 -1px 0 rgba(174, 214, 148, 0.8);
-}
-.highlight-date {
-  background-color: rgba(247, 182, 197, 0.4); /* Light pink */
-  box-shadow: inset 0 -1px 0 rgba(247, 182, 197, 0.8);
-}
-.highlight-location {
-  background-color: rgba(255, 219, 148, 0.4); /* Light yellow */
-  box-shadow: inset 0 -1px 0 rgba(255, 219, 148, 0.8);
-}
-.highlight-legal_term {
-  background-color: rgba(204, 182, 221, 0.4); /* Light purple */
-  box-shadow: inset 0 -1px 0 rgba(204, 182, 221, 0.8);
-}
-.highlight-financial_term {
-    background-color: rgba(255, 190, 128, 0.4); /* Light orange */
-    box-shadow: inset 0 -1px 0 rgba(255, 190, 128, 0.8);
-}
-
-/* Clause Highlighting (General) */
-.highlight-clause {
-  background-color: rgba(210, 210, 210, 0.4); /* Light gray */
-  box-shadow: inset 0 -1px 0 rgba(180, 180, 180, 0.8);
-}
-
-/* Risk Highlighting */
-.highlight-risk {
-  font-weight: 500; /* Slightly bolder */
+/* Style for template placeholders */
+.placeholder-highlight {
+  background-color: rgba(180, 180, 180, 0.2); /* Light grey background */
+  border-bottom: 1px dashed #a0a0a0; /* Dashed underline */
+  padding: 0 2px;
+  border-radius: 3px;
+  cursor: pointer; /* Indicate it might be clickable later */
   transition: background-color 0.2s ease-in-out;
 }
-.highlight-risk-low {
-  background-color: rgba(74, 222, 128, 0.2); /* Tailwind green-400 */
-  box-shadow: inset 0 -1.5px 0 rgba(34, 197, 94, 0.5); /* Tailwind green-500 */
-}
-.highlight-risk-medium {
-  background-color: rgba(250, 204, 21, 0.2); /* Tailwind yellow-400 */
-  box-shadow: inset 0 -1.5px 0 rgba(234, 179, 8, 0.5); /* Tailwind yellow-500 */
-}
-.highlight-risk-high {
-  background-color: rgba(249, 115, 22, 0.2); /* Tailwind orange-500 */
-  box-shadow: inset 0 -1.5px 0 rgba(234, 88, 12, 0.5); /* Tailwind orange-600 */
-}
-.highlight-risk-critical {
-  background-color: rgba(239, 68, 68, 0.2); /* Tailwind red-500 */
-  box-shadow: inset 0 -1.5px 0 rgba(220, 38, 38, 0.5); /* Tailwind red-600 */
+
+.placeholder-highlight:hover {
+  background-color: rgba(180, 180, 180, 0.4);
 }
 
-/* Timeline Highlighting (Optional) */
-.highlight-timeline {
-  background-color: rgba(165, 210, 235, 0.3); /* Another shade of blue/gray */
-  box-shadow: inset 0 -1px 0 rgba(135, 180, 205, 0.7);
+/* Add subtle pulse animation for placeholder navigation buttons */
+@keyframes subtlePulse {
+  0% { box-shadow: 0 0 0 0 rgba(var(--primary-rgb), 0.4); }
+  70% { box-shadow: 0 0 0 5px rgba(var(--primary-rgb), 0); }
+  100% { box-shadow: 0 0 0 0 rgba(var(--primary-rgb), 0); }
 }
 
-/* --- ADD Privileged Term Highlighting --- */
-.highlight-privileged {
-  background-color: rgba(255, 100, 100, 0.3); /* Distinctive reddish background */
-  box-shadow: inset 0 -1.5px 0 rgba(200, 50, 50, 0.6); /* Darker red underline */
-  border: 1px dashed rgba(200, 50, 50, 0.4); /* Dashed border */
-  padding: 0.5px 2px; /* Slightly more padding */
-  margin: -0.5px -2px;
-  font-style: italic;
+.tiptap-editor-wrapper .placeholder-nav-button:not(:disabled):hover,
+.tiptap-editor-wrapper .placeholder-nav-button:not(:disabled):focus-visible {
+   /* Add a subtle pulse on hover/focus for discoverability */
+  animation: subtlePulse 1.5s infinite cubic-bezier(0.66, 0, 0, 1);
 }
 
-/* Hover Effects (Optional but Recommended) */
-.highlight-person:hover { background-color: rgba(153, 217, 234, 0.6); }
-.highlight-organization:hover { background-color: rgba(174, 214, 148, 0.6); }
-.highlight-date:hover { background-color: rgba(247, 182, 197, 0.6); }
-.highlight-location:hover { background-color: rgba(255, 219, 148, 0.6); }
-.highlight-legal_term:hover { background-color: rgba(204, 182, 221, 0.6); }
-.highlight-financial_term:hover { background-color: rgba(255, 190, 128, 0.6); }
-.highlight-clause:hover { background-color: rgba(210, 210, 210, 0.6); }
-.highlight-timeline:hover { background-color: rgba(165, 210, 235, 0.5); }
-.highlight-privileged:hover {
-     background-color: rgba(255, 100, 100, 0.5); 
-     border-color: rgba(200, 50, 50, 0.8);
+/* Add styles for analysis result highlighting */
+.analysis-highlight {
+    border-radius: 3px;
+    padding: 0 2px;
+    margin: 0 -2px; /* Prevent layout shifts */
+    transition: background-color 0.2s ease-in-out;
+}
+
+.analysis-highlight:hover {
+    cursor: help; /* Indicate tooltip */
+}
+
+/* Specific entity types */
+.highlight-entity-person { background-color: rgba(59, 130, 246, 0.2); } /* blue-500 */
+.highlight-entity-organization { background-color: rgba(16, 185, 129, 0.2); } /* emerald-500 */
+.highlight-entity-location { background-color: rgba(249, 115, 22, 0.2); } /* orange-500 */
+.highlight-entity-date { background-color: rgba(139, 92, 246, 0.2); } /* violet-500 */
+.highlight-entity-legal-term { background-color: rgba(236, 72, 153, 0.2); } /* pink-500 */
+.highlight-entity-monetary-value { background-color: rgba(14, 165, 233, 0.2); } /* sky-500 */
+.highlight-entity-case-citation { background-color: rgba(217, 70, 239, 0.2); } /* fuchsia-500 */
+.highlight-entity-statute-citation { background-color: rgba(163, 230, 53, 0.2); } /* lime-500 */
+.highlight-entity-other { background-color: rgba(107, 114, 128, 0.2); } /* gray-500 */
+
+/* Risks */
+.highlight-risk-high { background-color: rgba(239, 68, 68, 0.3); border-bottom: 2px dashed rgba(239, 68, 68, 0.8); } /* red-500 */
+.highlight-risk-medium { background-color: rgba(245, 158, 11, 0.3); border-bottom: 2px dashed rgba(245, 158, 11, 0.8); } /* amber-500 */
+.highlight-risk-low { background-color: rgba(34, 197, 94, 0.3); border-bottom: 2px dashed rgba(34, 197, 94, 0.8); } /* green-500 */
+
+/* Clauses */
+.highlight-clause-key { background-color: rgba(168, 85, 247, 0.2); border-left: 3px solid rgba(168, 85, 247, 0.6); } /* purple-500 */
+
+/* Timeline */
+.highlight-timeline-event { background-color: rgba(20, 184, 166, 0.2); border-bottom: 2px solid rgba(20, 184, 166, 0.6); } /* teal-500 */
+
+/* General Analysis Highlight Styling */
+.analysis-highlight {
+  /* Base style - can be subtle, e.g., just a border or light background */
+  border-radius: 3px;
+  padding: 0 1px; /* Minimal padding */
+  margin: 0 -1px; /* Prevent minor layout shifts */
+  transition: background-color 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+  border-bottom: 2px solid transparent; /* Base for type-specific color */
+}
+
+/* Type-specific colors (adjust colors as needed for your theme) */
+.analysis-highlight.type-entities {
+  border-bottom-color: rgba(59, 130, 246, 0.6); /* Blue */
+}
+.analysis-highlight.type-clauses {
+  border-bottom-color: rgba(234, 179, 8, 0.7); /* Yellow */
+}
+.analysis-highlight.type-risks {
+  border-bottom-color: rgba(239, 68, 68, 0.6); /* Red */
+}
+.analysis-highlight.type-timeline {
+  border-bottom-color: rgba(34, 197, 94, 0.6); /* Green */
+}
+.analysis-highlight.type-privilegedTerms {
+  border-bottom-color: rgba(168, 85, 247, 0.6); /* Purple */
+}
+/* Add more types if needed */
+
+/* Style for the currently active/selected highlight */
+.analysis-highlight.active-highlight {
+  background-color: rgba(115, 180, 255, 0.3); /* Slightly brighter blue background */
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.5); /* Blue outline */
+  /* Ensure the type-specific border is still visible or override if needed */
+}
+
+/* Add these tooltip styles after the .analysis-highlight.active-highlight */
+
+/* Custom tooltip for highlights */
+.analysis-highlight::after {
+  content: attr(title);
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 5px 8px;
+  background: rgba(0, 0, 0, 0.8);
+  color: white;
+  border-radius: 4px;
+  font-size: 12px;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.2s, visibility 0.2s;
+  z-index: 100;
+  max-width: 250px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.analysis-highlight:hover::after {
+  opacity: 1;
+  visibility: visible;
 }

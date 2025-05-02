@@ -7,16 +7,19 @@ import path from "path"
 export default defineConfig({
   plugins: [
     react(), 
-    tsconfigPaths()
+    tsconfigPaths({
+      ignoreConfigErrors: true,
+      projects: ["."],
+      exclude: [
+        "**/paralegal-ai-assistant/mp/**", 
+        "**/paralegal-ai-assistant/my app/**",
+        "**/node_modules/**"
+      ]
+    })
   ],
   server: {
     proxy: {
       '/api': 'http://localhost:3001'
     }
   },
-  resolve: {
-    alias: {
-      "@": path.resolve(__dirname, "./src"),
-    },
-  }
 })

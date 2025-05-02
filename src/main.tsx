@@ -1,8 +1,12 @@
 import React from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 // import { checkSupabaseEnv } from './utils/envCheck' // Commented out - file not found
 import App from './App'
+
+// Create a client
+const queryClient = new QueryClient()
 
 // const envCheck = checkSupabaseEnv(); // Commented out - function source not found
 
@@ -23,7 +27,9 @@ import App from './App'
   // Environment variables are okay, render the app
   createRoot(document.getElementById('root')!).render(
     <React.StrictMode>
-      <App />
+      <QueryClientProvider client={queryClient}>
+        <App />
+      </QueryClientProvider>
     </React.StrictMode>,
   )
 // }

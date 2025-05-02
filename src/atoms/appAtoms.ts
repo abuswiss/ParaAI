@@ -3,6 +3,7 @@ import { Case, getCaseById } from '@/services/caseService';
 import { DocumentMetadata } from '@/services/documentService';
 import { getUserCases } from '@/services/caseService';
 import { EditorState } from '@/types/editor'
+import { AnalysisType, StructuredAnalysisResult } from '@/services/documentAnalysisService';
 
 // Define type for the item being viewed/edited in the main panel
 export type ActiveEditorItem = { type: 'document' | 'draft'; id: string } | null;
@@ -14,6 +15,10 @@ export const activeCaseIdAtom = atom<string | null>(null);
 
 // Atom for the active item being edited (document or draft).
 export const activeEditorItemAtom = atom<EditorState | null>(null);
+
+// Atom for the active conversation ID displayed in the chat panel.
+// null indicates a new chat state.
+export const activeConversationIdAtom = atom<string | null>(null);
 
 // --- NEW Derived Atom for Active Document ID (for Chat context) ---
 // Reads from activeEditorItemAtom and returns the ID if it's a document
@@ -165,12 +170,14 @@ export const renameTemplateVariableActionAtom = atom<{ oldName: string; newName:
 // --- NEW: Atom for Select Template Modal --- 
 export const selectTemplateModalOpenAtom = atom<boolean>(false);
 
-// --- NEW: Atom to trigger Fill Template Modal --- 
-// Set with the data needed by FillTemplateModal
-export const fillTemplateModalTriggerAtom = atom<{ id: string; name: string; content: string } | null>(null);
-
 // --- NEW: Atom for AI Template Draft Modal ---
 export const newAITemplateDraftModalOpenAtom = atom<boolean>(false);
+
+// Atom to control the visibility of the AI Document Draft Modal (NEW)
+export const newAIDocumentDraftModalOpenAtom = atom<boolean>(false);
+
+// Atom to hold files passed from drag-and-drop in FileManager (NEW)
+export const initialFilesForUploadAtom = atom<File[]>([]);
 
 // Atom for managing the command palette visibility
 export const commandPaletteOpenAtom = atom(false);
@@ -225,3 +232,12 @@ export const clearCompletedTasksAtom = atom(null, (get, set) => {
         set(backgroundTasksAtom, tasksToKeep);
     }
 });
+
+// --- Chat Preload State ---
+interface ChatPreloadContext {
+  analysisItem: any; // The specific clause, risk, entity, etc.
+  analysisType: AnalysisType;
+  documentText: string;
+}
+
+export const chatPreloadContextAtom = atom<ChatPreloadContext | null>(null);
