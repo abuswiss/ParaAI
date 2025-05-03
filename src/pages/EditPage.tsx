@@ -15,7 +15,8 @@ import {
   isNavCollapsedAtom, 
   activeEditorTypeAtom, 
   EditorType,
-  activeCaseIdAtom
+  activeCaseIdAtom,
+  activeEditorItemAtom
 } from '@/atoms/appAtoms';
 import { CheckCircle, XCircle, Dot, Save, FilePlus, AlertCircle } from 'lucide-react';
 import {
@@ -102,6 +103,7 @@ const EditPage: React.FC = () => {
   const activeCaseId = useAtomValue(activeCaseIdAtom); 
   const setIsNavCollapsed = useSetAtom(isNavCollapsedAtom);
   const setActiveEditorType = useSetAtom(activeEditorTypeAtom);
+  const setActiveEditorItem = useSetAtom(activeEditorItemAtom);
 
   const isNew = id === undefined || id === 'new';
   
@@ -344,138 +346,154 @@ const EditPage: React.FC = () => {
 
   // --- Save Handler ---
   const handleSave = async () => {
-    if (!type || !editorItem || !user) {
-      if (!user) toast.error('Authentication error. Cannot save.');
+    if (!editorItem) return;
+    if (!user) {
+      toast.error("You must be logged in to save.");
       return;
     }
-
-    // --- Variable Validation (when creating from template) ---
-    if (isCreatingFromTemplate) {
-      const firstMissingVar = variables.find(v => !v.value); // Find any var with null or empty string value
-      if (firstMissingVar) {
-        toast.error(`Please provide a value for the variable: ${firstMissingVar.name}`);
-        // Optional: Focus the input field
-        document.getElementById(`var-${firstMissingVar.name}`)?.focus();
-        return; // Prevent saving
-      }
-    }
-    // --- End Variable Validation ---
-
-    // Don't save if not dirty, unless creating from template (always save after validation)
-    if (!isDirty && !isCreatingFromTemplate) {
-      toast.info('No changes to save.');
-      return;
+    if (!type) {
+        toast.error("Cannot determine if saving a document or template.");
+        return;
     }
 
-    setIsSaving(true);
     setSaveStatus('saving');
+    setIsSaving(true);
+    
+    // --- NEW: Get latest content directly from ref just before saving ---
+    const contentToSave = editorContentRef.current;
+    
+    let finalContent = contentToSave;
+    
+    // If it was created from a template and we have variables, resolve them
+    if (isCreatingFromTemplate && variables.length > 0) {
+        const allVariablesFilled = variables.every(v => v.value !== null && v.value !== '');
+        if (!allVariablesFilled) {
+            toast.warning("Some template variables are not filled. Saving draft with placeholders.");
+            // Use the content as-is (with remaining placeholders)
+        } else {
+            // Resolve variables in the initial template content
+            finalContent = resolveVariables(initialContent, variables);
+            console.log("Resolved final content:", finalContent);
+        }
+    }
+    
+    let result: { data?: any; error?: any } | null = null;
 
     try {
-      let savedItemId: string | undefined = editorItem.id;
-      let navigateTo: string | null = null;
-      let contentToSave = editorContentRef.current; // Default to current editor content
-
-      // --- Resolve Content (when creating from template using resolveVariables) ---
-      if (isCreatingFromTemplate && initialContent) {
-        // Use resolveVariables with the original template content and current variable states
-        contentToSave = resolveVariables(initialContent, variables);
-        console.log("Resolved final content using resolveVariables:", contentToSave);
-      }
-      // --- End Resolve Content ---
-
       if (type === 'document') {
-        if (!activeCaseId) {
-          throw new Error('Cannot save document without an active case.');
-        }
+        const documentData = {
+          filename: editorItem.name,
+          content: finalContent, // Use resolved or current editor content
+          case_id: activeCaseId, // Use the active case ID from atom
+          user_id: user.id,
+          template_id: editorItem.templateId, // Include template ID if creating from template
+        };
 
-        if (isNew) { // Covers both standard new and new from template
-          let docName = editorItem.name.trim();
-          if (!docName || docName === 'New Document') {
-            docName = isCreatingFromTemplate ? `Draft from ${editorItem.templateName || 'Template'}` : `Untitled Document`;
-          }
-          
-          // Use contentToSave here
-          const { data: newDoc, error } = await documentService.createDocument(
-            user.id,
-            activeCaseId,
-            {
-              content: contentToSave, // Use the potentially resolved content
-              filename: docName,
-              ...(editorItem.templateId ? { template_id: editorItem.templateId } : {})
-            }
-          );
+        if (isNew) {
+          // Create new document
+          toast.promise(documentService.createDocument(documentData), {
+             loading: 'Creating document...',
+             success: (res) => {
+                 result = res;
+                 if (res.error) throw res.error;
+                 if (!res.data?.id) throw new Error("Save successful but no ID returned.");
+                 
+                 // *** NEW: Set active editor item on successful creation ***
+                 setActiveEditorItem({ type: 'document', id: res.data.id });
+                 console.log(`EditPage: Set active editor item to new doc: ${res.data.id}`);
 
-          if (error) throw error;
-          savedItemId = newDoc?.id;
-          navigateTo = `/view/document/${savedItemId}`;
-          toast.success(`Document '${docName}' created successfully.`);
-          setIsDirty(false); // Reset dirty state after successful save
-
-        } else { // Updating existing document
-          if (!id) throw new Error('Document ID is missing for update.');
-          // Note: When updating an existing document, we continue to use the live editor content
-          // The variable inputs are primarily for initial creation from template
-          const { error } = await documentService.updateDocument(id, {
-            editedContent: contentToSave, // Use contentToSave (which is editorContentRef for updates)
-            filename: editorItem.name.trim() || undefined,
+                 setIsDirty(false); // Mark as not dirty after successful save
+                 setSaveStatus('success');
+                 // Update URL without reloading page state to reflect new ID
+                 navigate(`/edit/document/${res.data.id}${location.search}`, { replace: true });
+                 return `Document "${res.data.filename}" created successfully!`;
+             },
+             error: (err) => {
+                 result = { error: err };
+                 setSaveStatus('error');
+                 return `Failed to create document: ${err.message || 'Unknown error'}`;
+             },
           });
-          if (error) throw error;
-          toast.success(`Document '${editorItem.name}' updated successfully.`);
-          setIsDirty(false); // Reset dirty state after successful save
+        } else {
+          // Update existing document
+          if (!id) throw new Error("Document ID is missing for update.");
+          toast.promise(documentService.updateDocument(id, { content: finalContent, filename: editorItem.name }), { // Only update content and filename
+            loading: 'Saving document...',
+            success: (res) => {
+                result = res;
+                if (res.error) throw res.error;
+                setIsDirty(false); // Mark as not dirty after successful save
+                setSaveStatus('success');
+                return `Document "${editorItem.name}" saved successfully!`;
+            },
+            error: (err) => {
+                result = { error: err };
+                setSaveStatus('error');
+                return `Failed to save document: ${err.message || 'Unknown error'}`;
+            },
+          });
         }
-      } else { // Saving a template
-           const nameToSave = editorItem.name.trim() || 'Untitled Template';
-           const descriptionToSave = editorItem.description?.trim() || ''; // Always provide a string
-           const categoryToSave = editorItem.category || 'other';
-           const tagsToSave = editorItem.tags?.split(',').map(t => t.trim()).filter(Boolean) || [];
+      } else if (type === 'template') {
+        const templateData = {
+          name: editorItem.name,
+          description: editorItem.description || '',
+          content: finalContent, // Use latest content
+          category: editorItem.category || 'other',
+          tags: editorItem.tags?.split(',').map(tag => tag.trim()).filter(Boolean) || [],
+          user_id: user.id,
+        };
 
-           // Use editorContentRef.current when saving templates as variables are not resolved in the same way
-           const templateContent = editorContentRef.current;
-
-           if (isNew) {
-             const { data: newTemplate, error } = await templateService.createTemplate({
-                 name: nameToSave,
-                 description: descriptionToSave,
-                 category: categoryToSave,
-                 content: templateContent, // Use current editor content for templates
-                 variables: extractVariables(templateContent).map((v: ExtractedVariable) => v.name),
-                 tags: tagsToSave,
-                 isPublic: false
-             });
-             if (error) throw error;
-             savedItemId = newTemplate?.id;
-             navigateTo = `/view/template/${savedItemId}`;
-             toast.success(`Template '${nameToSave}' created successfully.`);
-             setIsDirty(false); // Reset dirty state
-           } else {
-             if (!id) throw new Error('Template ID is missing for update.');
-             const { error } = await templateService.updateTemplate(id, {
-                 name: nameToSave,
-                 description: descriptionToSave,
-                 category: categoryToSave,
-                 content: templateContent, // Use current editor content for templates
-                 variables: extractVariables(templateContent).map((v: ExtractedVariable) => v.name),
-                 tags: tagsToSave,
-             });
-             if (error) throw error;
-             toast.success(`Template '${nameToSave}' updated successfully.`);
-             setIsDirty(false); // Reset dirty state
-           }
+        if (isNew) {
+          // Create new template
+           toast.promise(templateService.createTemplate(templateData), {
+            loading: 'Creating template...',
+            success: (res) => {
+                result = res;
+                if (res.error) throw res.error;
+                 if (!res.data?.id) throw new Error("Save successful but no ID returned.");
+                setIsDirty(false);
+                setSaveStatus('success');
+                navigate(`/edit/template/${res.data.id}`, { replace: true });
+                return `Template "${res.data.name}" created successfully!`;
+            },
+            error: (err) => {
+                 result = { error: err };
+                 setSaveStatus('error');
+                 return `Failed to create template: ${err.message || 'Unknown error'}`;
+            },
+          });
+        } else {
+          // Update existing template
+           if (!id) throw new Error("Template ID is missing for update.");
+           toast.promise(templateService.updateTemplate(id, templateData), {
+            loading: 'Saving template...',
+            success: (res) => {
+                result = res;
+                if (res.error) throw res.error;
+                setIsDirty(false);
+                setSaveStatus('success');
+                return `Template "${editorItem.name}" saved successfully!`;
+            },
+            error: (err) => {
+                 result = { error: err };
+                 setSaveStatus('error');
+                 return `Failed to save template: ${err.message || 'Unknown error'}`;
+            },
+          });
+        }
       }
-
-      setSaveStatus('success');
-      if (navigateTo) {
-        navigate(navigateTo);
-      }
-
-    } catch (err) {
-      console.error("Error saving:", err);
-      const message = err instanceof Error ? err.message : 'Unknown error';
-      setError(`Failed to save ${type}: ${message}`);
+    } catch (error) { // Catch errors not caught by toast.promise (e.g., missing ID before promise)
+      console.error("Save operation failed:", error);
       setSaveStatus('error');
-      toast.error(`Failed to save ${type}: ${message}`);
+      toast.error(`Save failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     } finally {
       setIsSaving(false);
+      // Add a slight delay before resetting icon for visual feedback
+      if (saveStatus === 'success' || saveStatus === 'error') {
+          setTimeout(() => {
+              setSaveStatus('idle');
+          }, 2000);
+      }
     }
   };
 
