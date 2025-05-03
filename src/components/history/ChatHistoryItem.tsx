@@ -52,10 +52,6 @@ const ChatHistoryItem: React.FC<ChatHistoryItemProps> = ({ conversation, onDelet
     e.preventDefault();
     e.stopPropagation(); // Prevent triggering handleClick
 
-    if (!window.confirm('Are you sure you want to delete this chat history?')) {
-      return;
-    }
-
     setIsDeleting(true);
     const conversationIdToDelete = conversation.id;
     try {

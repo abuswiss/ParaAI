@@ -296,7 +296,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
   return (
     <TooltipProvider delayDuration={0}>
       <div className="flex flex-col gap-2 p-4 w-full">
-        <div className="relative flex items-end w-full border rounded-md bg-background focus-within:ring-1 focus-within:ring-ring">
+        <div className="relative flex w-full border rounded-md bg-background focus-within:ring-1 focus-within:ring-ring">
           <TextareaAutosize
             ref={textareaRef}
             minRows={1}

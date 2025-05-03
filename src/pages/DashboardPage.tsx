@@ -93,8 +93,8 @@ const DashboardPage: React.FC = () => {
         </Button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
-        <Card className="hover:shadow-lg transition-shadow border-border">
+      <div className="flex flex-wrap gap-4 md:gap-6">
+        <Card className="hover:shadow-lg transition-shadow border-border w-full sm:w-[calc(50%-0.75rem)] lg:w-[calc(33.33%-1rem)] min-w-[280px]">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <MessageSquarePlus className="h-5 w-5 text-primary" />
@@ -109,7 +109,7 @@ const DashboardPage: React.FC = () => {
           </CardContent>
         </Card>
 
-        <Card className="hover:shadow-lg transition-shadow border-border">
+        <Card className="hover:shadow-lg transition-shadow border-border w-full sm:w-[calc(50%-0.75rem)] lg:w-[calc(33.33%-1rem)] min-w-[280px]">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <FileTextIcon className="h-5 w-5 text-primary" />
@@ -127,7 +127,7 @@ const DashboardPage: React.FC = () => {
           </CardContent>
         </Card>
 
-        <Card className="hover:shadow-lg transition-shadow border-border">
+        <Card className="hover:shadow-lg transition-shadow border-border w-full sm:w-[calc(50%-0.75rem)] lg:w-[calc(33.33%-1rem)] min-w-[280px]">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <FileText className="h-5 w-5 text-primary" />
@@ -145,7 +145,7 @@ const DashboardPage: React.FC = () => {
           </CardContent>
         </Card>
         
-        <Card className="hover:shadow-lg transition-shadow border-border">
+        <Card className="hover:shadow-lg transition-shadow border-border w-full sm:w-[calc(50%-0.75rem)] lg:w-[calc(33.33%-1rem)] min-w-[280px]">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <FolderPlus className="h-5 w-5 text-primary" />

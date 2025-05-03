@@ -27,8 +27,9 @@ const ChatHistoryList: React.FC = () => {
   const queryClient = useQueryClient();
   const [isDeletingAll, setIsDeletingAll] = useState(false);
   const { toast } = useToast();
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
-  const { data: conversations, isLoading, error, refetch } = useQuery<ConversationListItem[], Error>({
+  const { data: conversations, isLoading, error: fetchError, refetch } = useQuery<ConversationListItem[], Error>({
     queryKey: ['conversationsList', activeCaseId],
     queryFn: () => {
       if (!activeCaseId) return Promise.resolve([]);
@@ -57,9 +58,9 @@ const ChatHistoryList: React.FC = () => {
 
   const handleClearAllConfirm = async () => {
     setIsDeletingAll(true);
-    setError(null);
+    setDeleteError(null);
     try {
-        const { success, deletedCount, error: deleteError } = await deleteAllUserConversations();
+        const { success, deletedCount, error: apiDeleteError } = await deleteAllUserConversations();
         if (success) {
             toast({ 
                 title: "History Cleared", 
@@ -68,14 +69,15 @@ const ChatHistoryList: React.FC = () => {
             setActiveConversationId(null);
             refetch();
         } else {
-            throw deleteError || new Error('Failed to clear history.');
+            throw apiDeleteError || new Error('Failed to clear history.');
         }
     } catch (err) {
         console.error('Error clearing all conversations:', err);
-        setError(err instanceof Error ? err.message : 'Could not clear history.');
+        const message = err instanceof Error ? err.message : 'Could not clear history.';
+        setDeleteError(message);
         toast({ 
             title: "Error", 
-            description: err instanceof Error ? err.message : 'Could not clear history.', 
+            description: message, 
             variant: "destructive"
         });
     } finally {
@@ -95,8 +97,9 @@ const ChatHistoryList: React.FC = () => {
       <div className="flex-grow overflow-y-auto scrollbar-thin scrollbar-thumb-muted scrollbar-track-transparent">
         <div className="flex flex-col gap-1 px-2 py-1">
           {isLoading && <p className="px-2 py-1 text-sm text-muted-foreground">Loading...</p>}
-          {error && <p className="px-2 py-1 text-sm text-destructive">Error loading history: {error.message}</p>}
-          {!isLoading && !error && conversations?.length === 0 && (
+          {fetchError && <p className="px-2 py-1 text-sm text-destructive">Error loading history: {fetchError.message}</p>}
+          {deleteError && <p className="px-2 py-1 text-sm text-destructive">Deletion Error: {deleteError}</p>}
+          {!isLoading && !fetchError && conversations?.length === 0 && (
             <p className="px-2 py-1 text-sm text-muted-foreground">No chat history yet.</p>
           )}
           {conversations &&

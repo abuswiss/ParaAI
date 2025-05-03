@@ -35,6 +35,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import DocumentAnalyzer from './DocumentAnalyzer';
+import { useNavigate } from 'react-router-dom';
 
 interface DocumentViewerProps {
   documentId: string;
@@ -80,6 +81,7 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ documentId }) => {
   const [summaryCompleted, setSummaryCompleted] = useState<boolean>(false);
   const [activeHighlightPosition, setActiveHighlightPosition] = useState<HighlightPosition | null>(null);
 
+  const navigate = useNavigate();
   const addTask = useSetAtom(addTaskAtom);
   const updateTask = useSetAtom(updateTaskAtom);
   const removeTask = useSetAtom(removeTaskAtom);
@@ -284,7 +286,7 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ documentId }) => {
     return () => {
       isMounted = false;
     };
-  }, [documentId, setActiveEditorItem, activeCaseId, setActiveCaseId, activeTab]);
+  }, [documentId, setActiveEditorItem, activeCaseId, setActiveCaseId]);
 
   useEffect(() => {
     if (activeHighlightPosition && editorRef.current) {
@@ -397,6 +399,8 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ documentId }) => {
       analysisItem,
       analysisType,
       documentText: document.extractedText,
+      documentId: document.id,
+      documentName: document.filename
     });
   };
 

@@ -11,6 +11,7 @@ import { Icons } from "@/components/ui/Icons";
 import { Spinner } from "@/components/ui/Spinner";
 import { CourtListenerSnippet, PerplexitySource, SourceInfo } from '@/types/sources';
 import { Badge } from "@/components/ui/Badge";
+import { Skeleton } from "@/components/ui/skeleton";
 import { DocumentAnalysisResult } from '@/services/documentAnalysisService'; 
 import { RiskAssessment } from '../documents/RiskAssessment'; 
 import { getDocumentsMetadataByIds, DocumentMetadata } from '@/services/documentService';
@@ -160,9 +161,9 @@ const ChatMessage: React.FC<ChatMessageProps> = memo(({
 
     if (message.isLoading) {
       return (
-        <div className="flex items-center space-x-2 py-2">
-          <Spinner size="sm" />
-          <span className="text-sm text-muted-foreground italic">Generating...</span>
+        <div className="space-y-2 py-2">
+          <Skeleton className="h-4 w-full rounded" />
+          <Skeleton className="h-4 w-5/6 rounded" />
         </div>
       );
     }

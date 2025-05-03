@@ -43,6 +43,8 @@ import {
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { EditorToolbar } from '@/components/editor/toolbars/editor-toolbar';
 import { FloatingToolbar } from '@/lib/editor/extensions/FloatingToolbar';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 type RewriteMode = 'improve' | 'shorten' | 'expand' | 'professional' | 'formal' | 'simple' | 'custom';
 
@@ -549,7 +551,7 @@ const TiptapEditor = forwardRef<TiptapEditorRef, TiptapEditorProps>((
                 {aiMenuItems.map((item, index) => (
                   <DropdownMenuItem
                     key={item.label}
-                    className="hover:bg-neutral-700 focus:bg-neutral-700 cursor-pointer"
+                    className="hover:bg-muted focus:bg-muted cursor-pointer"
                     onSelect={() => item.isAction ? item.action() : handleRewrite(item.mode as RewriteMode, editor)}
                     disabled={isRewriting || isSummarizing}
                   >
@@ -647,7 +649,7 @@ const TiptapEditor = forwardRef<TiptapEditorRef, TiptapEditorProps>((
                 {aiMenuItems.map((item, index) => (
                   <DropdownMenuItem
                     key={item.label}
-                    className="hover:bg-neutral-700 focus:bg-neutral-700 cursor-pointer"
+                    className="hover:bg-muted focus:bg-muted cursor-pointer"
                     onSelect={() => item.isAction ? item.action() : handleRewrite(item.mode as RewriteMode, editor)}
                     disabled={isRewriting || isSummarizing}
                   >
@@ -667,7 +669,7 @@ const TiptapEditor = forwardRef<TiptapEditorRef, TiptapEditorProps>((
 
       {/* --- Summary Dialog --- */}
       <Dialog open={showSummaryDialog} onOpenChange={setShowSummaryDialog}>
-        <DialogContent className="sm:max-w-lg bg-background/80 backdrop-blur-sm">
+        <DialogContent className="sm:max-w-lg bg-card">
           <DialogHeader>
             <DialogTitle className="text-neutral-900 dark:text-neutral-100">Summary</DialogTitle>
             <DialogDescription className="text-neutral-600 dark:text-neutral-400">
@@ -675,11 +677,11 @@ const TiptapEditor = forwardRef<TiptapEditorRef, TiptapEditorProps>((
             </DialogDescription>
           </DialogHeader>
           <ScrollArea className="max-h-[400px] my-4 pr-4">
-            {/* Render summaryResult as HTML */}
-            <p 
-              className="text-sm text-muted-foreground whitespace-pre-wrap"
-              dangerouslySetInnerHTML={{ __html: summaryResult || '' }}
-            />
+            <div className="prose prose-sm dark:prose-invert max-w-none">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                {summaryResult || ''}
+              </ReactMarkdown>
+            </div>
           </ScrollArea>
           <DialogFooter className="sm:justify-between">
             <Button 

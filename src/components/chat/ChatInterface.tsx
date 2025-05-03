@@ -7,7 +7,8 @@ import {
   activeCaseIdAtom,
   activeConversationIdAtom,
   uploadModalOpenAtom,
-  chatDocumentContextIdsAtom
+  chatDocumentContextIdsAtom,
+  chatPreloadContextAtom
 } from '@/atoms/appAtoms';
 import { getConversationMessages, saveMessage } from '@/services/messageService';
 import { createConversation, getConversation } from '@/services/conversationService';
@@ -38,6 +39,14 @@ interface ChatInterfaceProps {
   onNewConversationStart?: (newId: string) => void;
 }
 
+interface PreloadContext {
+  analysisItem: any;
+  analysisType: string;
+  documentText: string;
+  documentId: string;
+  documentName: string;
+}
+
 const ChatInterface: React.FC<ChatInterfaceProps> = ({
   conversationId: initialConversationId,
   onNewConversationStart,
@@ -54,6 +63,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const [isHistoryLoading, setIsHistoryLoading] = useState<boolean>(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [selectedDocumentIds, setSelectedDocumentIds] = useAtom(chatDocumentContextIdsAtom);
+  const [preloadedContext, setPreloadedContext] = useAtom(chatPreloadContextAtom);
 
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -143,6 +153,40 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     },
   });
 
+  const scrollToBottom = useCallback(() => {
+    setTimeout(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }, 100);
+  }, []);
+
+  const handleSend = useCallback((messageContent: string) => {
+    if (!activeCaseId) return;
+    if (!messageContent.trim() && selectedDocumentIds.length === 0) return;
+
+    const tempUserMessage: VercelMessage = {
+      id: Date.now().toString(),
+      role: 'user',
+      content: messageContent
+    };
+    
+    const fakeEvent = { preventDefault: () => {} } as React.FormEvent<HTMLFormElement>;
+    const idToSend = latestConversationIdRef.current;
+
+    console.log(`Sending programmatic message for conversation: ${idToSend ?? 'NEW'} | Case ID (in hook body): ${activeCaseId}`);
+    
+    append(tempUserMessage, {
+        options: {
+            body: {
+              conversationId: idToSend,
+              caseId: activeCaseId,
+              documentContextIds: selectedDocumentIds,
+            }
+        }
+    });
+
+    scrollToBottom();
+  }, [activeCaseId, selectedDocumentIds, append, scrollToBottom]);
+
   useEffect(() => {
     setCurrentConversationId(initialConversationId);
     setMessages([]);
@@ -176,8 +220,8 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
               createdAt: msg.created_at,
               model: msg.model,
               documentContext: msg.document_context,
-      }));
-      setMessages(formattedMessages);
+            }));
+            setMessages(formattedMessages);
           } else {
             setMessages([]);
           }
@@ -200,11 +244,25 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     }
   }, [initialConversationId, setMessages, useToastToast]);
 
-  const scrollToBottom = useCallback(() => {
-    setTimeout(() => {
-      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-    }, 100);
-  }, []);
+  useEffect(() => {
+    if (preloadedContext) {
+      console.log('ChatInterface detected preloaded context:', preloadedContext);
+      
+      let contextMessage = `Let's discuss the ${preloadedContext.analysisType} from the document "${preloadedContext.documentName}".`;
+      
+      if (preloadedContext.analysisType === 'risks' && preloadedContext.analysisItem.title) {
+        contextMessage += `\n\nRisk: ${preloadedContext.analysisItem.title}\nSeverity: ${preloadedContext.analysisItem.severity}\nExplanation: ${preloadedContext.analysisItem.explanation}`;
+      } else if (preloadedContext.analysisType === 'clauses' && preloadedContext.analysisItem.title) {
+         contextMessage += `\n\nClause: ${preloadedContext.analysisItem.title}\nText: ${preloadedContext.analysisItem.text}`;
+      } else {
+        contextMessage += `\n\nDetails:\n\`\`\`json\n${JSON.stringify(preloadedContext.analysisItem, null, 2)}\`\`\`\n`;
+      }
+
+      handleSend(contextMessage);
+
+      setPreloadedContext(null);
+    }
+  }, [preloadedContext, setPreloadedContext, handleSend]);
 
   useEffect(() => {
     if (!isHistoryLoading) {
@@ -231,33 +289,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
         }
       }
     });
-    scrollToBottom();
-  };
-
-  const handleSend = (messageContent: string) => {
-    if (!activeCaseId) return;
-    if (!messageContent.trim() && selectedDocumentIds.length === 0) return;
-
-    const tempUserMessage: VercelMessage = {
-      id: Date.now().toString(),
-      role: 'user',
-      content: messageContent
-    };
-    append(tempUserMessage);
-
-    const fakeEvent = { preventDefault: () => {} } as React.FormEvent<HTMLFormElement>;
-    const idToSend = latestConversationIdRef.current;
-
-    console.log(`Sending programmatic message for conversation: ${idToSend ?? 'NEW'} | Case ID (in hook body): ${activeCaseId}`);
-    handleSubmit(fakeEvent, {
-      options: {
-        body: {
-          conversationId: idToSend,
-        },
-        data: { content: messageContent }
-      }
-    });
-
     scrollToBottom();
   };
 

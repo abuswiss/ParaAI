@@ -43,7 +43,7 @@ serve(async (req: Request) => {
     const { data: conversations, error: fetchError } = await supabaseAdmin
       .from('conversations')
       .select('id')
-      .eq('user_id', userId);
+      .eq('owner_id', userId);
 
     if (fetchError) {
       console.error('Error fetching conversations:', fetchError);
