@@ -518,12 +518,12 @@ export const searchDocumentsByName = async (
 
     let request = supabase
       .from('documents')
-      .select('*') // Select all needed fields for DocumentMetadata
+      .select('*')
       .eq('owner_id', user.id)
       .eq('is_deleted', false)
       .ilike('filename', `%${query}%`)
       .limit(limit)
-      .order('last_accessed_at', { ascending: false, nullsFirst: false }); // Or order by updated_at/uploaded_at
+      .order('uploaded_at', { ascending: false, nullsFirst: false });
 
     if (caseId) {
         request = request.eq('case_id', caseId);
@@ -549,7 +549,6 @@ export const searchDocumentsByName = async (
         extractedText: doc.extracted_text,
         editedContent: doc.edited_content,
         errorMessage: doc.error_message,
-        lastAccessedAt: doc.last_accessed_at,
         version: doc.version,
         isDeleted: doc.is_deleted,
         ownerId: doc.owner_id,
@@ -563,3 +562,65 @@ export const searchDocumentsByName = async (
     return { data: null, error: error as Error };
   }
 };
+
+// --- Semantic Search Result Types ---
+// Matches the structure returned by the semantic-search-documents function
+export interface SemanticMatch {
+  chunkText: string;
+  similarity: number;
+}
+
+export interface SemanticSearchResultItem {
+  documentId: string;
+  filename: string;
+  caseId?: string | null; // ADDED caseId (optional because root docs might not have one)
+  matches: SemanticMatch[]; // Typically contains the best match based on backend logic
+}
+
+/**
+ * Perform semantic search across document contents using embeddings.
+ */
+export const semanticSearchDocuments = async (
+  query: string,
+  limit: number = 5,
+  threshold: number = 0.75 // Optional: pass threshold if backend supports it
+): Promise<{ data: SemanticSearchResultItem[] | null; error: Error | null }> => {
+  try {
+    console.log(`Invoking semantic-search-documents function for query: "${query}"`);
+    const { data: functionData, error: functionError } = await supabase.functions.invoke<{ success: boolean, results: SemanticSearchResultItem[], error?: string }>(
+      'semantic-search-documents',
+      {
+        body: {
+          query,
+          match_count: limit,
+          match_threshold: threshold,
+        },
+      }
+    );
+
+    if (functionError) {
+      console.error('Error invoking semantic search function:', functionError.message);
+      throw new Error(`Function invocation failed: ${functionError.message}`);
+    }
+
+    if (!functionData) {
+        throw new Error('No data returned from semantic search function.');
+    }
+
+    // Check for errors reported within the function response body
+    if (!functionData.success || functionData.error) {
+      console.error('Semantic search function returned an error:', functionData.error);
+      throw new Error(functionData.error || 'Semantic search failed on the backend.');
+    }
+
+    console.log(`Semantic search returned ${functionData.results?.length ?? 0} results.`);
+    return { data: functionData.results || [], error: null };
+
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error during semantic search';
+    console.error('Error in semanticSearchDocuments:', message);
+    return { data: null, error: error instanceof Error ? error : new Error(message) };
+  }
+};
+
+// --- Utility Functions (if any) ---

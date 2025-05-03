@@ -180,50 +180,58 @@ const Sidebar = React.forwardRef<HTMLDivElement, SidebarProps>(
     },
     ref
   ) => {
-    const isMobile = useIsMobile();
     const { state } = useSidebar();
+    const isMobile = useIsMobile();
 
-    if (isMobile) {
-       // Handle mobile view if necessary, or return null/Sheet
-       // Keeping original mobile logic for now
-       const { openMobile, setOpenMobile } = useSidebar()
-       return (
-         <Sheet open={openMobile} onOpenChange={setOpenMobile}>
-           <SheetContent
-             side={side}
-             style={
-               {
-                 "--sidebar-width-mobile": SIDEBAR_WIDTH_MOBILE,
-               } as React.CSSProperties
-             }
-             className={cn(
-               "flex w-[var(--sidebar-width-mobile)] flex-col p-0",
-               className
-             )}
-             {...props}
-           >
-             {children}
-           </SheetContent>
-         </Sheet>
-       )
+    if (isMobile && collapsible === "offcanvas") {
+      const { openMobile, setOpenMobile } = useSidebar()
+      return (
+        <Sheet open={openMobile} onOpenChange={setOpenMobile}>
+          <SheetContent
+            side={side}
+            style={
+              {
+                "--sidebar-width-mobile": SIDEBAR_WIDTH_MOBILE,
+              } as React.CSSProperties
+            }
+            className={cn(
+              "flex w-[var(--sidebar-width-mobile)] flex-col p-0",
+              className
+            )}
+            {...props}
+          >
+            {children}
+          </SheetContent>
+        </Sheet>
+      )
     }
 
-    // Desktop View - Simplified
     return (
-      <div
-        ref={ref}
+      <aside
         data-state={state}
+        data-variant={variant}
+        data-side={side}
         className={cn(
-          "relative h-full flex flex-col bg-surface text-secondary border-r",
-          state === 'expanded' ? 'w-[var(--sidebar-width)]' : 'w-[var(--sidebar-width-icon)]',
-          "transition-all duration-300 ease-in-out overflow-hidden", // Keep overflow hidden on main container
+          "flex flex-col",
+          "transition-[width,margin] duration-300 ease-in-out",
+          variant === "sidebar" &&
+            "min-h-svh group-data-[variant=inset]/sidebar-wrapper:border-r",
+          variant === "inset" && "absolute inset-y-0 h-full",
+          side === "left"
+            ? "left-0 group-data-[variant=inset]/sidebar-wrapper:ml-[var(--sidebar-width-icon)]"
+            : "right-0 group-data-[variant=inset]/sidebar-wrapper:mr-[var(--sidebar-width-icon)]",
+          state === "expanded" && "w-[var(--sidebar-width)]",
+          state === "collapsed" &&
+            collapsible === "icon" &&
+            "w-[var(--sidebar-width-icon)]",
+          "bg-white text-gray-900",
           className
         )}
+        ref={ref}
         {...props}
       >
-        {/* Directly render children. Layout is now fully managed by AppLayout.tsx */}
         {children}
-      </div>
+      </aside>
     )
   }
 )
@@ -396,11 +404,19 @@ const SidebarGroup = React.forwardRef<
   HTMLDivElement,
   React.ComponentProps<"div">
 >(({ className, ...props }, ref) => {
+  // Get sidebar state to conditionally apply padding
+  const { state: sidebarState } = useSidebar(); 
+
   return (
     <div
       ref={ref}
       data-sidebar="group"
-      className={cn("relative flex w-full min-w-0 flex-col p-2", className)}
+      className={cn(
+        "relative flex w-full min-w-0 flex-col", 
+        // Only apply padding when expanded
+        sidebarState === 'expanded' && "p-2", 
+        className
+      )}
       {...props}
     />
   )
@@ -491,7 +507,7 @@ const SidebarMenuItem = React.forwardRef<
 SidebarMenuItem.displayName = "SidebarMenuItem"
 
 const sidebarMenuButtonVariants = cva(
-  "peer/menu-button flex w-full items-center gap-2 overflow-hidden rounded-md p-2 text-left text-sm outline-none ring-ring transition-[width,height,padding] hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 active:bg-accent active:text-accent-foreground disabled:pointer-events-none disabled:opacity-50 group-has-[[data-sidebar=menu-action]]/menu-item:pr-8 aria-disabled:pointer-events-none aria-disabled:opacity-50 data-[active=true]:bg-accent data-[active=true]:font-medium data-[active=true]:text-accent-foreground data-[state=open]:hover:bg-accent data-[state=open]:hover:text-accent-foreground group-data-[collapsible=icon]:!size-8 group-data-[collapsible=icon]:!p-2 group-data-[collapsible=icon]:!justify-center group-data-[state=collapsed]:justify-center [&>span:last-child]:truncate [&>svg]:size-4 [&>svg]:shrink-0",
+  "peer/menu-button flex w-full items-center gap-2 overflow-hidden rounded-md p-2 text-left text-sm outline-none ring-ring transition-[width,height,padding] hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 active:bg-accent active:text-accent-foreground disabled:pointer-events-none disabled:opacity-50 group-has-[[data-sidebar=menu-action]]/menu-item:pr-8 aria-disabled:pointer-events-none aria-disabled:opacity-50 data-[active=true]:bg-accent data-[active=true]:font-medium data-[active=true]:text-accent-foreground data-[state=open]:hover:bg-accent data-[state=open]:hover:text-accent-foreground group-data-[collapsible=icon]:!size-8 group-data-[collapsible=icon]:!p-2 group-data-[collapsible=icon]:items-center group-data-[collapsible=icon]:!justify-center group-data-[state=collapsed]:justify-center [&>span:last-child]:truncate [&>svg]:size-4 [&>svg]:shrink-0",
   {
     variants: {
       variant: {

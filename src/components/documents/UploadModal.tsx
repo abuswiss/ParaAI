@@ -132,10 +132,15 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose }) => {
       setOverallError("No pending files selected for upload.");
       return;
     }
+    if (!activeCaseId) {
+        setOverallError("Cannot upload: No case is currently active.");
+        return;
+    }
     setIsUploading(true);
     setOverallError(null);
     let refreshNeeded = false;
     let uploadErrors = 0;
+    let firstSuccessfulUploadId: string | null = null;
 
     // --- Upload files sequentially --- 
     for (let i = 0; i < filesToUpload.length; i++) {
@@ -147,8 +152,8 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose }) => {
         const taskId = uuidv4();
         addTask({ 
             id: taskId, 
-            description: `Uploading ${currentFileStatus.file.name}...`, 
-            status: 'running', // Use 'running' consistently
+            name: `Uploading ${currentFileStatus.file.name}...`, // Use name field
+            status: 'processing', // Use processing consistently?
             progress: 0
         });
 
@@ -166,23 +171,29 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose }) => {
                     idx === currentIndex ? { ...f, progress: 10 } : f
                 )
             );
-            updateTask({ id: taskId, progress: 10 }); // Update global task too
+            updateTask({ id: taskId, delta: { progress: 10 } }); // Update global task too
 
             const { data: uploadResult, error: uploadError } = await uploadAndProcessDocument(currentFileStatus.file, activeCaseId);
             
-            if (uploadError || !uploadResult) {
-                throw uploadError || new Error('Upload initiation failed.');
+            if (uploadError || !uploadResult?.id) { // Check for uploadResult.id
+                throw uploadError || new Error('Upload initiation failed or did not return an ID.');
             }
-
-            // Set the active editor item immediately after successful upload initiation
-            setActiveEditorItem({ type: 'document', id: uploadResult.id });
+            
+            // *** Set active context for the FIRST successfully initiated upload ***
+            if (!firstSuccessfulUploadId) {
+                firstSuccessfulUploadId = uploadResult.id;
+                setActiveEditorItem({ type: 'document', id: uploadResult.id });
+                console.log(`UploadModal: Set active editor item to first uploaded doc: ${uploadResult.id}`);
+            }
 
             // Update task status upon successful initiation (backend handles rest)
             updateTask({ 
                 id: taskId, 
-                status: 'success', // Mark as success for frontend (backend processing continues)
-                progress: 100, 
-                description: `${currentFileStatus.file.name}: Processing started...`
+                delta: {
+                    status: 'completed', // Mark task complete once backend accepts it
+                    progress: 100, 
+                    name: `${currentFileStatus.file.name}: Processing started...`
+                }
             });
             setFilesToUpload(prev => 
                 prev.map((f, idx) => 
@@ -194,7 +205,7 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose }) => {
             // Updated toast message
             toast({
                 title: "Upload Successful",
-                description: `Document "${currentFileStatus.file.name}" is processing. You can interact with it in chat shortly.`,
+                description: `Document "${currentFileStatus.file.name}" is processing.`,
             });
 
             // Auto-remove task from status bar after a delay
@@ -206,7 +217,14 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose }) => {
             const errorMessage = error instanceof Error ? error.message : 'Unknown upload error';
             
             if (taskId) {
-                 updateTask({ id: taskId, status: 'error', description: `Error: ${errorMessage}` });
+                 updateTask({ 
+                     id: taskId, 
+                     delta: { 
+                         status: 'failed', 
+                         name: `Error: ${currentFileStatus.file.name}`, 
+                         error: errorMessage 
+                    }
+                });
                  // Keep error task visible longer
                  setTimeout(() => removeTask(taskId), 20000); 
             }
@@ -220,15 +238,16 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose }) => {
     } // End of sequential loop
 
     setIsUploading(false);
-    if (uploadErrors === filesToUpload.length) {
+    if (uploadErrors === filesToUpload.filter(f => f.status !== 'processing_started').length && filesToUpload.length > 0) { // Check against non-processed files
         setOverallError(`All ${uploadErrors} file(s) failed to upload.`);
     } else if (uploadErrors > 0) {
         setOverallError(`${uploadErrors} file(s) failed to upload. Others initiated processing.`);
+        // Don't close automatically if some failed
     } else if (refreshNeeded) {
-        // Close modal automatically if all uploads initiated successfully (toast moved earlier)
+        // Close modal automatically if all uploads initiated successfully
         onClose(true); // Signal refresh needed
     } else {
-        // Should not happen if logic is correct, but handle just in case
+        // Handle case where no files were actually processed (e.g., all skipped)
         onClose(false);
     }
   };
@@ -237,6 +256,8 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose }) => {
   const handleOpenChange = (open: boolean) => {
       if (!open && !isUploading) { // Only allow close if not uploading
           onClose(); // Call original onClose
+          setFilesToUpload([]); // Explicitly clear files when closing via X/overlay
+          setOverallError(null);
       }
       // If trying to close while uploading, Dialog should prevent it if modal prop is true
   };
@@ -244,130 +265,128 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose }) => {
   const pendingFileCount = filesToUpload.filter(f => f.status === 'pending' && !isUploading).length;
 
   return (
-    <Dialog open={isOpen} onOpenChange={handleOpenChange} modal={true}> {/* Use modal={true} to prevent closing via Esc/overlay click during upload */} 
+    <Dialog open={isOpen} onOpenChange={handleOpenChange} modal={true}> 
       <DialogContent 
         className="sm:max-w-2xl" 
-        onDragEnter={(e: React.DragEvent<HTMLDivElement>) => handleDrag(e, 'enter')} // Explicit type
-        onDragLeave={(e: React.DragEvent<HTMLDivElement>) => handleDrag(e, 'leave')} // Explicit type
-        onDragOver={(e: React.DragEvent<HTMLDivElement>) => handleDrag(e, 'over')}  // Explicit type
-        onDrop={(e: React.DragEvent<HTMLDivElement>) => handleDrag(e, 'drop')}    // Explicit type
-        aria-describedby={undefined} // Remove default aria-describedby if not using DialogDescription
+        onDragEnter={(e: React.DragEvent<HTMLDivElement>) => handleDrag(e, 'enter')} 
+        onDragLeave={(e: React.DragEvent<HTMLDivElement>) => handleDrag(e, 'leave')} 
+        onDragOver={(e: React.DragEvent<HTMLDivElement>) => handleDrag(e, 'over')} 
+        onDrop={(e: React.DragEvent<HTMLDivElement>) => handleDrag(e, 'drop')}
+        // Prevent default close on escape key when uploading
+        onEscapeKeyDown={(e) => {
+          if (isUploading) {
+            e.preventDefault();
+          }
+        }}
+        // Prevent default close on pointer down outside when uploading
+        onPointerDownOutside={(e) => {
+             if (isUploading) {
+               e.preventDefault();
+             }
+         }}
       >
         <DialogHeader>
           <DialogTitle>Upload Documents</DialogTitle>
           <DialogDescription>
-            {activeCaseId ? `Upload files to the active case.` : "Upload files. Select a case first to associate them."}
-            Drag and drop files or click to browse.
+            {activeCaseId ? "Select or drop files to upload to the current case." : "Please select a case before uploading."}
           </DialogDescription>
         </DialogHeader>
 
+        {/* Drop Zone and File Input */}
+        <div 
+            className={`mt-4 p-6 border-2 border-dashed rounded-lg text-center transition-colors ${dragActive ? 'border-primary bg-primary/5' : 'border-border hover:border-muted-foreground/50'}`}
+        >
+            <input 
+                type="file"
+                id="file-upload"
+                multiple 
+                onChange={handleFileChange}
+                className="hidden"
+                accept=".pdf,.doc,.docx,.txt,.md,.json"
+                disabled={isUploading || !activeCaseId}
+            />
+            <Label 
+                htmlFor="file-upload"
+                className={`cursor-pointer flex flex-col items-center ${!activeCaseId ? 'opacity-50 cursor-not-allowed' : ''}`}
+            >
+                 <Icons.Upload className="h-12 w-12 text-muted-foreground mb-2" />
+                 <span className="font-semibold text-primary">Click to select files</span>
+                 <span className="text-muted-foreground mt-1">or drag and drop</span>
+                 <p className="text-xs text-muted-foreground mt-2">Supported: PDF, DOCX, TXT, MD, JSON</p>
+            </Label>
+        </div>
+
+        {/* File List */}
+        {filesToUpload.length > 0 && (
+            <div className="mt-4 max-h-60 overflow-y-auto pr-2 space-y-2">
+                {filesToUpload.map((fileStatus, index) => (
+                    <div key={index} className="flex items-center justify-between p-2 border rounded-md bg-background shadow-sm">
+                        <div className="flex items-center space-x-2 overflow-hidden">
+                             <span className="text-2xl">
+                                {fileStatus.status === 'pending' && <Clock className="h-5 w-5 text-muted-foreground" />}
+                                {fileStatus.status === 'uploading' && <Spinner size="xs" />}
+                                {fileStatus.status === 'processing_started' && <CheckCircle className="h-5 w-5 text-green-500" />}
+                                {fileStatus.status === 'error' && <XCircle className="h-5 w-5 text-destructive" />}
+                                {fileStatus.status === 'complete' && <CheckCircle className="h-5 w-5 text-green-500" />}
+                             </span>
+                             <div className="flex flex-col overflow-hidden">
+                                <span className="text-sm font-medium truncate" title={fileStatus.file.name}>{fileStatus.file.name}</span>
+                                <span className="text-xs text-muted-foreground">
+                                    {fileStatus.status === 'error' ? (
+                                        <Tooltip>
+                                            <TooltipTrigger asChild>
+                                                <span className="text-destructive cursor-help">Upload Failed</span>
+                                            </TooltipTrigger>
+                                            <TooltipContent side="bottom"><p>{fileStatus.error || 'Unknown error'}</p></TooltipContent>
+                                        </Tooltip>
+                                    ) : fileStatus.status === 'uploading' ? (
+                                        `Uploading... ${fileStatus.progress !== undefined ? fileStatus.progress + '%' : ''}`
+                                    ) : fileStatus.status === 'processing_started' ? (
+                                        `Processing...`
+                                    ) : fileStatus.status === 'complete' ? (
+                                         `Complete`
+                                    ) : (
+                                        `Pending`
+                                    )}
+                                </span>
+                             </div>
+                        </div>
+                         <Button 
+                             variant="ghost" 
+                             size="icon" 
+                             className="h-6 w-6 flex-shrink-0 text-muted-foreground hover:text-destructive disabled:opacity-50"
+                             onClick={() => removeFile(index)}
+                             disabled={isUploading && (fileStatus.status === 'uploading' || fileStatus.status === 'processing_started')}
+                             aria-label="Remove file"
+                         >
+                             <XCircle className="h-4 w-4" />
+                         </Button>
+                     </div>
+                 ))}
+             </div>
+         )}
+
         {overallError && (
             <Alert variant="destructive" className="mt-4">
+                <AlertTriangle className="h-4 w-4" />
                 <AlertDescription>{overallError}</AlertDescription>
             </Alert>
         )}
 
-        {/* Drag and Drop Area / File Input - Simplified with Label */}
-        <Label 
-          className={`relative flex flex-col items-center justify-center w-full h-32 border-2 border-dashed rounded-lg cursor-pointer transition-colors ${dragActive ? 'border-primary bg-primary/10' : 'border-border hover:border-primary/80 bg-background/50'}`}
-        >
-            <div className="flex flex-col items-center justify-center pt-5 pb-6 text-center">
-                <Icons.Upload className={`w-8 h-8 mb-2 transition-colors ${dragActive ? 'text-primary' : 'text-muted-foreground'}`} />
-                <p className={`mb-1 text-sm transition-colors ${dragActive ? 'text-primary' : 'text-muted-foreground'}`}>
-                    <span className="font-semibold">Click to upload</span> or drag and drop
-                </p>
-                <p className="text-xs text-muted-foreground/80">PDF, DOCX, DOC, TXT, MD</p>
-            </div>
-            {/* Supported formats text */}
-            <p className="text-xs text-muted-foreground/70 absolute bottom-2 left-1/2 transform -translate-x-1/2">
-                Supported: PDF, DOCX, DOC, TXT, MD
-            </p>
-            <Input 
-                id="file-upload-input" 
-                type="file" 
-                multiple 
-                onChange={handleFileChange} 
-                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" // Visually hidden but takes space
-                accept=".pdf,.doc,.docx,.txt,.md" 
-                disabled={isUploading}
-            />
-        </Label>
-        
-        {/* File List */}
-        {filesToUpload.length > 0 && (
-            <div className="mt-4 space-y-3 max-h-60 overflow-y-auto pr-2">
-                {filesToUpload.map((fileStatus, index) => (
-                    <div key={index} className="flex items-center justify-between p-2 border rounded-md bg-muted/30">
-                         <div className="flex items-center space-x-3 flex-grow min-w-0"> {/* Ensure text truncates */}
-                            {/* Icon based on status */}
-                            {fileStatus.status === 'pending' && <FileText className="h-5 w-5 text-muted-foreground flex-shrink-0" />}
-                            {fileStatus.status === 'uploading' && <Spinner size="sm" className="text-primary flex-shrink-0" />}
-                            {fileStatus.status === 'processing_started' && <Clock className="h-5 w-5 text-blue-500 flex-shrink-0" />}
-                            {fileStatus.status === 'complete' && <CheckCircle className="h-5 w-5 text-green-500 flex-shrink-0" />}
-                            {fileStatus.status === 'error' && <AlertTriangle className="h-5 w-5 text-destructive flex-shrink-0" />}
-
-                            {/* File Name & Size */}
-                            <div className="flex flex-col min-w-0"> {/* Ensure text truncates */}
-                                <span className="text-sm font-medium truncate" title={fileStatus.file.name}>
-                                    {fileStatus.file.name}
-                                </span>
-                                <span className="text-xs text-muted-foreground">
-                                    {(fileStatus.file.size / (1024 * 1024)).toFixed(2)} MB
-                                </span>
-                            </div>
-                         </div>
-
-                        {/* Progress Bar & Status/Actions */}
-                        <div className="flex items-center space-x-2 flex-shrink-0 ml-2">
-                            {fileStatus.status === 'uploading' && fileStatus.progress !== undefined && (
-                                <div className="w-24 flex flex-col items-end">
-                                     <Progress value={fileStatus.progress} className="h-1.5 w-full" />
-                                     <span className="text-xs text-muted-foreground mt-0.5">{fileStatus.progress}%</span>
-                                </div>
-                            )}
-                            {fileStatus.status === 'processing_started' && (
-                                <Badge variant="outline" className="text-xs border-blue-500/50 text-blue-600 dark:text-blue-400">Processing</Badge>
-                            )}
-                            {fileStatus.status === 'complete' && (
-                                <Badge variant="outline" className="text-xs border-green-500/50 text-green-600 dark:text-green-400">Complete</Badge>
-                            )}
-                             {fileStatus.status === 'error' && (
-                                <Tooltip>
-                                    <TooltipTrigger>
-                                        <Badge variant="destructive" className="text-xs cursor-help">Error</Badge>
-                                    </TooltipTrigger>
-                                    <TooltipContent>
-                                        <p className="max-w-xs">{fileStatus.error || 'Unknown error'}</p>
-                                    </TooltipContent>
-                                </Tooltip>
-                             )}
-                             {(fileStatus.status === 'pending' || fileStatus.status === 'error') && !isUploading && (
-                                <Button
-                                    variant="ghost"
-                                    size="icon_xs"
-                                    onClick={() => removeFile(index)}
-                                    className="text-muted-foreground hover:text-destructive"
-                                    aria-label="Remove file"
-                                >
-                                    <XCircle className="h-4 w-4" />
-                                </Button>
-                             )}
-                        </div>
-                    </div>
-                ))}
-            </div>
-        )}
-
         <DialogFooter className="mt-6">
-          <DialogClose asChild>
-             {/* Disable close button during upload */} 
-            <Button variant="outline" onClick={() => onClose()} disabled={isUploading}>Cancel</Button>
-          </DialogClose>
+          <Button 
+            variant="outline" 
+            onClick={() => handleOpenChange(false)} 
+            disabled={isUploading}
+           >
+               Cancel
+           </Button>
           <Button 
             onClick={handleUpload} 
-            disabled={pendingFileCount === 0 || isUploading}
-          >
-            {isUploading ? <><Spinner size="sm" className="mr-2" /> Uploading...</> : `Upload ${pendingFileCount} File(s)`}
+            disabled={pendingFileCount === 0 || isUploading || !activeCaseId}
+           >
+            {isUploading ? <Spinner size="xs" className="mr-2" /> : <Icons.Upload className="mr-2 h-4 w-4" />}
+            Upload {pendingFileCount > 0 ? `(${pendingFileCount})` : ''}
           </Button>
         </DialogFooter>
       </DialogContent>

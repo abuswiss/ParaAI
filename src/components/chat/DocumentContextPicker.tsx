@@ -1,8 +1,11 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { useAtomValue, useSetAtom } from 'jotai';
+import { useAtomValue, useSetAtom, useAtom } from 'jotai';
 import { DocumentMetadata } from '@/services/documentService';
 import * as documentService from '@/services/documentService';
-import { activeEditorItemAtom } from '@/atoms/appAtoms';
+import { 
+    activeCaseIdAtom,
+    chatDocumentContextIdsAtom
+} from '@/atoms/appAtoms';
 import { 
     Dialog, 
     DialogContent, 
@@ -18,7 +21,7 @@ import { Checkbox } from "@/components/ui/Checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Input } from "@/components/ui/Input";
 import { Label } from "@/components/ui/Label";
-import { Folder, FileText, Paperclip, Search, X } from 'lucide-react';
+import { FileText, Search, X, Check, List } from 'lucide-react';
 import { Spinner } from '@/components/ui/Spinner';
 import { Alert, AlertDescription } from '@/components/ui/Alert';
 import { cn } from '@/lib/utils';
@@ -26,22 +29,20 @@ import { cn } from '@/lib/utils';
 interface DocumentContextPickerProps {
     isOpen: boolean;
     onOpenChange: (isOpen: boolean) => void;
-    activeCaseId: string | null;
 }
 
 const DocumentContextPicker: React.FC<DocumentContextPickerProps> = ({ 
     isOpen,
     onOpenChange,
-    activeCaseId, 
  }) => {
-  const activeEditorItem = useAtomValue(activeEditorItemAtom);
-  const currentActiveDocId = activeEditorItem?.type === 'document' ? activeEditorItem.id : null;
-  const [selectedContextIdInModal, setSelectedContextIdInModal] = useState<string | null>(null);
+  const activeCaseId = useAtomValue(activeCaseIdAtom);
+  const [selectedContextIds, setSelectedContextIds] = useAtom(chatDocumentContextIdsAtom);
+  
+  const [modalSelectedIds, setModalSelectedIds] = useState<string[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [caseDocuments, setCaseDocuments] = useState<DocumentMetadata[]>([]);
-  const setActiveEditorItem = useSetAtom(activeEditorItemAtom);
   
   useEffect(() => {
     if (isOpen && activeCaseId) {
@@ -52,7 +53,7 @@ const DocumentContextPicker: React.FC<DocumentContextPickerProps> = ({
              const { data, error: fetchError } = await documentService.getUserDocuments(activeCaseId); 
              if (fetchError) throw fetchError;
              setCaseDocuments(data || []);
-             setSelectedContextIdInModal(currentActiveDocId);
+             setModalSelectedIds(selectedContextIds);
         } catch (err: any) {
              console.error("Error fetching documents for context picker:", err);
              setError("Failed to load documents.");
@@ -62,12 +63,12 @@ const DocumentContextPicker: React.FC<DocumentContextPickerProps> = ({
         }
       };
       fetchCaseDocuments();
-    } else {
+    } else if (!isOpen) {
         setSearchTerm('');
-        setCaseDocuments([]);
-        setSelectedContextIdInModal(null);
+        setModalSelectedIds([]);
+        setError(null);
     }
-  }, [isOpen, activeCaseId, currentActiveDocId]);
+  }, [isOpen, activeCaseId, selectedContextIds]);
 
   const filteredDocuments = useMemo(() => {
     if (!caseDocuments) return [];
@@ -76,15 +77,22 @@ const DocumentContextPicker: React.FC<DocumentContextPickerProps> = ({
     );
   }, [caseDocuments, searchTerm]);
 
-  const handleSelection = (docId: string) => {
-    setActiveEditorItem({ type: 'document', id: docId });
-    onOpenChange(false);
+  const handleCheckboxChange = (docId: string) => {
+    setModalSelectedIds(prev => 
+        prev.includes(docId) 
+            ? prev.filter(id => id !== docId) 
+            : [...prev, docId]
+    );
   };
 
-  const handleClearSelection = () => {
-    setActiveEditorItem(prev => (prev?.type === 'document' ? null : prev));
+  const handleConfirmSelection = () => {
+    setSelectedContextIds(modalSelectedIds);
     onOpenChange(false);
   };
+  
+  const handleClearAll = () => {
+      setModalSelectedIds([]);
+  }
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
@@ -92,7 +100,7 @@ const DocumentContextPicker: React.FC<DocumentContextPickerProps> = ({
         <DialogHeader>
           <DialogTitle>Select Document Context</DialogTitle>
           <DialogDescription>
-            Choose a single document to provide context for your chat.
+            Choose one or more documents to provide context for your chat.
           </DialogDescription>
         </DialogHeader>
         <div className="relative my-4">
@@ -120,34 +128,35 @@ const DocumentContextPicker: React.FC<DocumentContextPickerProps> = ({
                  </p>
              ) : (
                  <div className="space-y-1">
-                     <Button 
-                        variant="ghost"
-                        onClick={handleClearSelection}
-                        className={cn(
-                            "w-full justify-start px-2 py-1.5 text-sm",
-                            selectedContextIdInModal === null ? "text-primary font-medium" : "text-muted-foreground"
-                        )}
-                     >
-                        <X className="h-4 w-4 mr-2"/> No Context
-                     </Button>
-                     {filteredDocuments.map(doc => (
-                         <Button 
-                            key={doc.id}
-                            variant="ghost"
-                            onClick={() => handleSelection(doc.id)}
-                            className={cn(
-                                "w-full justify-start px-2 py-1.5 text-sm",
-                                selectedContextIdInModal === doc.id ? "bg-accent text-accent-foreground font-medium" : "text-muted-foreground"
-                             )}
-                         >
-                             <FileText className="h-4 w-4 mr-2 flex-shrink-0"/> 
-                             <span className="truncate">{doc.filename}</span>
-                         </Button>
+                    {filteredDocuments.map(doc => (
+                         <div key={doc.id} className="flex items-center space-x-2 p-2 rounded-md hover:bg-accent cursor-pointer" onClick={() => handleCheckboxChange(doc.id)}>
+                            <Checkbox 
+                                id={`doc-${doc.id}`}
+                                checked={modalSelectedIds.includes(doc.id)}
+                                onCheckedChange={() => handleCheckboxChange(doc.id)}
+                            />
+                             <Label 
+                                htmlFor={`doc-${doc.id}`}
+                                className={cn(
+                                    "flex items-center flex-grow cursor-pointer text-sm",
+                                    modalSelectedIds.includes(doc.id) ? "text-accent-foreground font-medium" : "text-muted-foreground"
+                                )}
+                             >
+                                <FileText className="h-4 w-4 mr-2 flex-shrink-0"/> 
+                                <span className="truncate">{doc.filename}</span>
+                             </Label>
+                         </div>
                      ))}
                  </div>
              )}
            </div>
         </ScrollArea>
+        <DialogFooter className="mt-4">
+            <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+            <Button onClick={handleConfirmSelection}>
+                <Check className="h-4 w-4 mr-2"/> Confirm ({modalSelectedIds.length} selected)
+            </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

@@ -1,6 +1,6 @@
 import React, { useState, KeyboardEvent, useRef, useEffect, useCallback, useMemo } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Search, BarChart2, Globe, FileText, HelpCircle, Send, Upload as UploadIcon, X, DraftingCompass, Microscope, Clock, Lightbulb, Puzzle, ChevronsUpDown, Check, SearchCheck } from 'lucide-react';
+import { Search, BarChart2, Globe, FileText, HelpCircle, Send, Upload as UploadIcon, X, DraftingCompass, Microscope, Clock, Lightbulb, Puzzle, ChevronsUpDown, Check, SearchCheck, Paperclip, ListChecks } from 'lucide-react';
 import { Button } from "@/components/ui/Button";
 import { Icons } from "@/components/ui/Icons";
 import {
@@ -23,7 +23,9 @@ import {
     currentCaseDocumentsAtom,
     editorTextToQueryAtom,
     chatPreloadContextAtom,
-    activeDocumentContextIdAtom,
+    chatDocumentContextIdsAtom,
+    uploadModalOpenAtom,
+    activeEditorItemAtom,
 } from '@/atoms/appAtoms';
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/Tooltip";
 import TextareaAutosize from 'react-textarea-autosize';
@@ -34,7 +36,7 @@ import DocumentContextPicker from './DocumentContextPicker';
 
 interface SendMessagePayload {
   content: string;
-  documentId: string | null;
+  documentContext: string[];
   agent: string;
   context?: {
     documentText: string;
@@ -45,7 +47,6 @@ interface SendMessagePayload {
 
 interface ChatInputProps {
   onSendMessage: (payload: SendMessagePayload) => void;
-  onFileUpload?: (files: File[]) => void;
   disabled?: boolean;
   initialValue?: string;
   isLoading: boolean;
@@ -155,14 +156,12 @@ interface MessageContext {
 
 const ChatInput: React.FC<ChatInputProps> = ({ 
   onSendMessage, 
-  onFileUpload, 
   disabled = false,
   initialValue,
   isLoading,
 }) => {
   const [inputValue, setInputValue] = useState(initialValue || '');
   const [showCommandPalette, setShowCommandPalette] = useState(false);
-  const [showContextPicker, setShowContextPicker] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
 
   const [selectedModelId, setSelectedModelId] = useState<string>(availableModels.find(m => m.id === 'default-chat')?.id || availableModels[0].id);
@@ -170,7 +169,6 @@ const ChatInput: React.FC<ChatInputProps> = ({
   const [modelSelectorOpen, setModelSelectorOpen] = useState(false);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const commandPaletteRef = useRef<HTMLDivElement>(null);
   const chatInputContainerRef = useRef<HTMLDivElement>(null);
 
@@ -178,16 +176,13 @@ const ChatInput: React.FC<ChatInputProps> = ({
   const documents = useAtomValue(currentCaseDocumentsAtom);
   const [editorTextToQuery, setEditorTextToQuery] = useAtom(editorTextToQueryAtom);
   const [chatPreloadContext, setChatPreloadContext] = useAtom(chatPreloadContextAtom);
-  const activeDocumentId = useAtomValue(activeDocumentContextIdAtom);
+  const selectedContextIds = useAtomValue(chatDocumentContextIdsAtom);
+  const setIsUploadModalOpen = useSetAtom(uploadModalOpenAtom);
+  const activeEditorItem = useAtomValue(activeEditorItemAtom);
+
   const [messageContext, setMessageContext] = useState<MessageContext | null>(null);
 
-  const selectedContextName = useMemo(() => {
-    if (activeDocumentId && documents) {
-      const doc = documents.find(d => d.id === activeDocumentId);
-      return doc ? doc.filename : 'Unknown Document';
-    } 
-    return null;
-  }, [activeDocumentId, documents]);
+  const [isContextPickerOpen, setIsContextPickerOpen] = useState(false);
 
   useEffect(() => {
     if (initialValue) {
@@ -244,7 +239,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
 
     const payload: SendMessagePayload = {
       content: trimmedValue,
-      documentId: activeDocumentId,
+      documentContext: selectedContextIds,
       agent: selectedModelId,
       context: messageContext || null
     };
@@ -260,22 +255,17 @@ const ChatInput: React.FC<ChatInputProps> = ({
     if (e.key === 'Enter' && !e.shiftKey && !showCommandPalette) {
       e.preventDefault();
       handleSubmit();
-    }
-    if (showCommandPalette && (e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'Enter' || e.key === 'Escape')) {
-       return; 
-    }
-    if (e.key === 'Escape' && showCommandPalette) {
-        setShowCommandPalette(false);
-        e.preventDefault();
-        e.stopPropagation();
+    } else if (e.key === '/' && inputValue === '') {
+      setShowCommandPalette(true);
+    } else if (e.key === 'Escape') {
+      if (showCommandPalette) setShowCommandPalette(false);
     }
   };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const value = e.target.value;
     setInputValue(value);
-
-    if (value.startsWith('/') && value.length > 0 && !value.includes(' ')) {
+    if (value.startsWith('/') && value.length > 0) {
         setShowCommandPalette(true);
     } else {
         setShowCommandPalette(false);
@@ -283,47 +273,43 @@ const ChatInput: React.FC<ChatInputProps> = ({
   };
 
   const handleFileButtonClick = () => {
-    fileInputRef.current?.click();
+    if (!activeCaseId) {
+       console.warn("Upload requires an active case.");
+       alert("Please select or create a case before uploading documents.");
+       return;
+    }
+    setIsUploadModalOpen(true);
   };
 
-  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const files = event.target.files;
-    if (files && files.length > 0 && onFileUpload) {
-      onFileUpload(Array.from(files));
-    }
-    event.target.value = ''; 
-  };
-  
-  const handleDocumentPickerClick = () => {
+  const handleContextPickerOpen = () => {
       if (!activeCaseId) {
-          console.warn("Cannot open document picker without an active case.");
+          console.warn("Context selection requires an active case.");
+          alert("Please select or create a case first.");
           return;
       }
-      setShowContextPicker(true);
-  }
+      setIsContextPickerOpen(true);
+  };
 
   const handleDragEnter = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     e.stopPropagation();
-    if (e.dataTransfer.items && e.dataTransfer.items.length > 0) {
-      setIsDragging(true);
-    }
+    setIsDragging(true);
   };
 
   const handleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     e.stopPropagation();
-    if (chatInputContainerRef.current && !chatInputContainerRef.current.contains(e.relatedTarget as Node)) {
+    setTimeout(() => {
+      if (chatInputContainerRef.current && !chatInputContainerRef.current.contains(e.relatedTarget as Node)) {
         setIsDragging(false);
-    }
+      }
+    }, 50);
   };
 
   const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     e.stopPropagation();
-    if (!isDragging && e.dataTransfer.items && e.dataTransfer.items.length > 0) {
-        setIsDragging(true);
-    }
+    e.dataTransfer.dropEffect = 'copy';
   };
 
   const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
@@ -331,245 +317,210 @@ const ChatInput: React.FC<ChatInputProps> = ({
     e.stopPropagation();
     setIsDragging(false);
 
-    if (e.dataTransfer.files && e.dataTransfer.files.length > 0 && onFileUpload) {
-      const files = Array.from(e.dataTransfer.files);
-      console.log('Files dropped on chat input:', files);
-      onFileUpload(files);
-      e.dataTransfer.clearData();
+    if (!activeCaseId) {
+       console.warn("Upload via drop requires an active case.");
+       alert("Please select or create a case before uploading documents.");
+       return;
     }
+    
+    const files = Array.from(e.dataTransfer.files);
+    if (files.length > 0) {
+        console.log('Files dropped:', files.map(f => f.name));
+        setIsUploadModalOpen(true);
+    } 
   };
 
-  const currentSelectedModel = availableModels.find(m => m.id === selectedModelId) || availableModels.find(m => m.id === 'default-chat') || availableModels[0];
-  const webSearchPossible = currentSelectedModel.supportsWebSearch;
+  const handleCommandSelect = (command: CommandAction) => {
+    setInputValue(command.value + ' ');
+    setShowCommandPalette(false);
+    textareaRef.current?.focus();
+  };
+  
+  const closeCommandPalette = () => {
+    setShowCommandPalette(false);
+  };
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (commandPaletteRef.current && !commandPaletteRef.current.contains(event.target as Node)) {
+        closeCommandPalette();
+      }
+    };
+    if (showCommandPalette) {
+      document.addEventListener('mousedown', handleClickOutside);
+    } else {
+      document.removeEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showCommandPalette]);
+
+  const selectedModel = useMemo(() => availableModels.find(m => m.id === selectedModelId), [selectedModelId]);
+
+  useEffect(() => {
+    if (selectedModel && !selectedModel.supportsWebSearch) {
+      setIsWebSearchEnabled(false);
+    }
+  }, [selectedModel]);
 
   return (
     <div 
       ref={chatInputContainerRef}
       className={cn(
-        "relative flex flex-col gap-2 border-t bg-background transition-colors duration-300",
-        isDragging ? "border-primary ring-2 ring-primary ring-offset-2 ring-offset-background rounded-md" : "border-border"
+        "relative w-full bg-background border-t",
+        isDragging && "outline-dashed outline-2 outline-offset-4 outline-primary"
       )}
       onDragEnter={handleDragEnter}
       onDragLeave={handleDragLeave}
       onDragOver={handleDragOver}
       onDrop={handleDrop}
     >
-      <AnimatePresence>
-        {isDragging && (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="absolute inset-0 bg-primary/10 border-2 border-dashed border-primary rounded-lg z-20 flex items-center justify-center pointer-events-none"
-            >
-               <div className="text-center text-primary font-medium">
-                 <UploadIcon className="h-8 w-8 mx-auto mb-2" />
-                 Drop files to upload
-               </div>
-            </motion.div>
-        )}
-      </AnimatePresence>
-        
-        <AnimatePresence>
-        {showCommandPalette && (
-            <motion.div
-                ref={commandPaletteRef}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: 10 }}
-                transition={{ duration: 0.2 }}
-                className="absolute bottom-full left-0 right-0 mb-2 z-10 max-w-full"
-                style={{ width: chatInputContainerRef.current?.offsetWidth }}
-            >
-                <Command className="rounded-lg border shadow-md bg-popover text-popover-foreground">
-                     <CommandInput placeholder="Type a command or search..." value={inputValue.startsWith('/') ? inputValue.substring(1) : inputValue} />
-                     <ScrollArea className="h-[250px]">
-                         <CommandList>
-                             <CommandEmpty>No results found.</CommandEmpty>
-                             <CommandGroup heading="Commands">
-                                 {commandActions.map((action) => (
-                                     <CommandItem
-                                         key={action.id}
-                                         value={action.value}
-                                         onSelect={() => handleCommandSelect(action.value)}
-                                         className="flex items-center justify-between"
-                                     >
-                                         <div className="flex items-center">
-                                             {action.icon}
-                                             <span>{action.label}</span>
-                                         </div>
-                                         <span className="text-xs text-muted-foreground">{action.description}</span>
-                                     </CommandItem>
-                                 ))}
-                             </CommandGroup>
-                         </CommandList>
-                     </ScrollArea>
-                </Command>
-            </motion.div>
-        )}
-        </AnimatePresence>
-        
-        {/* Context Badge Area - Reads directly from atom */} 
-        {activeDocumentId && selectedContextName && (
-            <div className="px-3 pt-1 pb-1 flex justify-end"> 
-                 <Badge variant="secondary" className="flex items-center gap-1 max-w-[250px] pl-1.5 pr-1 py-0.5 text-xs font-normal border border-border/80 shadow-sm">
-                    <span className="text-muted-foreground mr-1">Context:</span>
-                    <Icons.FileText className="h-3 w-3 flex-shrink-0" />
-                    <span className="truncate font-medium">{selectedContextName}</span>
-                 </Badge>
+       {isDragging && (
+          <div className="absolute inset-0 bg-primary/10 flex flex-col items-center justify-center pointer-events-none z-10">
+              <UploadIcon className="h-16 w-16 text-primary opacity-80 mb-4" />
+              <p className="text-lg font-semibold text-primary">Drop files here to upload</p>
+          </div>
+       )}
+       {showCommandPalette && (
+          <motion.div
+              ref={commandPaletteRef}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 10 }}
+              transition={{ duration: 0.2 }}
+              className="absolute bottom-full left-0 right-0 mb-2 z-20 mx-4 shadow-lg rounded-lg border bg-popover"
+          >
+              <Command className="rounded-lg">
+                  <CommandInput placeholder="Type a command or search..." />
+                  <CommandList>
+                      <CommandEmpty>No results found.</CommandEmpty>
+                      <CommandGroup heading="Agent Commands">
+                          {commandActions.map((command) => (
+                              <CommandItem
+                                  key={command.id}
+                                  value={command.value}
+                                  onSelect={() => handleCommandSelect(command)}
+                                  className="flex items-center cursor-pointer"
+                              >
+                                  {command.icon}
+                                  <span className="flex-grow ml-1">{command.label}</span>
+                                  <span className="text-xs text-muted-foreground ml-auto">{command.description}</span>
+                              </CommandItem>
+                          ))}
+                      </CommandGroup>
+                  </CommandList>
+              </Command>
+          </motion.div>
+       )}
+
+      <div className="flex items-end p-3 space-x-2">
+        <div className="flex-grow relative">
+          <TextareaAutosize
+            ref={textareaRef}
+            value={inputValue}
+            onChange={handleInputChange}
+            onKeyDown={handleKeyDown}
+            placeholder={isLoading ? "Assistant is thinking..." : "Type message or / for commands..."}
+            className="w-full resize-none border rounded-md py-2 pr-10 pl-3 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50 min-h-[40px] max-h-[200px] scrollbar-thin scrollbar-thumb-muted-foreground/50 scrollbar-track-transparent"
+            disabled={disabled || isLoading}
+            rows={1}
+          />
+          {isLoading && (
+             <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                 <Spinner size="sm" />
              </div>
-        )}
+          )}
+        </div>
 
-        {/* Textarea and Send Button Area */}
-        <div className="flex items-end space-x-2 px-3 pt-0 pb-3"> {/* Adjusted padding */}
-            <div className="flex-grow relative border rounded-md focus-within:border-primary focus-within:ring-1 focus-within:ring-primary transition-colors duration-200 bg-background">
-                <TextareaAutosize
-                    ref={textareaRef}
-                    value={inputValue}
-                    onChange={handleInputChange}
-                    onKeyDown={handleKeyDown}
-                    placeholder="Type here"
-                    className="w-full resize-none border-0 shadow-none focus-visible:ring-0 bg-transparent text-sm py-2.5 px-3 placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50 max-h-[200px] min-h-[44px]"
-                    disabled={disabled || isLoading}
-                    rows={1}
-                    maxRows={8}
-                    aria-label="Chat message input"
-                />
-            </div>
-            
-            <Tooltip>
+        <Button 
+            variant="default"
+            size="icon" 
+            className="flex-shrink-0"
+            onClick={handleSubmit}
+            disabled={!inputValue.trim() || disabled || isLoading}
+            aria-label="Send message"
+        >
+            <Send className="h-5 w-5" />
+        </Button>
+      </div>
+
+      <div className="flex items-center space-x-1 px-3 pb-2 pt-1 border-t">
+          <Tooltip>
+              <TooltipTrigger asChild>
+                  <Button 
+                      variant="ghost" 
+                      size="icon" 
+                      className="flex-shrink-0 text-muted-foreground hover:text-primary h-8 w-8"
+                      onClick={handleFileButtonClick}
+                      disabled={isLoading || disabled}
+                   >
+                      <Paperclip className="h-4 w-4" />
+                   </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                  <p>Upload Document</p>
+              </TooltipContent>
+          </Tooltip>
+  
+          <Tooltip>
+              <TooltipTrigger asChild>
+                  <Button 
+                      variant="ghost" 
+                      size="icon" 
+                      className={cn(
+                          "flex-shrink-0 text-muted-foreground hover:text-primary h-8 w-8",
+                          selectedContextIds.length > 0 && "text-primary ring-1 ring-primary/50"
+                      )}
+                      onClick={handleContextPickerOpen}
+                      disabled={isLoading || disabled || !activeCaseId}
+                   >
+                      <ListChecks className="h-4 w-4" />
+                      {selectedContextIds.length > 0 && (
+                          <span className="absolute -top-0.5 -right-0.5 flex h-3 w-3 items-center justify-center rounded-full bg-primary text-[9px] font-bold text-primary-foreground">
+                              {selectedContextIds.length}
+                          </span>
+                      )}
+                   </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                  {selectedContextIds.length > 0 
+                      ? <p>Edit Context ({selectedContextIds.length} selected)</p> 
+                      : <p>Select Document Context</p>}
+                  {!activeCaseId && <p className='text-destructive'>(Select a case first)</p>}
+              </TooltipContent>
+          </Tooltip>
+
+          <div className="flex-grow"></div>
+
+          {selectedModel?.supportsWebSearch && (
+              <Tooltip>
                 <TooltipTrigger asChild>
-                    <Button
-                        size="icon"
-                        className="h-11 w-11 flex-shrink-0"
-                        onClick={handleSubmit}
-                        disabled={disabled || isLoading || inputValue.trim().length === 0}
-                        aria-label="Send message"
-                    >
-                        {isLoading ? <Spinner size="small" /> : <Send size={18} />}
-                    </Button>
-                </TooltipTrigger>
-                <TooltipContent><p>Send Message</p></TooltipContent>
-            </Tooltip>
-        </div>
-        
-        <div className="flex items-center justify-between px-3 pb-2 pt-1">
-            <div className="flex items-center gap-1">
-                <Tooltip>
-                    <TooltipTrigger asChild>
-                        <Button
-                            variant="ghost"
-                            size="icon"
-                            className={cn(
-                                "h-8 w-8 text-muted-foreground hover:text-foreground",
-                                activeDocumentId && "text-primary hover:text-primary/80"
-                            )}
-                            onClick={handleDocumentPickerClick}
-                            aria-label="Set Document Context"
-                            disabled={disabled || !activeCaseId}
-                            title={!activeCaseId ? "Select a case first" : activeDocumentId ? `Using context: ${selectedContextName}` : "Select Document Context"}
-                        >
-                            <Icons.FileText className="h-4 w-4" />
-                        </Button>
-                    </TooltipTrigger>
-                    <TooltipContent><p>{activeDocumentId ? `Change Context (${selectedContextName})` : "Select Document Context"}</p></TooltipContent>
-                </Tooltip>
-
-                <Tooltip>
-                    <TooltipTrigger asChild>
-                        <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8 text-muted-foreground hover:text-foreground"
-                            onClick={handleFileButtonClick}
-                            aria-label="Upload Files"
-                            disabled={disabled || !onFileUpload}
-                            title="Upload Files"
-                        >
-                            <UploadIcon className="h-4 w-4" />
-                        </Button>
-                    </TooltipTrigger>
-                    <TooltipContent><p>Upload Files</p></TooltipContent>
-                </Tooltip>
-                <input
-                    type="file"
-                    ref={fileInputRef}
-                    onChange={handleFileChange}
-                    multiple
-                    accept=".pdf,.doc,.docx,.txt,.md"
-                    className="hidden"
-                    disabled={disabled || !onFileUpload}
-                />
-            </div>
-
-            <div className="flex items-center gap-2">
-                <Popover open={modelSelectorOpen} onOpenChange={setModelSelectorOpen}>
-                    <PopoverTrigger asChild>
-                        <Button
-                            variant="outline"
-                            role="combobox"
-                            aria-expanded={modelSelectorOpen}
-                            className="w-[180px] justify-between text-xs h-8"
-                            size="sm"
-                        >
-                            {currentSelectedModel.name}
-                            <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                        </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-[250px] p-0">
-                        <Command>
-                            <CommandInput placeholder="Search models..." className="h-9" />
-                            <CommandList>
-                                <CommandEmpty>No model found.</CommandEmpty>
-                                <CommandGroup>
-                                    {availableModels.map((model) => (
-                                        <CommandItem
-                                            key={model.id}
-                                            value={model.name}
-                                            onSelect={() => {
-                                                setSelectedModelId(model.id);
-                                                setModelSelectorOpen(false);
-                                            }}
-                                        >
-                                            {model.name}
-                                            <Check
-                                                className={cn(
-                                                    "ml-auto h-4 w-4",
-                                                    selectedModelId === model.id ? "opacity-100" : "opacity-0"
-                                                )}
-                                            />
-                                        </CommandItem>
-                                    ))}
-                                </CommandGroup>
-                            </CommandList>
-                        </Command>
-                    </PopoverContent>
-                </Popover>
-
-                {webSearchPossible && (
-                    <div className="flex items-center space-x-1">
-                        <Switch
-                            id="web-search-toggle"
-                            checked={isWebSearchEnabled}
-                            onCheckedChange={setIsWebSearchEnabled}
-                            disabled={!webSearchPossible || isLoading}
-                            className="scale-75"
-                        />
-                        <Label htmlFor="web-search-toggle" className="text-xs text-muted-foreground flex items-center gap-1">
-                            <SearchCheck className="h-3.5 w-3.5" /> Web
-                        </Label>
+                    <div className="flex items-center space-x-1.5 mr-2">
+                      <Switch
+                        id="web-search-switch-footer"
+                        checked={isWebSearchEnabled}
+                        onCheckedChange={setIsWebSearchEnabled}
+                        disabled={!selectedModel?.supportsWebSearch}
+                        className="scale-75"
+                      />
+                      <Label htmlFor="web-search-switch-footer" className="text-xs text-muted-foreground cursor-pointer">
+                        Web Search
+                      </Label>
                     </div>
-                )}
-            </div>
-        </div>
-        
-        {showContextPicker && activeCaseId && (
-            <DocumentContextPicker
-                isOpen={showContextPicker}
-                onOpenChange={setShowContextPicker}
-                activeCaseId={activeCaseId}
-            />
-        )}
+                </TooltipTrigger>
+                <TooltipContent side="top">
+                    <p>Enable web search for up-to-date info.</p>
+                </TooltipContent>
+              </Tooltip>
+          )}
+      </div>
+
+      <DocumentContextPicker 
+         isOpen={isContextPickerOpen}
+         onOpenChange={setIsContextPickerOpen}
+      />
+
     </div>
   );
 };

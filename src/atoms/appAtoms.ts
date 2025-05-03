@@ -1,4 +1,5 @@
 import { atom } from 'jotai';
+import { atomWithStorage } from 'jotai/utils';
 import { Case, getCaseById } from '@/services/caseService';
 import { DocumentMetadata } from '@/services/documentService';
 import { getUserCases } from '@/services/caseService';
@@ -11,7 +12,7 @@ export type ActiveEditorItem = { type: 'document' | 'draft'; id: string } | null
 // --- Core State Atoms ---
 
 // Atom for the active case ID. This is the primary atom other case-related atoms derive from.
-export const activeCaseIdAtom = atom<string | null>(null);
+export const activeCaseIdAtom = atomWithStorage<string | null>('activeCaseId', null);
 
 // Atom for the active item being edited (document or draft).
 export const activeEditorItemAtom = atom<EditorState | null>(null);
@@ -241,3 +242,6 @@ interface ChatPreloadContext {
 }
 
 export const chatPreloadContextAtom = atom<ChatPreloadContext | null>(null);
+
+// *** NEW: Atom for multiple document IDs specifically selected for chat context ***
+export const chatDocumentContextIdsAtom = atom<string[]>([]);

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAtom } from 'jotai';
 import {
@@ -18,7 +18,8 @@ import Header from './Header';
 import { useAuth } from '@/hooks/useAuth';
 import {
   clearCompletedTasksAtom,
-  uploadModalOpenAtom
+  uploadModalOpenAtom,
+  commandPaletteOpenAtom
 } from '@/atoms/appAtoms';
 import { cn } from '@/lib/utils';
 import {
@@ -32,6 +33,7 @@ import UploadModal from '@/components/documents/UploadModal';
 import { InlineSuggestionProvider } from '@/context/InlineSuggestionContext';
 import ChatHistoryList from '@/components/history/ChatHistoryList';
 import TaskStatusBar from '@/components/common/TaskStatusBar';
+import GlobalCommandPalette from '@/components/common/GlobalCommandPalette';
 import { Home, Files, LogOut, Settings, PanelLeft } from 'lucide-react';
 import CaseSelector from './CaseSelector';
 
@@ -39,6 +41,20 @@ const AppLayout: React.FC = () => {
   const clearCompletedTasks = useAtom(clearCompletedTasksAtom)[1];
   const [isSidebarOpen, setIsSidebarOpen] = useState(true); // Default OPEN for testing
   const [isUploadModalOpen, setIsUploadModalOpen] = useAtom(uploadModalOpenAtom);
+  const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useAtom(commandPaletteOpenAtom);
+
+  // Keyboard listener for Command Palette (Cmd+K / Ctrl+K)
+  useEffect(() => {
+    const down = (e: KeyboardEvent) => {
+      if (e.key === 'k' && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        setIsCommandPaletteOpen((open) => !open);
+      }
+    };
+
+    document.addEventListener('keydown', down);
+    return () => document.removeEventListener('keydown', down);
+  }, [setIsCommandPaletteOpen]);
 
   // Handler for closing the upload modal
   const handleCloseUploadModal = () => {
@@ -61,6 +77,10 @@ const AppLayout: React.FC = () => {
             isOpen={isUploadModalOpen}
             onClose={handleCloseUploadModal}
           />
+          <GlobalCommandPalette
+            open={isCommandPaletteOpen}
+            onOpenChange={setIsCommandPaletteOpen}
+          />
         </InlineSuggestionProvider>
       </SidebarProvider>
     </TooltipProvider>
@@ -82,29 +102,42 @@ const LayoutContent: React.FC = () => {
 
   return (
     <div className="flex h-screen overflow-hidden">
-      <div className="flex-shrink-0 bg-background border-r h-full flex flex-col">
+      <div className="flex-shrink-0 bg-background border-r h-full flex flex-col group/sidebar">
         <Sidebar collapsible="icon" className="h-full flex flex-col">
           <SidebarHeader>
-            <div className="p-2 font-semibold text-lg flex items-center gap-2 group-data-[state=expanded]:pl-3">
-              <span className="group-data-[state=collapsed]:hidden">BenchWise</span>
+            <div className="p-2 font-semibold text-lg flex items-center justify-center h-12">
+              {sidebarState === 'expanded' ? (
+                  <span>BenchWise</span>
+              ) : (
+                  <span className="text-xl font-bold">B</span>
+              )}
             </div>
           </SidebarHeader>
           <SidebarContent className="flex flex-col h-full p-2 space-y-2">
-            <div className={cn("px-2", sidebarState === 'collapsed' && "px-0")}>
-              <CaseSelector />
-            </div>
+            {/* Conditionally render CaseSelector only when expanded */}
+            {sidebarState === 'expanded' && (
+              <div className={cn("px-2", sidebarState === 'collapsed' && "px-0")}>
+                <CaseSelector />
+              </div>
+            )}
             {/* Top Navigation */}
             <SidebarGroup>
               <SidebarGroupLabel>Workspace</SidebarGroupLabel>
               <SidebarMenu>
                 <SidebarMenuItem>
                   <SidebarMenuButton asChild isActive={location.pathname === '/dashboard'} tooltip="Dashboard">
-                    <Link to="/dashboard"><Home /><span>Dashboard</span></Link>
+                    <Link to="/dashboard">
+                      <Home />
+                      <span>Dashboard</span>
+                    </Link>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
                 <SidebarMenuItem>
                   <SidebarMenuButton asChild isActive={location.pathname.startsWith('/files') || location.pathname.startsWith('/documents') || location.pathname.startsWith('/cases')} tooltip="Files & Cases">
-                    <Link to="/files"><Files /><span>Files & Cases</span></Link>
+                    <Link to="/files">
+                      <Files />
+                      <span>Files & Cases</span>
+                    </Link>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               </SidebarMenu>
@@ -150,7 +183,7 @@ const LayoutContent: React.FC = () => {
                     tooltip={{ content: 'Settings', side: 'right', align: 'center' }}
                   >
                     <Settings />
-                    <span className="group-data-[state=collapsed]:hidden">Settings</span>
+                    <span>Settings</span>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
                 <SidebarMenuItem>
@@ -159,7 +192,7 @@ const LayoutContent: React.FC = () => {
                     tooltip={{ content: 'Logout', side: 'right', align: 'center' }}
                   >
                     <LogOut />
-                    <span className="group-data-[state=collapsed]:hidden">Logout</span>
+                    <span>Logout</span>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
                 <SidebarSeparator className="my-1" />
@@ -169,7 +202,7 @@ const LayoutContent: React.FC = () => {
                     tooltip={{ content: toggleTooltip, side: 'right', align: 'center' }}
                   >
                     <PanelLeft />
-                    <span className="group-data-[state=collapsed]:hidden">Collapse</span>
+                    <span>Collapse</span>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               </SidebarMenu>
@@ -196,8 +229,7 @@ const LayoutContent: React.FC = () => {
           </div>
         </ResizablePanel>
       </ResizablePanelGroup>
-      {/* Command Palette */}
-      {/* If you want to use CommandPalette, add it here and ensure it's used */}
+      {/* Command Palette is now rendered in AppLayout */}
     </div>
   );
 }

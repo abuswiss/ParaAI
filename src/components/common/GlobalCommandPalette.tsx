@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom'; // Import useNavigate
-import { useSetAtom } from 'jotai'; // Import useSetAtom
+import { useSetAtom, useAtomValue } from 'jotai'; // Import useSetAtom and useAtomValue
 import { useAuth } from '@/hooks/useAuth'; // Import useAuth
-import { uploadModalOpenAtom } from '@/atoms/appAtoms'; // Import atom
+import { uploadModalOpenAtom, activeCaseIdAtom } from '@/atoms/appAtoms'; // Import atom and activeCaseIdAtom
 import {
   CommandDialog,
   CommandEmpty,
@@ -11,21 +11,43 @@ import {
   CommandItem,
   CommandList,
   CommandSeparator,
-} from '@/components/ui/command'; 
-import { Search, FileText, Folder, Settings, Mail, Square, File, Sparkles, Upload, LogOut, Globe } from 'lucide-react'; // Example & actual icons
-import { 
-  FolderIcon, 
-  DocumentIcon, // Use this for File Manager?
-  FileTextIcon 
-} from '@/components/ui/Icons'; 
-import useDebounce from '@/hooks/useDebounce'; // Import the hook
+} from '@/components/ui/command';
+import {
+  Search,
+  FileText,
+  Folder,
+  Settings,
+  Mail,
+  Square,
+  File,
+  Sparkles,
+  Upload,
+  LogOut,
+  Globe,
+  PlusCircle,
+  FilePlus,
+  BrainCircuit, // Icon for semantic search
+  AlertTriangle // Icon for the warning
+} from 'lucide-react';
+import {
+  FolderIcon,
+  DocumentIcon,
+  FileTextIcon
+} from '@/components/ui/Icons';
+import useDebounce from '@/hooks/useDebounce';
 import * as caseService from '@/services/caseService';
-import * as documentService from '@/services/documentService';
+import * as documentService from '@/services/documentService'; // Import the whole service
 import * as templateService from '@/services/templateService';
 import { Case } from '@/types/case';
 import { DocumentMetadata } from '@/types/document';
 import { DocumentTemplate } from '@/types/template';
-import { Spinner } from '@/components/ui/Spinner'; // Import Spinner
+import { Spinner } from '@/components/ui/Spinner';
+import { cn } from '@/lib/utils';
+import { DialogTitle } from "@/components/ui/dialog";
+import * as VisuallyHidden from '@radix-ui/react-visually-hidden';
+
+// Import the new type for semantic search results
+import { SemanticSearchResultItem } from '@/services/documentService';
 
 // Define structure for search results
 interface SearchResults {
@@ -33,15 +55,18 @@ interface SearchResults {
     cases: Case[];
     documents: DocumentMetadata[];
     templates: DocumentTemplate[];
+    semanticHits: SemanticSearchResultItem[]; // Add state for semantic results
 }
 
-// Define structure for command actions (similar to ChatInput)
+// Define structure for command actions
 interface CommandAction {
     id: string;
     label: string;
     icon: React.ReactElement;
-    action: () => void;
-    group: 'General' | 'Agent' | 'Navigation';
+    action: (() => void) | null; // Action can be null if disabled
+    group: 'General' | 'Agent' | 'Navigation' | 'Create';
+    disabled?: boolean; // Explicit disabled flag
+    disabledTooltip?: string; // Tooltip explaining why it's disabled
 }
 
 interface GlobalCommandPaletteProps {
@@ -53,56 +78,85 @@ const GlobalCommandPalette: React.FC<GlobalCommandPaletteProps> = ({ open, onOpe
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<SearchResults | null>(null);
-  const debouncedSearch = useDebounce(search, 300); // Debounce search input
-  const navigate = useNavigate(); // Hook for navigation
-  const setIsUploadModalOpen = useSetAtom(uploadModalOpenAtom); // Hook to set upload modal state
-  const { signOut } = useAuth(); // Hook for auth actions
+  const debouncedSearch = useDebounce(search, 300);
+  const navigate = useNavigate();
+  const setIsUploadModalOpen = useSetAtom(uploadModalOpenAtom);
+  const { signOut } = useAuth();
+  const activeCaseId = useAtomValue(activeCaseIdAtom);
+  const setActiveCaseId = useSetAtom(activeCaseIdAtom);
+  const isCaseActive = !!activeCaseId;
 
-  // --- Helper function to run command and close palette ---
   const runCommand = useCallback((commandAction: () => void) => {
-    onOpenChange(false); // Close palette first
-    // Use setTimeout to ensure palette is closed visually before action/navigation
-    setTimeout(commandAction, 50); 
+    onOpenChange(false);
+    setTimeout(commandAction, 50);
   }, [onOpenChange]);
 
-  // --- Predefined Commands --- (Expand this list)
-  const predefinedCommands: CommandAction[] = [
-    // Navigation
-    { id: 'nav-dashboard', label: 'Go to Dashboard', icon: <Square className="h-4 w-4" />, action: () => runCommand(() => navigate('/dashboard')), group: 'Navigation' },
-    { id: 'nav-cases', label: 'Manage Cases', icon: <FolderIcon className="h-4 w-4" />, action: () => runCommand(() => navigate('/cases')), group: 'Navigation' },
-    { id: 'nav-file-manager', label: 'File Manager', icon: <DocumentIcon className="h-4 w-4" />, action: () => runCommand(() => navigate('/files')), group: 'Navigation' },
+  const predefinedCommands = useMemo((): CommandAction[] => {
+    const caseRequiredTooltip = "Requires an active case to be selected.";
+    return [
+      // Navigation
+      { id: 'nav-dashboard', label: 'Go to Dashboard', icon: <Square className="h-4 w-4" />, action: () => runCommand(() => navigate('/dashboard')), group: 'Navigation' },
+      { id: 'nav-cases', label: 'Manage Cases', icon: <FolderIcon className="h-4 w-4" />, action: () => runCommand(() => navigate('/cases')), group: 'Navigation' },
+      { id: 'nav-file-manager', label: 'File Manager', icon: <DocumentIcon className="h-4 w-4" />, action: () => runCommand(() => navigate('/files')), group: 'Navigation' },
 
-    // Agent Commands (Navigate to chat and pre-fill)
-    { 
-      id: 'cmd-draft', 
-      label: 'AI Document Draft...', 
-      icon: <Sparkles className="h-4 w-4" />,
-      action: () => runCommand(() => navigate('/dashboard', { state: { initialChatInput: '/agent draft ' } })), 
-      group: 'Agent' 
-    },
-     { 
-      id: 'cmd-perplexity', 
-      label: 'AI Live Search...', 
-      icon: <Globe className="h-4 w-4" />,
-      action: () => runCommand(() => navigate('/dashboard', { state: { initialChatInput: '/agent perplexity ' } })), 
-      group: 'Agent' 
-    },
-     { 
-      id: 'cmd-research', 
-      label: 'Legal Research...', 
-      icon: <Search className="h-4 w-4" />,
-      action: () => runCommand(() => navigate('/dashboard', { state: { initialChatInput: '/research ' } })), 
-      group: 'Agent' 
-    },
-    // General
-    { id: 'cmd-upload', label: 'Upload Document', icon: <Upload className="h-4 w-4" />, action: () => runCommand(() => setIsUploadModalOpen(true)), group: 'General' },
-    { id: 'cmd-settings', label: 'Settings', icon: <Settings className="h-4 w-4" />, action: () => runCommand(() => navigate('/settings')), group: 'General' },
-    { id: 'cmd-logout', label: 'Logout', icon: <LogOut className="h-4 w-4" />, action: () => runCommand(signOut), group: 'General' },
-  ];
+      // Create
+      { id: 'create-case', label: 'Create New Case', icon: <PlusCircle className="h-4 w-4" />, action: () => runCommand(() => navigate('/cases/new')), group: 'Create' },
+      {
+        id: 'create-doc',
+        label: 'Create Blank Document',
+        icon: <FilePlus className="h-4 w-4" />,
+        action: isCaseActive ? () => runCommand(() => navigate('/edit/document/new')) : null,
+        group: 'Create',
+        disabled: !isCaseActive,
+        disabledTooltip: caseRequiredTooltip
+      },
+
+      // Agent Commands
+      {
+        id: 'cmd-draft',
+        label: 'AI Document Draft...',
+        icon: <Sparkles className="h-4 w-4" />,
+        action: isCaseActive ? () => runCommand(() => navigate('/dashboard', { state: { initialChatInput: '/agent draft ' } })) : null,
+        group: 'Agent',
+        disabled: !isCaseActive,
+        disabledTooltip: caseRequiredTooltip
+      },
+      {
+        id: 'cmd-perplexity',
+        label: 'AI Live Search...',
+        icon: <Globe className="h-4 w-4" />,
+        action: isCaseActive ? () => runCommand(() => navigate('/dashboard', { state: { initialChatInput: '/agent perplexity ' } })) : null,
+        group: 'Agent',
+        disabled: !isCaseActive,
+        disabledTooltip: caseRequiredTooltip
+      },
+      {
+        id: 'cmd-research',
+        label: 'Legal Research...',
+        icon: <Search className="h-4 w-4" />,
+        action: isCaseActive ? () => runCommand(() => navigate('/dashboard', { state: { initialChatInput: '/research ' } })) : null,
+        group: 'Agent',
+        disabled: !isCaseActive,
+        disabledTooltip: caseRequiredTooltip
+      },
+      // General
+      {
+        id: 'cmd-upload',
+        label: 'Upload Document',
+        icon: <Upload className="h-4 w-4" />,
+        action: isCaseActive ? () => runCommand(() => setIsUploadModalOpen(true)) : null,
+        group: 'General',
+        disabled: !isCaseActive,
+        disabledTooltip: caseRequiredTooltip
+      },
+      { id: 'cmd-settings', label: 'Settings', icon: <Settings className="h-4 w-4" />, action: () => runCommand(() => navigate('/settings')), group: 'General' },
+      { id: 'cmd-logout', label: 'Logout', icon: <LogOut className="h-4 w-4" />, action: () => runCommand(signOut), group: 'General' },
+    ];
+  }, [isCaseActive, navigate, runCommand, setIsUploadModalOpen, signOut]); // Dependencies for useMemo
 
   useEffect(() => {
     if (!open) {
-      setSearch(''); // Clear search when closed
+      setSearch('');
       setResults(null);
       setLoading(false);
       return;
@@ -110,12 +164,12 @@ const GlobalCommandPalette: React.FC<GlobalCommandPaletteProps> = ({ open, onOpe
 
     const fetchResults = async () => {
       if (!debouncedSearch.trim()) {
-        // Show predefined commands if search is empty
-        setResults({ 
-          commands: predefinedCommands, 
-          cases: [], 
-          documents: [], 
-          templates: [] 
+        setResults({ // Show only predefined (filtered by activeCaseId) commands when search is empty
+          commands: predefinedCommands, // Use the memoized list
+          cases: [],
+          documents: [],
+          templates: [],
+          semanticHits: [], // Ensure semanticHits is initialized
         });
         setLoading(false);
         return;
@@ -124,48 +178,65 @@ const GlobalCommandPalette: React.FC<GlobalCommandPaletteProps> = ({ open, onOpe
       setLoading(true);
       try {
         const query = debouncedSearch.trim().toLowerCase();
-        
-        // Filter predefined commands
-        const filteredCommands = predefinedCommands.filter(cmd => 
+
+        // Filter the memoized predefined commands further by the search query
+        const filteredCommands = predefinedCommands.filter(cmd =>
           cmd.label.toLowerCase().includes(query)
         );
 
-        // Perform actual searches in parallel
-        const [caseResults, docResults, templateResults] = await Promise.all([
-          caseService.searchCasesByName(query, 5), 
-          documentService.searchDocumentsByName(query, null, 5), // Pass null for caseId to search all user docs
-          templateService.searchTemplatesByName(query, 5) 
+        // Perform all searches in parallel
+        const [caseResults, docResults, templateResults, semanticResults] = await Promise.all([
+          caseService.searchCasesByName(query, 5),
+          documentService.searchDocumentsByName(query, null, 5),
+          templateService.searchTemplatesByName(query, 5),
+          documentService.semanticSearchDocuments(query, 5) // Call semantic search
         ]);
 
-        // Check for errors in results (optional, could show partial results)
+        // Log errors but allow partial results
         if (caseResults.error) console.error("Case search error:", caseResults.error);
         if (docResults.error) console.error("Document search error:", docResults.error);
         if (templateResults.error) console.error("Template search error:", templateResults.error);
+        if (semanticResults.error) console.error("Semantic search error:", semanticResults.error); // Log semantic search errors
 
         setResults({
-          commands: filteredCommands,
-          cases: caseResults.data || [], 
+          commands: filteredCommands, // Use commands filtered by both caseId and search query
+          cases: caseResults.data || [],
           documents: docResults.data || [],
-          templates: templateResults.data || []
+          templates: templateResults.data || [],
+          semanticHits: semanticResults.data || [] // Store semantic results
         });
 
       } catch (error) {
         console.error("Error fetching command palette results:", error);
-        setResults({ commands: [], cases: [], documents: [], templates: [] }); // Clear results on error
+        // Ensure results object structure is maintained on error
+        setResults({ commands: [], cases: [], documents: [], templates: [], semanticHits: [] });
       } finally {
         setLoading(false);
       }
     };
 
     fetchResults();
-  }, [debouncedSearch, open, runCommand, navigate, setIsUploadModalOpen, signOut]); // Update dependencies
+  // Include navigate, setIsUploadModalOpen, signOut if they were dependencies for actions
+  // runCommand is memoized and depends on onOpenChange
+  }, [debouncedSearch, open, runCommand, navigate, setIsUploadModalOpen, signOut, predefinedCommands]); // Add predefinedCommands to dependencies
+
+  const hasAnyResults = results && (
+    results.commands.length > 0 ||
+    results.cases.length > 0 ||
+    results.documents.length > 0 ||
+    results.templates.length > 0 ||
+    results.semanticHits.length > 0
+  );
 
   return (
     <CommandDialog open={open} onOpenChange={onOpenChange}>
-      <CommandInput 
-        placeholder="Type a command or search..." 
+      <VisuallyHidden.Root>
+        <DialogTitle>Command Palette</DialogTitle>
+      </VisuallyHidden.Root>
+      <CommandInput
+        placeholder="Type a command or search cases, docs, content..."
         value={search}
-        onValueChange={setSearch} 
+        onValueChange={setSearch}
       />
       <CommandList>
         {loading && (
@@ -173,31 +244,49 @@ const GlobalCommandPalette: React.FC<GlobalCommandPaletteProps> = ({ open, onOpe
              <Spinner size="sm" className="mr-2"/> Searching...
            </div>
         )}
-        {!loading && !results?.commands.length && !results?.cases.length && !results?.documents.length && !results?.templates.length && debouncedSearch && 
+        {!loading && !hasAnyResults && debouncedSearch &&
           <CommandEmpty>No results found for "{debouncedSearch}".</CommandEmpty>}
-        {!loading && !results && !debouncedSearch && <CommandEmpty>Type to search commands, cases, docs...</CommandEmpty>}
+        {!loading && !debouncedSearch && 
+           <CommandEmpty>Type to search commands, cases, docs, content...</CommandEmpty>
+        }
 
         {!loading && results && (
           <>
-            {/* Render Commands */} 
+            {/* Display warning message if no case is active - THIS IS THE ONE TO KEEP */}
+            {!isCaseActive && (
+              <div className="p-2 text-sm text-muted-foreground border-b flex items-center bg-orange-50 dark:bg-orange-900/20">
+                <AlertTriangle className="mr-2 h-4 w-4 flex-shrink-0 text-orange-500" />
+                Select a Case to enable case-specific commands.
+              </div>
+            )}
+
+            {/* Commands */} 
             {results.commands.length > 0 && (
               <CommandGroup heading="Commands">
                 {results.commands.map((cmd) => (
-                  <CommandItem key={cmd.id} onSelect={cmd.action} value={cmd.label}>
+                  <CommandItem
+                    key={cmd.id}
+                    onSelect={cmd.disabled ? undefined : cmd.action} // Only call action if not disabled
+                    value={cmd.label}
+                    disabled={cmd.disabled} // Pass disabled prop to CommandItem
+                    className={cn(cmd.disabled && "text-muted-foreground cursor-not-allowed")}
+                    // Optional: Add tooltip on hover for disabled items
+                    title={cmd.disabled ? cmd.disabledTooltip : undefined}
+                  >
                     {cmd.icon}
                     <span className='ml-2'>{cmd.label}</span>
                   </CommandItem>
                 ))}
               </CommandGroup>
             )}
-             
-             {/* Render Cases */} 
+
+             {/* Cases */} 
              {results.cases.length > 0 && <CommandSeparator />} 
              {results.cases.length > 0 && (
                  <CommandGroup heading="Cases">
                     {results.cases.map((c) => (
-                       <CommandItem 
-                         key={c.id} 
+                       <CommandItem
+                         key={c.id}
                          onSelect={() => runCommand(() => navigate(`/cases/${c.id}`))}
                          value={`Case: ${c.name}`}
                        >
@@ -209,31 +298,64 @@ const GlobalCommandPalette: React.FC<GlobalCommandPaletteProps> = ({ open, onOpe
                  </CommandGroup>
              )}
 
-            {/* Render Documents */} 
+            {/* Documents (by name) */} 
              {results.documents.length > 0 && <CommandSeparator />} 
              {results.documents.length > 0 && (
                <CommandGroup heading="Documents">
                  {results.documents.map((doc) => (
-                   <CommandItem 
-                     key={doc.id} 
-                     onSelect={() => runCommand(() => navigate(`/view/document/${doc.id}`))}
+                   <CommandItem
+                     key={doc.id}
+                     onSelect={() => {
+                       if (!activeCaseId && doc.caseId) {
+                         setActiveCaseId(doc.caseId);
+                       }
+                       runCommand(() => navigate(`/view/document/${doc.id}`));
+                     }}
                      value={`Document: ${doc.filename}`}
                    >
                      <FileTextIcon className="mr-2 h-4 w-4" />
                      <span>{doc.filename}</span>
-                     {/* Maybe add case name or date? Needs fetching case details or adding to search result */}
                    </CommandItem>
                  ))}
                </CommandGroup>
              )}
-             
-             {/* Render Templates */} 
+
+             {/* Document Content (Semantic Search) */} 
+             {results.semanticHits.length > 0 && <CommandSeparator />} 
+             {results.semanticHits.length > 0 && (
+               <CommandGroup heading="Document Content">
+                 {results.semanticHits.map((hit) => (
+                   <CommandItem
+                     key={hit.documentId}
+                     onSelect={() => {
+                       if (!activeCaseId && hit.caseId) {
+                         setActiveCaseId(hit.caseId);
+                       }
+                       runCommand(() => navigate(`/view/document/${hit.documentId}`));
+                     }}
+                     value={`Content: ${hit.filename}: ${hit.matches[0]?.chunkText}`}
+                   >
+                     <BrainCircuit className="mr-2 h-4 w-4 text-purple-500" />
+                     <div className="flex flex-col overflow-hidden">
+                        <span className="truncate font-medium">{hit.filename}</span>
+                        {hit.matches[0]?.chunkText && (
+                           <span className="text-xs text-muted-foreground truncate">
+                             ...{hit.matches[0].chunkText}...
+                           </span>
+                        )}
+                     </div>
+                   </CommandItem>
+                 ))}
+               </CommandGroup>
+             )}
+
+             {/* Templates */} 
              {results.templates.length > 0 && <CommandSeparator />} 
              {results.templates.length > 0 && (
                  <CommandGroup heading="Templates">
                     {results.templates.map((tmpl) => (
-                       <CommandItem 
-                         key={tmpl.id} 
+                       <CommandItem
+                         key={tmpl.id}
                          onSelect={() => runCommand(() => navigate(`/edit/template/${tmpl.id}`))}
                          value={`Template: ${tmpl.name}`}
                        >

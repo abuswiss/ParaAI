@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { useSetAtom, useAtomValue } from 'jotai';
-import { addTaskAtom, updateTaskAtom, removeTaskAtom, chatPreloadContextAtom, activeEditorItemAtom, activeDocumentContextIdAtom } from '@/atoms/appAtoms';
+import { useSetAtom, useAtomValue, useAtom } from 'jotai';
+import { addTaskAtom, updateTaskAtom, removeTaskAtom, chatPreloadContextAtom, activeEditorItemAtom, activeDocumentContextIdAtom, activeCaseIdAtom } from '@/atoms/appAtoms';
 import { getDocumentById, getDocumentUrl, DocumentMetadata } from '@/services/documentService';
 import {
   analyzeDocument, 
@@ -77,9 +77,7 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ documentId }) => {
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [summaryContent, setSummaryContent] = useState<string | null>(null);
   const [activeCase, setActiveCase] = useState<Case | null>(null);
-  // *** ADDED: State for summary completion ***
   const [summaryCompleted, setSummaryCompleted] = useState<boolean>(false);
-  // *** ADDED: State for active highlight ***
   const [activeHighlightPosition, setActiveHighlightPosition] = useState<HighlightPosition | null>(null);
 
   const addTask = useSetAtom(addTaskAtom);
@@ -87,23 +85,19 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ documentId }) => {
   const removeTask = useSetAtom(removeTaskAtom);
   const setChatPreloadContext = useSetAtom(chatPreloadContextAtom);
   const setActiveEditorItem = useSetAtom(activeEditorItemAtom);
+  const [activeCaseId, setActiveCaseId] = useAtom(activeCaseIdAtom);
 
-  // *** ADDED: Ref for the TiptapEditor instance ***
   const editorRef = useRef<TiptapEditorRef>(null);
 
-  // *** ADDED: Memoize the consolidated list of highlights ***
   const allHighlights = useMemo(() => {
     if (!analysisHistory) return [];
     
     const highlights: HighlightInfo[] = [];
     
     try {
-      // Process each analysis result in history
       analysisHistory.forEach(analysis => {
-        // Skip if analysis result is null or not an object
         if (!analysis || typeof analysis !== 'object') return;
         
-        // Process entities
         if ('entities' in analysis && Array.isArray(analysis.entities)) {
           analysis.entities.forEach(entity => {
             if (typeof entity.start === 'number' && typeof entity.end === 'number' && entity.start < entity.end) {
@@ -121,7 +115,6 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ documentId }) => {
           });
         }
         
-        // Process clauses
         if ('clauses' in analysis && Array.isArray(analysis.clauses)) {
           analysis.clauses.forEach(clause => {
             if (typeof clause.start === 'number' && typeof clause.end === 'number' && clause.start < clause.end) {
@@ -139,7 +132,6 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ documentId }) => {
           });
         }
         
-        // Process risks
         if ('risks' in analysis && Array.isArray(analysis.risks)) {
           analysis.risks.forEach(risk => {
             if (typeof risk.start === 'number' && typeof risk.end === 'number' && risk.start < risk.end) {
@@ -157,7 +149,6 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ documentId }) => {
           });
         }
         
-        // Process timeline
         if ('timeline' in analysis && Array.isArray(analysis.timeline)) {
           analysis.timeline.forEach(event => {
             if (typeof event.start === 'number' && typeof event.end === 'number' && event.start < event.end) {
@@ -175,7 +166,6 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ documentId }) => {
           });
         }
         
-        // Process privileged terms
         if ('privilegedTerms' in analysis && Array.isArray(analysis.privilegedTerms)) {
           analysis.privilegedTerms.forEach(term => {
             if (typeof term.start === 'number' && typeof term.end === 'number' && term.start < term.end) {
@@ -194,7 +184,6 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ documentId }) => {
         }
       });
       
-      // Filter out any duplicates (same start and end position)
       const uniqueHighlights = highlights.filter((highlight, index, self) => 
         index === self.findIndex(h => h.start === highlight.start && h.end === highlight.end)
       );
@@ -207,13 +196,11 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ documentId }) => {
   }, [analysisHistory]);
 
   useEffect(() => {
-    let isMounted = true; // <-- Declare isMounted here, outside the async function
+    let isMounted = true;
 
     const fetchAllData = async () => {
-      // Remove the declaration from inside: let isMounted = true;
+      if (!isMounted) return;
       try {
-        // Reset state at the beginning, only if mounted
-        if (!isMounted) return;
         setLoading(true);
         setError(null);
         setDocument(null);
@@ -225,114 +212,80 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ documentId }) => {
         setAnalysisError(null);
         setSummaryContent(null);
 
-        // Set the active editor item instead of the derived atom
         setActiveEditorItem({ type: 'document', id: documentId });
 
         const { data: docData, error: docError } = await getDocumentById(documentId);
-        if (!isMounted) return; // Check after async call
+        if (!isMounted) return;
         if (docError) throw docError;
         if (!docData) throw new Error('Document not found');
         setDocument(docData);
-        // setActiveEditorItem is already set above
-        // setActiveEditorItem({ type: 'document', id: documentId }); 
 
         if (docData.caseId) {
-           const { data: caseData, error: caseError } = await getCaseById(docData.caseId);
-           if (!isMounted) return; // Check after async call
-           if (caseError) console.warn('Could not fetch case details:', caseError);
-           else setActiveCase(caseData);
+          if (!activeCaseId) {
+            setActiveCaseId(docData.caseId);
+            console.log(`DocumentViewer: Active case was null, setting to document's case ID: ${docData.caseId}`);
+          }
+          const { data: caseData, error: caseError } = await getCaseById(docData.caseId);
+          if (!isMounted) return;
+          if (caseError) console.warn('Could not fetch case details:', caseError);
+          else setActiveCase(caseData);
+        } else {
+             console.warn(`Document ${documentId} does not have an associated caseId.`);
         }
 
         const { data: historyData, error: historyError } = await getDocumentAnalyses(documentId);
-        if (!isMounted) return; // Check after async call
+        if (!isMounted) return;
         if (historyError) console.warn('Could not fetch analysis history:', historyError);
         const validHistory = historyData || [];
         setAnalysisHistory(validHistory);
 
-        // Find the most recent summary from history
-        const latestSummary = validHistory.find(h => h.analysis_type === 'summary');
-        if (latestSummary && latestSummary.result) {
-            // Handle both string and object summary results
-            const summaryText = typeof latestSummary.result === 'string' ? latestSummary.result : (latestSummary.result as any).summary;
-            if (summaryText) setSummaryContent(summaryText);
-            // ** NEW: If summary found in history, mark as completed **
-            setSummaryCompleted(true); 
-        } else if (!latestSummary) {
-            // ** NEW: Automatically trigger summary if none found in history **
-            // Check if document exists and text has been extracted before triggering
-            if (docData && docData.extractedText) {
-                console.log('No existing summary found, triggering automatic summary analysis.');
-                handleRunAnalysis('summary');
-            } else {
-                console.log('Skipping automatic summary: Document or extracted text not available yet.');
+        const summaryResult = validHistory.find(
+          (analysis): analysis is DocumentAnalysisResult & { summary: string } =>
+            analysis !== null &&
+            typeof analysis === 'object' &&
+            'summary' in analysis &&
+            typeof analysis.summary === 'string'
+        );
+
+        if (summaryResult) {
+            setSummaryContent(summaryResult.summary);
+            setSummaryCompleted(true);
+            if (activeTab === 'summary') {
+                setSelectedAnalysisType('summary');
+                setCurrentAnalysisResult({ summary: summaryResult.summary });
             }
+        } else {
+             setSummaryCompleted(false);
         }
 
-        if (docData.file_type === 'application/pdf') {
-            // Only fetch URL if it's a PDF and needed for preview
-           await fetchUrlForPreview(); // Ensure this awaits if needed
+        if (docData.mime_type && !['text/plain', 'application/json', 'text/markdown'].includes(docData.mime_type)) {
+          const { data: urlData, error: urlError } = await getDocumentUrl(documentId);
+          if (!isMounted) return;
+          if (urlError) console.warn('Could not fetch document URL:', urlError);
+          else setDocumentUrl(urlData?.signedUrl || null);
+        } else {
+          setDocumentUrl(null);
         }
-        
+
       } catch (err: any) {
-        console.error("Error loading document:", err);
-        if (isMounted) { // Check before setting state
-            setError(err.message || 'Failed to load document');
+        console.error("Error fetching document data:", err);
+        if (isMounted) {
+          setError(err.message || "Failed to load document.");
         }
       } finally {
-        if (isMounted) { // Check before setting state
-            setLoading(false);
+        if (isMounted) {
+          setLoading(false);
         }
       }
     };
 
-    const fetchUrlForPreview = async () => {
-        try {
-            console.log('Fetching URL for preview tab...');
-            try {
-                 // Check if the document is AI-generated or likely plain text
-                 const isPlainText = document.contentType === 'text/plain' || document.fileType === 'txt' || document.storagePath === 'ai-generated';
-
-                 if (isPlainText) {
-                     console.log('Document is text-based or AI-generated, skipping URL fetch for preview.');
-                     // Optionally set an indicator that no preview is available, or rely on renderPreviewContent logic
-                     setDocumentUrl(null); // Ensure URL state is null if we skip fetching
-                     return; // Don't try to fetch URL for text content
-                 }
-                 
-                 // If not plain text, proceed to get the signed URL
-                 setDocumentUrl(null); // Reset before fetching
-                 const urlResponse = await getDocumentUrl(document.storagePath!); // Use non-null assertion as storagePath exists here
-                 if (urlResponse.error) throw urlResponse.error;
-                 setDocumentUrl(urlResponse.data);
-                 setError(null); // Clear previous errors if URL fetch succeeds
-            } catch (err) {
-                 console.error('Error fetching document URL for preview:', err);
-                 // Only set error if it's not the expected "Object not found" for ai-generated
-                 if (!(document.storagePath === 'ai-generated' && err instanceof Error && err.message.includes('Object not found'))) {
-                    setError('Failed to load document preview URL.'); 
-                 }
-                 setDocumentUrl(null); // Ensure URL is null on error
-            }
-        } catch (previewError) {
-            if (isMounted) {
-                console.warn('Error fetching URL for preview:', previewError);
-            }
-        }
-    };
-
     fetchAllData();
 
-    // Return the cleanup function directly from useEffect
     return () => {
       isMounted = false;
-      // Clear the active editor item if it matches the current document
-      setActiveEditorItem(prev => 
-        (prev?.type === 'document' && prev?.id === documentId) ? null : prev
-      );
     };
-  }, [documentId, setActiveEditorItem]); // Update dependencies: remove setActiveDocumentContextId
+  }, [documentId, setActiveEditorItem, activeCaseId, setActiveCaseId, activeTab]);
 
-  // *** ADDED: useEffect for scrolling to active highlight ***
   useEffect(() => {
     if (activeHighlightPosition && editorRef.current) {
       const editorInstance = editorRef.current.getEditor();
@@ -340,50 +293,42 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ documentId }) => {
         console.log('Scrolling to highlight:', activeHighlightPosition);
         editorInstance
           .chain()
-          .focus() // Focus the editor first
-          .setTextSelection(activeHighlightPosition) // Set selection to highlight bounds
-          .scrollIntoView() // Scroll the selection into view
+          .focus()
+          .setTextSelection(activeHighlightPosition)
+          .scrollIntoView()
           .run();
       }
     }
-  }, [activeHighlightPosition]); // Run when activeHighlightPosition changes
+  }, [activeHighlightPosition]);
 
   useEffect(() => {
     if (activeTab === 'preview' && !documentUrl && document?.storagePath && !loading) {
         const fetchUrlForPreview = async () => {
             console.log('Fetching URL for preview tab...');
             try {
-                 // Check if the document is AI-generated or likely plain text
                  const isPlainText = document.contentType === 'text/plain' || document.fileType === 'txt' || document.storagePath === 'ai-generated';
 
                  if (isPlainText) {
                      console.log('Document is text-based or AI-generated, skipping URL fetch for preview.');
-                     // Optionally set an indicator that no preview is available, or rely on renderPreviewContent logic
-                     setDocumentUrl(null); // Ensure URL state is null if we skip fetching
-                     return; // Don't try to fetch URL for text content
+                     setDocumentUrl(null);
+                     return;
                  }
                  
-                 // If not plain text, proceed to get the signed URL
-                 setDocumentUrl(null); // Reset before fetching
-                 const urlResponse = await getDocumentUrl(document.storagePath!); // Use non-null assertion as storagePath exists here
+                 setDocumentUrl(null);
+                 const urlResponse = await getDocumentUrl(document.storagePath!);
                  if (urlResponse.error) throw urlResponse.error;
                  setDocumentUrl(urlResponse.data);
-                 setError(null); // Clear previous errors if URL fetch succeeds
+                 setError(null);
             } catch (err) {
                  console.error('Error fetching document URL for preview:', err);
-                 // Only set error if it's not the expected "Object not found" for ai-generated
                  if (!(document.storagePath === 'ai-generated' && err instanceof Error && err.message.includes('Object not found'))) {
                     setError('Failed to load document preview URL.'); 
                  }
-                 setDocumentUrl(null); // Ensure URL is null on error
+                 setDocumentUrl(null);
             }
         };
         fetchUrlForPreview();
     }
-     // Reset URL if tab changes away from preview or document changes
-    // else if (activeTab !== 'preview' && documentUrl) { 
-    //   setDocumentUrl(null);
-    // }
   }, [activeTab, documentUrl, document, loading]);
 
   const handleRunAnalysis = async (type: AnalysisType | null) => {
@@ -392,27 +337,10 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ documentId }) => {
     setSelectedAnalysisType(type);
     setIsAnalysisLoading(true);
     setAnalysisError(null);
-    // Don't clear currentAnalysisResult immediately, maybe show stale while loading?
-    // setCurrentAnalysisResult(null);
 
     console.log(`Running analysis type: ${type} for doc: ${document.id}`);
 
     try {
-      // --- TEMPORARILY COMMENT OUT HISTORY CHECK ---
-      /*
-      const existingResult = analysisHistory.find((a: DocumentAnalysisResult) => a.analysisType === type);
-      if (existingResult) {
-        console.log('Using existing analysis result from history.');
-        setCurrentAnalysisResult(existingResult.result);
-        if (type === 'summary' && typeof existingResult.result === 'string') {
-          setSummaryContent(existingResult.result);
-        }
-        setIsAnalysisLoading(false);
-        return; 
-      }
-      */
-      // --- END TEMPORARY COMMENT ---
-
       const { data, error: analysisErr, analysisId } = await analyzeDocument({
         documentId: document.id,
         analysisType: type,
@@ -427,18 +355,13 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ documentId }) => {
       console.log(`Analysis result for ${type}:`, data);
       setCurrentAnalysisResult(data);
 
-      // Refined: Handle both string and object summary results upon completion
       if (type === 'summary') {
           if (typeof data === 'object' && data !== null && 'summary' in data && 'summaryAnalysis' in data) {
-             // Handle structured summary object
-             setSummaryContent(data.summary); // Set tab content
-             // setCurrentAnalysisResult(data) was already called, so analyzer gets the object
-             setSummaryCompleted(true); // ** NEW: Mark summary as completed **
+             setSummaryContent(data.summary);
+             setSummaryCompleted(true);
           } else if (typeof data === 'string') {
-             // Handle legacy string summary
              setSummaryContent(data);
-             // setCurrentAnalysisResult(data) was already called, so analyzer gets the string
-             setSummaryCompleted(true); // ** NEW: Mark summary as completed **
+             setSummaryCompleted(true);
           }
       }
 
@@ -458,18 +381,15 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ documentId }) => {
       console.error(`Error running analysis type ${type}:`, err);
       const message = err instanceof Error ? err.message : 'Failed to run analysis.';
       setAnalysisError(message);
-      // Set current result to an error object to display in DocumentAnalyzer
       setCurrentAnalysisResult({ error: message }); 
     } finally {
       setIsAnalysisLoading(false);
     }
   };
 
-  // Function to handle initiating chat from an analysis item
   const handleInitiateChat = (analysisItem: any, analysisType: AnalysisType) => {
     if (!document?.extractedText) {
         console.warn('Cannot initiate chat without document text.');
-        // Maybe show a toast notification?
         return; 
     }
     console.log(`Initiating chat for ${analysisType}:`, analysisItem);
@@ -478,30 +398,22 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ documentId }) => {
       analysisType,
       documentText: document.extractedText,
     });
-    // Maybe add logic here to switch focus to a chat panel if it's separate?
   };
 
-  // *** ADDED: Callback for handling clicks on findings in the analyzer panel ***
   const handleFindingClick = useCallback((position: HighlightPosition | null) => {
-    // Update active highlight position state
     setActiveHighlightPosition(position);
     
-    // If we're clearing the selection, just return
     if (!position) return;
     
-    // Add visual feedback that informs the user where to look
-    // This will be a brief flash of the highlight area
     const flashTimeout = setTimeout(() => {
       const editorInstance = editorRef.current?.getEditor();
       if (editorInstance) {
         try {
-          // Set selection to the position to give immediate visual feedback
           editorInstance.commands.setTextSelection({
             from: position.start,
             to: position.end
           });
           
-          // Then clear the selection after a moment to return to normal view
           setTimeout(() => {
             editorInstance.commands.blur();
           }, 800);
@@ -514,8 +426,6 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ documentId }) => {
     return () => clearTimeout(flashTimeout);
   }, []);
 
-  // --- Render Functions ---
-
   const renderLoading = () => (
     <div className="flex justify-center items-center h-full">
         <Spinner size="lg" />
@@ -525,7 +435,6 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ documentId }) => {
   const renderError = (errorMessage: string) => (
     <div className="p-4">
         <Alert variant="destructive">
-            {/* Use Info icon from lucide-react */}
             <Info className="h-4 w-4" /> 
             <AlertTitle>Error</AlertTitle>
             <AlertDescription>{errorMessage}</AlertDescription>
@@ -556,7 +465,6 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ documentId }) => {
   const renderTextContent = () => {
     if (!document) return renderLoading(); 
 
-    // Check for both editedContent and extractedText
     if (!document.editedContent && !document.extractedText && !loading) {
       return (
         <div className="text-center p-8 flex flex-col justify-center items-center h-full">
@@ -567,7 +475,6 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ documentId }) => {
       );
     }
 
-    // Prioritize editedContent over extractedText
     const displayContent = document.editedContent || document.extractedText || '';
 
     return (
@@ -591,30 +498,26 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ documentId }) => {
   const renderPreviewContent = () => {
     if (!document) return renderLoading();
 
-    // Determine if it's a type we should render directly from text
     const isPlainText = document.contentType === 'text/plain' || document.fileType === 'txt' || document.storagePath === 'ai-generated';
 
     if (isPlainText) {
-      // Render text content directly for plain text / AI docs
       const displayContent = document.editedContent || document.extractedText;
       if (displayContent) {
         return (
           <div className="flex h-full">
             <div className="flex-1 h-full p-1">
-              {/* Use a read-only Tiptap instance for preview */}
               <TiptapEditor
-                ref={editorRef} // Keep ref if needed for other interactions
+                ref={editorRef}
                 content={displayContent}
                 editable={false}
-                className="h-full border-0 shadow-none bg-transparent" // Ensure transparent background
-                allHighlights={allHighlights} // Pass highlights
-                activeHighlightPosition={activeHighlightPosition} // Pass active highlight
+                className="h-full border-0 shadow-none bg-transparent"
+                allHighlights={allHighlights}
+                activeHighlightPosition={activeHighlightPosition}
               />
             </div>
           </div>
         );
       } else {
-        // Should not happen if text extraction worked, but handle gracefully
         return (
             <div className="text-center p-8 flex flex-col justify-center items-center h-full">
                 <FileSearch className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
@@ -624,14 +527,10 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ documentId }) => {
       }
     }
 
-    // --- If NOT plain text, proceed with URL-based preview --- 
-
-    // Check for errors specifically related to preview loading (after checking isPlainText)
     if (error && error.includes('preview')) {
          return renderError(error);
     }
 
-    // If URL is still loading for a non-text file
     if (!documentUrl) return (
         <div className="flex justify-center items-center h-64">
             <Spinner />
@@ -639,7 +538,6 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ documentId }) => {
         </div>
     );
     
-    // Render based on URL and file type
     const fileType = document.contentType || '';
     const containerStyle = "w-full h-[calc(100vh-200px)] flex justify-center items-center p-4";
     const iframeStyle = "w-full h-full border-0";
@@ -650,7 +548,6 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ documentId }) => {
     } else if (fileType.includes('image')) {
       return <div className={containerStyle}><img src={documentUrl} alt={document.filename} className={imgStyle}/></div>;
     } else {
-      // Fallback for other non-text types
       return (
         <div className="text-center p-8 flex flex-col justify-center items-center h-full">
           <FileWarning className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
@@ -666,20 +563,16 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ documentId }) => {
     }
   };
 
-  // --- Main Return --- 
-  if (loading && !document) return renderLoading(); // Show loading only if document is null
-  if (error && !error.includes('preview') && activeTab !== 'preview') return renderError(error); // Show non-preview error if not on preview tab
+  if (loading && !document) return renderLoading();
+  if (error && !error.includes('preview') && activeTab !== 'preview') return renderError(error);
   if (!document) return renderError('Document data could not be loaded.');
 
-  // Determine if the summary tab should be disabled
   const isSummaryLoading = isAnalysisLoading && selectedAnalysisType === 'summary';
   const summaryTabDisabled = !summaryContent && !isSummaryLoading;
 
   return (
     <div className="flex flex-col h-full p-4 bg-background">
-      {/* Header Section */} 
       <div className="mb-4 flex justify-between items-center">
-        {/* Breadcrumbs */} 
         <Breadcrumb 
           items={[
             { label: 'Cases', href: '/cases' },
@@ -688,8 +581,6 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ documentId }) => {
           ]} 
           className="flex-grow mr-4"
         />
-         
-        {/* Analysis Selector & Button */} 
        <div className="flex items-center space-x-2 flex-shrink-0">
          <Select 
             value={selectedAnalysisType || ''}
@@ -698,9 +589,9 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ documentId }) => {
           >
               <SelectTrigger 
                   className={cn(
-                      "w-[180px] h-8 text-xs border-input bg-background", // Base styles: added bg-background
-                      "hover:border-primary/70 hover:bg-muted", // Hover effect: changed to hover:bg-muted
-                      "data-[state=open]:border-primary data-[state=open]:ring-2 data-[state=open]:ring-primary/20", // Open state: stronger border + ring
+                      "w-[180px] h-8 text-xs border-input bg-background",
+                      "hover:border-primary/70 hover:bg-muted",
+                      "data-[state=open]:border-primary data-[state=open]:ring-2 data-[state=open]:ring-primary/20",
                       "transition-all"
                   )}
               >
@@ -720,21 +611,17 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ documentId }) => {
             onClick={() => handleRunAnalysis(selectedAnalysisType)} 
             disabled={!selectedAnalysisType || isAnalysisLoading || loading}
             className={cn(
-                "h-8 font-medium", // Base styles
-                // Enabled state styles:
+                "h-8 font-medium",
                 !(!selectedAnalysisType || isAnalysisLoading || loading) && 
                 "bg-primary text-primary-foreground shadow-md hover:bg-primary/90 hover:shadow-lg transform hover:scale-[1.02] transition-all duration-150 ease-in-out",
-                // Disabled state styles (uses default Button disabled styles)
              )}
           >
               {isAnalysisLoading ? <Spinner size="xs" className="mr-1" /> : <Play className="h-3.5 w-3.5 mr-1" />} 
               Run
          </Button>
-         {/* Add Download/Edit buttons? */}
        </div>
       </div>
 
-      {/* Chat Hint */}
       {!loading && !error && document && (
           <p className="text-sm text-muted-foreground italic text-center mb-3 -mt-2">
               <Info className="h-3.5 w-3.5 mr-1 inline-block relative -top-px"/>
@@ -742,9 +629,7 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ documentId }) => {
           </p>
       )}
 
-      {/* Main Content Area */} 
       <div className="flex-grow flex overflow-hidden">
-          {/* Left Panel: Editor/Preview */} 
           <div className="flex-grow flex flex-col overflow-hidden">
               {loading && (
                  <div className="p-4 space-y-2">
@@ -812,7 +697,6 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ documentId }) => {
               )}
           </div>
 
-          {/* Right Panel: Analysis Results */} 
           <div className="w-[350px] flex-shrink-0 border-l overflow-hidden flex flex-col">
               <div className="p-3 border-b bg-muted/30 flex-shrink-0">
                  <h3 className="text-sm font-medium">Analysis Results</h3> 
