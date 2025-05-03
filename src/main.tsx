@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 // import { checkSupabaseEnv } from './utils/envCheck' // Commented out - file not found
+import { AuthProvider } from './context/AuthContext'
 import App from './App'
 
 // Create a client
@@ -26,10 +27,12 @@ const queryClient = new QueryClient()
 // } else {
   // Environment variables are okay, render the app
   createRoot(document.getElementById('root')!).render(
-    // <React.StrictMode>
-      <QueryClientProvider client={queryClient}>
-        <App />
-      </QueryClientProvider>
-    // </React.StrictMode>,
+    <React.StrictMode>
+      <AuthProvider>
+        <QueryClientProvider client={queryClient}>
+          <App />
+        </QueryClientProvider>
+      </AuthProvider>
+    </React.StrictMode>,
   )
 // }

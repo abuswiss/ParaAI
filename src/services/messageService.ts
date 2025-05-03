@@ -1,11 +1,11 @@
 import { supabase } from '../lib/supabaseClient';
 import {
-  addMessageSafely, 
   getConversationMessagesSafely 
 } from '../lib/secureDataClient';
 import { Message as ChatMessage } from '@/components/chat/ChatMessage'; 
 import { Message as VercelChatMessage } from 'ai';
 import { v4 as uuidv4 } from 'uuid';
+import { Message as DbMessage } from '@/types/db'; 
 
 console.log('Message service initializing...');
 
@@ -15,6 +15,7 @@ console.log('Message service initializing...');
 
 /**
  * Get messages for a conversation
+ * Still used for loading initial history in ChatInterface
  */
 export const getConversationMessages = async (
   conversationId: string
@@ -35,25 +36,8 @@ export const getConversationMessages = async (
   }
 };
 
-/**
- * Add a message to a conversation
- */
-export const addMessage = async (
-  conversationId: string,
-  role: 'system' | 'user' | 'assistant' | 'error', // Added 'error' role if used
-  content: string
-): Promise<{ data: ChatMessage | null; error: Error | null }> => {
-  try {
-    const result = await addMessageSafely(conversationId, role, content);
-    return result;
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : 'Unknown error adding message';
-    console.error('Error adding message:', message);
-    return { data: null, error: error instanceof Error ? error : new Error(message) };
-  }
-};
-
 // Function to map our Message type to Vercel AI SDK Message type
+// Keep this if needed elsewhere, but useChat handles mapping internally for API calls
 export function mapToVercelMessages(messages: ChatMessage[]): VercelChatMessage[] {
     return messages.map(msg => ({
         id: msg.id,
@@ -63,66 +47,78 @@ export function mapToVercelMessages(messages: ChatMessage[]): VercelChatMessage[
     }));
 } 
 
-// --- NEW saveMessage Function ---
+// --- NEW saveMessage Function --- 
 /**
  * Saves a complete message object to the database.
+ * Expects an object compatible with the DB schema.
  */
 export const saveMessage = async (
-  message: ChatMessage
-): Promise<{ data: any | null; error: Error | null }> => {
-  // Omit fields that shouldn't be directly saved or are handled by the DB
-  const { isLoading, isStreaming, ...messageToSave } = message;
+  message: DbMessage // <-- Expect DbMessage type
+): Promise<{ data: DbMessage | null; error: Error | null }> => {
+  
+  const messageToSave = message;
 
-  // Map documentContext (if exists) to appropriate DB column if needed,
-  // or ensure your DB schema accepts it directly on the 'messages' table.
-  // Example: if DB column is 'document_context_id':
-  // if (messageToSave.documentContext) {
-  //    messageToSave.document_context_id = messageToSave.documentContext;
-  //    delete messageToSave.documentContext; 
-  // }
-
-  // Ensure required fields are present
-  if (!messageToSave.id || !messageToSave.conversation_id || !messageToSave.role || !messageToSave.content) {
+  // Update validation check to use sender_id
+  if (!messageToSave.id || !messageToSave.conversation_id || !messageToSave.role || !messageToSave.content || !messageToSave.sender_id) { // Check sender_id
     console.error('Missing required fields in message object for saving:', messageToSave);
-    return { data: null, error: new Error('Invalid message object for saving.') };
+    return { data: null, error: new Error('Invalid message object for saving (missing required fields). ID, conversation_id, role, content, sender_id needed.') };
   }
 
   try {
-    console.log("Saving message:", messageToSave);
+    console.log("Attempting to save message via saveMessage:", messageToSave);
     
-    // Prepare metadata object
+    // Prepare metadata object 
     const metadataPayload: Record<string, any> = {};
     if (messageToSave.model) {
         metadataPayload.model = messageToSave.model;
     }
-    if (messageToSave.documentContext) {
-        metadataPayload.documentContextId = messageToSave.documentContext; // Store as documentContextId inside metadata
+    if (messageToSave.document_context && typeof messageToSave.document_context === 'string') { 
+        metadataPayload.documentContextIds = messageToSave.document_context;
     }
+    if (messageToSave.metadata) {
+        Object.assign(metadataPayload, messageToSave.metadata);
+    }
+
+    // Prepare the object for insertion, using sender_id and omitting DB-defaulted fields
+    const dbPayload: Partial<DbMessage> = {
+        id: messageToSave.id,
+        conversation_id: messageToSave.conversation_id,
+        // Use sender_id
+        sender_id: messageToSave.sender_id, 
+        role: messageToSave.role,
+        content: messageToSave.content,
+        // OMIT created_at - let DB handle default
+        // created_at: messageToSave.created_at, 
+        // OMIT timestamp - let DB handle default
+        // timestamp: undefined, // Or however you handle this if it exists on DbMessage
+        // Optional fields
+        model: messageToSave.model, // Include if present
+        document_context: messageToSave.document_context, // Include if present
+        // Include metadata if the column exists and payload has keys or original metadata exists
+        metadata: Object.keys(metadataPayload).length > 0 ? metadataPayload : (messageToSave.metadata !== undefined ? messageToSave.metadata : null), 
+    };
+
+    // Remove undefined fields before insert
+    Object.keys(dbPayload).forEach(key => dbPayload[key as keyof DbMessage] === undefined && delete dbPayload[key as keyof DbMessage]);
+
+    console.log("Final payload for DB insert:", JSON.stringify(dbPayload, null, 2));
+    console.log("Payload Keys:", Object.keys(dbPayload));
 
     const { data, error } = await supabase
       .from('messages')
-      .insert([{
-          id: messageToSave.id,
-          conversation_id: messageToSave.conversation_id,
-          role: messageToSave.role,
-          content: messageToSave.content,
-          // Remove direct insertion of model and document_context
-          // model: messageToSave.model, 
-          // document_context: messageToSave.documentContext ?? null, 
-          // Insert the constructed metadata object (or null if empty)
-          metadata: Object.keys(metadataPayload).length > 0 ? metadataPayload : null,
-          // Add owner_id if available and needed (assuming it comes from auth)
-          // owner_id: (await supabase.auth.getUser()).data.user?.id, 
-          // timestamp / created_at might be handled by DB defaults
-      }])
+      .insert([dbPayload as DbMessage]) 
       .select() 
       .single();
 
     if (error) {
+        // --- Log Supabase Error Details --- 
+        console.error("Supabase Insert Error Details:", JSON.stringify(error, null, 2));
+        // --- End Log --- 
+
         // Handle potential primary key violation (message ID already exists)
         if (error.code === '23505') { // PostgreSQL unique violation code
-            console.warn(`Message with ID ${messageToSave.id} likely already saved. Ignoring duplicate insert error.`);
-            // Optionally, fetch the existing message instead of returning an error
+            console.warn(`Message with ID ${messageToSave.id} likely already saved (e.g., user message on retry). Ignoring duplicate insert error.`);
+            // Fetch the existing message instead of returning an error
             const { data: existingMsg, error: fetchErr } = await supabase
                 .from('messages')
                 .select('*')
@@ -132,12 +128,14 @@ export const saveMessage = async (
                  console.error("Failed to fetch existing message after duplicate insert attempt:", fetchErr);
                  return { data: null, error: fetchErr }; 
             }
+            console.log("Returning existing message data for duplicate ID:", existingMsg);
             return { data: existingMsg, error: null }; // Return existing message
         } else {
              throw error; // Re-throw other errors
         }
     }
     
+    console.log("Message saved successfully:", data);
     return { data, error: null };
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error saving message';

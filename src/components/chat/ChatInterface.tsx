@@ -1,13 +1,16 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useChat } from 'ai/react';
+import { Loader2, SendHorizontal, StopCircle, X, Paperclip } from 'lucide-react';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { 
+  activeCaseAtom,
   activeCaseIdAtom,
-  activeDocumentContextIdAtom,
   activeConversationIdAtom,
-  uploadModalOpenAtom
+  uploadModalOpenAtom,
+  chatDocumentContextIdsAtom
 } from '@/atoms/appAtoms';
 import { getConversationMessages, saveMessage } from '@/services/messageService';
-import { createConversation } from '@/services/conversationService';
+import { createConversation, getConversation } from '@/services/conversationService';
 import { v4 as uuidv4 } from 'uuid';
 import { MessageCircle, Wand2, PlusSquare } from 'lucide-react';
 import ChatInput from './ChatInput';
@@ -20,391 +23,349 @@ import { toast } from 'react-hot-toast';
 import { Button } from '@/components/ui/Button';
 import { supabase } from '@/lib/supabaseClient';
 import { cn } from '@/lib/utils';
+import { useToast } from '@/components/ui/use-toast';
+import { useQueryClient } from '@tanstack/react-query';
+import { Separator } from '@/components/ui/separator';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { Skeleton } from '@/components/ui/skeleton';
+import { useAuth } from '@/context/AuthContext';
+import { MAX_CONTEXT_DOCUMENTS } from '@/config/constants';
+import type { Message as VercelMessage } from 'ai';
+import { Message as DbMessage } from '@/types/db';
 
 interface ChatInterfaceProps {
-  onInsertContent?: (content: string) => void;
-  initialInput?: string;
+  conversationId?: string | null;
+  onNewConversationStart?: (newId: string) => void;
 }
 
-interface ChatFunctionResponse {
-  content?: string;
-  error?: string;
-}
-
-// Type for the payload received from ChatInput
-interface SendMessagePayload {
-  content: string;
-  documentId: string | null;
-  agent: string;
-  context?: {
-    documentText: string;
-    analysisItem: any;
-    analysisType: string;
-  } | null;
-}
-
-function ChatInterface({ onInsertContent, initialInput }: ChatInterfaceProps) {
-  const [activeConversationId, setActiveConversationId] = useAtom(activeConversationIdAtom);
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
-  const [isLoadingHistory, setIsLoadingHistory] = useState<boolean>(false);
-  const activeDocumentContextId = useAtomValue(activeDocumentContextIdAtom);
-
+const ChatInterface: React.FC<ChatInterfaceProps> = ({
+  conversationId: initialConversationId,
+  onNewConversationStart,
+}) => {
+  const { toast: useToastToast } = useToast();
+  const { user, session, loading: authLoading } = useAuth();
+  const selectedCaseDetails = useAtomValue(activeCaseAtom).details;
   const activeCaseId = useAtomValue(activeCaseIdAtom);
+  const queryClient = useQueryClient();
 
-  const setUploadModalOpen = useSetAtom(uploadModalOpenAtom);
+  const [currentConversationId, setCurrentConversationId] = useState<string | null | undefined>(initialConversationId);
+  const latestConversationIdRef = useRef<string | null | undefined>(initialConversationId);
+  const [conversationTitle, setConversationTitle] = useState<string>('New Chat');
+  const [isHistoryLoading, setIsHistoryLoading] = useState<boolean>(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [selectedDocumentIds, setSelectedDocumentIds] = useAtom(chatDocumentContextIdsAtom);
 
+  const scrollAreaRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const prevActiveConversationIdRef = useRef<string | null | undefined>(undefined);
 
-  const howToUseTips = [
-      { icon: <MessageCircle className="h-6 w-6 text-primary" />, title: 'Ask Anything', desc: 'Ask questions about the current document or general legal topics.', example: 'Summarize this document.' },
-      { icon: <Wand2 className="h-6 w-6 text-purple-400" />, title: 'Use Commands', desc: 'Type / for helpful commands (Note: complex commands may be disabled).', example: '/research ...' },
-  ];
+  const {
+    messages,
+    input,
+    handleInputChange,
+    handleSubmit,
+    isLoading: isAiLoading,
+    error: aiError,
+    stop,
+    setMessages,
+    reload,
+    append,
+  } = useChat({
+    api: '/api/supabase/generic-chat-agent',
+    id: currentConversationId || undefined,
+    initialMessages: [],
+    body: {
+      caseId: activeCaseId,
+      documentContextIds: selectedDocumentIds,
+    },
+    headers: {
+      Authorization: session?.access_token ? `Bearer ${session.access_token}` : ''
+    },
+    onResponse: (response) => {
+      if (response.ok) {
+        const newConvId = response.headers.get('X-Conversation-Id');
+        if (newConvId && !currentConversationId) {
+          console.log("New conversation started, ID:", newConvId);
+          setCurrentConversationId(newConvId);
+          latestConversationIdRef.current = newConvId;
+          if (onNewConversationStart) {
+            onNewConversationStart(newConvId);
+          }
+          queryClient.invalidateQueries({ queryKey: ['conversations', activeCaseId] });
+        }
+      } else {
+        console.error("API response error:", response.statusText);
+      }
+    },
+    onFinish: async (message) => {
+      const finalConversationId = latestConversationIdRef.current;
+      console.log(`AI finished responding for conversation ${finalConversationId}. Saving assistant message (Vercel ID: ${message.id}):`, message);
+      if (finalConversationId && user) {
+        const dbMessageId = uuidv4();
+        console.log(`Generated new UUID for DB message: ${dbMessageId}`);
 
-  const resetChat = useCallback(() => {
-    console.log('Resetting chat state (likely due to atom change)...');
+        const assistantMessageToSave: DbMessage = {
+          id: dbMessageId,
+          conversation_id: finalConversationId,
+          role: 'assistant',
+          content: message.content,
+          sender_id: user.id,
+          created_at: message.createdAt?.toISOString() || new Date().toISOString(),
+          document_context: selectedDocumentIds.length > 0 ? selectedDocumentIds.join(',') : undefined,
+        };
+        try {
+          const { data: savedMsg, error: saveError } = await saveMessage(assistantMessageToSave);
+          if (saveError) {
+            console.error("Error saving assistant message:", saveError);
+            useToastToast({ title: "Save Error", description: "Failed to save assistant's response.", variant: "destructive" });
+          } else {
+            console.log("Assistant message saved to DB:", savedMsg?.id);
+          }
+        } catch (error) {
+          console.error("Exception saving assistant message:", error);
+          useToastToast({ title: "Save Error", description: "An unexpected error occurred while saving the response.", variant: "destructive" });
+        }
+      } else {
+        console.warn("Could not save assistant message: Missing conversationId or userId.", { finalConversationId, userExists: !!user });
+      }
+      scrollToBottom();
+      if (finalConversationId) {
+        console.log(`Invalidating messages query for conversation: ${finalConversationId}`);
+        queryClient.invalidateQueries({ queryKey: ['messages', finalConversationId] });
+      }
+    },
+    onError: (error) => {
+      console.error("Chat API Error:", error);
+      useToastToast({
+        variant: "destructive",
+        title: "Chat Error",
+        description: error.message || "An error occurred while communicating with the AI.",
+      });
+    },
+  });
+
+  useEffect(() => {
+    setCurrentConversationId(initialConversationId);
     setMessages([]);
-    setError(null);
-    setIsLoading(false);
-    setIsLoadingHistory(false);
-  }, []);
+    setConversationTitle(initialConversationId ? 'Loading...' : 'New Chat');
+    setHistoryError(null);
 
-  const fetchMessages = useCallback(async (convId: string | null | undefined) => {
-    if (!convId) {
-        resetChat();
-        console.log('No active conversation ID, resetting chat.');
-        return;
-    }
-    console.log('Fetching messages for conversation (from atom):', convId);
-    setIsLoadingHistory(true);
-    setError(null);
-    try {
-      const { data, error: fetchError } = await getConversationMessages(convId);
-      if (fetchError) throw fetchError;
-      
-      const formattedMessages = (data || []).map(msg => ({
-        ...msg,
-        id: msg.id || uuidv4(),
-        timestamp: msg.timestamp || new Date().toISOString(),
-        isStreaming: false,
-        isLoading: false,
+    if (initialConversationId) {
+      setIsHistoryLoading(true);
+      console.log(`Fetching history for conversation: ${initialConversationId}`);
+
+      const fetchHistory = async () => {
+        try {
+          const { data: convData, error: convError } = await getConversation(initialConversationId);
+          if (convError || !convData) {
+            throw convError || new Error("Conversation not found.");
+          }
+          setConversationTitle(convData.title || `Chat ${initialConversationId.substring(0, 8)}`);
+
+          const { data: historyData, error: historyError } = await getConversationMessages(initialConversationId);
+
+          if (historyError) {
+            throw historyError;
+          }
+
+          if (historyData) {
+            console.log(`Fetched ${historyData.length} messages.`);
+            const formattedMessages = historyData.map((msg): Message => ({
+              id: msg.id,
+              role: msg.role,
+              content: msg.content,
+              createdAt: msg.created_at,
+              model: msg.model,
+              documentContext: msg.document_context,
       }));
       setMessages(formattedMessages);
-    } catch (error: unknown) {
-      console.error('Error fetching messages:', error);
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      setError(`Failed to load conversation: ${message}`);
+          } else {
+            setMessages([]);
+          }
+        } catch (err: any) {
+          console.error("Error fetching conversation history:", err);
+          setHistoryError(err.message || "Failed to load chat history.");
+          useToastToast({
+            variant: "destructive",
+            title: "Load Error",
+            description: err.message || "Failed to load chat history.",
+          });
+        } finally {
+          setIsHistoryLoading(false);
+        }
+      };
+      fetchHistory();
+    } else {
       setMessages([]);
-    } finally {
-      setIsLoadingHistory(false);
+      setIsHistoryLoading(false);
     }
-  }, [resetChat]);
+  }, [initialConversationId, setMessages, useToastToast]);
 
-  useEffect(() => {
-    const prevId = prevActiveConversationIdRef.current;
-    console.log(`ChatInterface: activeConversationId ATOM changed from ${prevId} to: ${activeConversationId}`);
-
-    // Simplified: Always fetch if the ID is valid and different from the previous ref
-    // This handles initial load and external changes.
-    // Redundant fetch after creation in handleSendMessage is acceptable for simplicity.
-    if (activeConversationId && activeConversationId !== prevId) {
-        console.log('Fetching messages based on atom change.');
-        fetchMessages(activeConversationId);
-    }
-    // Handle case where conversation is cleared
-    if (!activeConversationId && prevId) {
-        console.log('Conversation cleared, resetting chat.');
-        resetChat();
-    }
-
-    prevActiveConversationIdRef.current = activeConversationId;
-
-  }, [activeConversationId, fetchMessages, resetChat]);
-
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
-
-  const addMessage = useCallback((message: Message) => {
-    setMessages(prevMessages => {
-      if (prevMessages.some(m => m.id === message.id)) {
-        return prevMessages;
-      }
-      return [...prevMessages, message];
-    });
+  const scrollToBottom = useCallback(() => {
+    setTimeout(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }, 100);
   }, []);
 
-  const handleSendMessage = useCallback(async (payload: SendMessagePayload) => {
-    const { content, documentId, agent, context } = payload;
-
-    if (!content.trim() || isLoading) return;
-
-    const docContextIdForMessage = documentId ?? activeDocumentContextId;
-    
-    let currentMessages = messages; // Capture current messages state
-    let conversationId = activeConversationId;
-
-    setIsLoading(true);
-    setError(null);
-
-    // Prepare user message details
-    const userMessageDetails = {
-      id: uuidv4(),
-      role: 'user' as const,
-      content,
-      timestamp: new Date().toISOString(),
-      ...(docContextIdForMessage && { documentContext: docContextIdForMessage }),
-    };
-
-    // --- Conversation Creation Logic --- 
-    if (!conversationId) {
-      if (!activeCaseId) {
-        setError("Cannot create conversation without an active case.");
-        setIsLoading(false);
-        return;
-      }
-      try {
-        console.log('Creating new conversation...');
-        const { data: newConv, error: createError } = await createConversation(activeCaseId, content.substring(0, 50));
-        if (createError) throw createError;
-        if (!newConv?.id) throw new Error('Failed to create conversation or get ID.');
-        
-        conversationId = newConv.id;
-        console.log('New conversation created:', conversationId);
-        
-        // Update user message with the new ID
-        const userMessageWithConvId: Message = { ...userMessageDetails, conversation_id: conversationId };
-
-        // Update local state DIRECTLY
-        setMessages([userMessageWithConvId]); // Start new history with this message
-        currentMessages = [userMessageWithConvId]; // Update local variable for history prep
-        
-        // Set the global atom
-        setActiveConversationId(conversationId);
-        
-        // Save the user message to DB
-        saveMessage(userMessageWithConvId).catch(err => console.error("Failed to save user message after new conv creation:", err));
-        
-        // **CONTINUE execution within this function**
-
-      } catch (err) {
-        console.error('Error creating conversation:', err);
-        setError(err instanceof Error ? err.message : 'Could not start new conversation.');
-        setIsLoading(false);
-        // No optimistic message added yet in this flow, so no cleanup needed here
-        return;
-      }
-    } else {
-      // Conversation already exists
-      const userMessageExistingConv: Message = { ...userMessageDetails, conversation_id: conversationId };
-      
-      // Add user message to existing local state
-      setMessages(prev => [...prev, userMessageExistingConv]);
-      currentMessages = [...messages, userMessageExistingConv]; // Update local variable
-
-      // Save user message to DB
-      saveMessage(userMessageExistingConv).catch(err => console.error("Failed to save user message for existing conv:", err));
+  useEffect(() => {
+    if (!isHistoryLoading) {
+      scrollToBottom();
     }
-    
-    // --- AI Message Sending Logic (Now runs for both new and existing conv) ---
-    
-    // Prepare history using the updated `currentMessages` variable
-    const historyForBackend = currentMessages
-      // Ensure filtering by the correct final conversationId
-      .filter(m => m.conversation_id === conversationId) 
-      .map(msg => ({ role: msg.role, content: msg.content }));
+  }, [messages.length, isHistoryLoading, scrollToBottom]);
 
-    try {
-      const { data, error: invokeError } = await supabase.functions.invoke<ChatFunctionResponse>(
-        'generic-chat-agent',
-        {
-          body: {
-            messages: historyForBackend,
-            modelId: agent ?? undefined,
-            analysisContext: context ?? undefined,
-            documentContext: docContextIdForMessage ? [docContextIdForMessage] : undefined,
-            caseId: activeCaseId ?? undefined,
-            // Pass conversationId explicitly if needed by backend 
-            conversationId: conversationId ?? undefined,
-          },
+  const handleFormSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!activeCaseId) {
+      useToastToast({ title: "No Case Selected", description: "Please select a case before sending a message.", variant: "destructive" });
+      return;
+    }
+    if (!input.trim() && selectedDocumentIds.length === 0) {
+      useToastToast({ title: "Empty message", description: "Please enter a message or select documents.", variant: "destructive" });
+      return;
+    }
+    const idToSend = latestConversationIdRef.current;
+    console.log(`Submitting message for conversation: ${idToSend ?? 'NEW'} | Case ID (in hook body): ${activeCaseId}`);
+    handleSubmit(e, {
+      options: {
+        body: {
+          conversationId: idToSend,
         }
-      );
-
-      if (invokeError) throw invokeError;
-      if (data?.error) throw new Error(data.error);
-      if (!data?.content) throw new Error('No content received from AI.');
-
-      const assistantMessage: Message = {
-        id: uuidv4(),
-        role: 'assistant',
-        content: data.content,
-        timestamp: new Date().toISOString(),
-        conversation_id: conversationId,
-        ...(docContextIdForMessage && { documentContext: docContextIdForMessage }),
-      };
-      
-      // Add assistant message to local state
-      setMessages(prev => [...prev, assistantMessage]);
-      
-      // Save assistant message to DB
-      saveMessage(assistantMessage).catch(err => console.error("Failed to save assistant message:", err));
-
-    } catch (err) {
-       console.error('Error during AI call:', err);
-       const messageText = err instanceof Error ? err.message : 'An unknown error occurred.';
-       setError(`Assistant error: ${messageText}`);
-       // Optionally add an error message to the chat UI
-       const errorMessage: Message = {
-         id: uuidv4(),
-         role: 'assistant',
-         content: `Sorry, I encountered an error: ${messageText}`,
-         timestamp: new Date().toISOString(),
-         conversation_id: conversationId,
-         isError: true, // Add flag if needed for styling
-       };
-       setMessages(prev => [...prev, errorMessage]);
-    } finally {
-       setIsLoading(false);
-    }
-  }, [activeCaseId, activeConversationId, activeDocumentContextId, isLoading, messages, setActiveConversationId]); // Added dependencies
-
-  const handleEditMessage = (messageId: string, newContent: string) => {
-    console.log(`Editing message ${messageId} to: ${newContent}`);
-    setMessages(prevMessages =>
-      prevMessages.map(message =>
-        message.id === messageId ? { ...message, content: newContent } : message
-      )
-    );
-  };
-
-  const handleRegenerateResponse = (messageId: string) => {
-    const assistantMessageIndex = messages.findIndex(msg => msg.id === messageId && msg.role === 'assistant');
-    if (assistantMessageIndex > 0) {
-      const userMessageToResend = messages[assistantMessageIndex - 1];
-      if (userMessageToResend.role === 'user') {
-        setMessages(prev => prev.slice(0, assistantMessageIndex));
-        handleSendMessage({
-            content: userMessageToResend.content,
-            documentId: userMessageToResend.documentContext || null,
-            agent: 'default-chat'
-        });
-      } else {
-         toast.error('Cannot regenerate response for the first message.');
       }
-    } else {
-         toast.error('Could not find the message to regenerate.');
+    });
+    scrollToBottom();
+  };
+
+  const handleSend = (messageContent: string) => {
+    if (!activeCaseId) return;
+    if (!messageContent.trim() && selectedDocumentIds.length === 0) return;
+
+    const tempUserMessage: VercelMessage = {
+      id: Date.now().toString(),
+      role: 'user',
+      content: messageContent
+    };
+    append(tempUserMessage);
+
+    const fakeEvent = { preventDefault: () => {} } as React.FormEvent<HTMLFormElement>;
+    const idToSend = latestConversationIdRef.current;
+
+    console.log(`Sending programmatic message for conversation: ${idToSend ?? 'NEW'} | Case ID (in hook body): ${activeCaseId}`);
+    handleSubmit(fakeEvent, {
+      options: {
+        body: {
+          conversationId: idToSend,
+        },
+        data: { content: messageContent }
+      }
+    });
+
+    scrollToBottom();
+  };
+
+  const handleDocumentSelection = (docIds: string[]) => {
+    setSelectedDocumentIds(docIds);
+    console.log("Selected document IDs updated:", docIds);
+  };
+
+  const renderMessages = () => {
+    if (isHistoryLoading) {
+      return (
+        <div className="space-y-4 p-4">
+          <Skeleton className="h-16 w-3/4" />
+          <Skeleton className="h-16 w-1/2 ml-auto" />
+          <Skeleton className="h-24 w-full" />
+        </div>
+      );
     }
-  };
 
-  const handleCopyContent = (content: string) => {
-    navigator.clipboard.writeText(content)
-      .then(() => toast.success('Copied to clipboard!'))
-      .catch(() => toast.error('Failed to copy text.'));
-  };
-
-  const handleInsertToEditor = (content: string) => {
-    if (onInsertContent) {
-      onInsertContent(content);
-      toast.success('Content inserted into editor.');
-    } else {
-      toast.error('Cannot insert content: No editor connection.');
+    if (historyError) {
+      return <div className="p-4 text-center text-red-600">{historyError}</div>;
     }
+
+    if (!isHistoryLoading && messages.length === 0 && currentConversationId) {
+      return <div className="p-4 text-center text-gray-500">No messages in this conversation yet.</div>;
+    }
+
+    if (!isHistoryLoading && messages.length === 0 && !currentConversationId) {
+      return <div className="p-4 text-center text-gray-500">Start the conversation by sending a message or selecting documents.</div>;
+    }
+
+    const displayMessages = messages.filter(m => m.role !== 'system');
+
+    return displayMessages.map((message, index) => (
+      <ChatMessage
+        key={message.id || `msg-${index}`}
+        message={message as Message}
+      />
+    ));
   };
 
-  const handleFileUpload = (files: File[]) => {
-      console.log("Files selected in chat input:", files);
-      setUploadModalOpen(true);
-  };
-
-  const showEmptyState = messages.length === 0 && !isLoadingHistory && !error;
-
-  const handleNewChatClick = () => {
-      console.log("New Chat button clicked, setting active ID to null");
-      setActiveConversationId(null);
-  };
+  const isLoading = isHistoryLoading || isAiLoading || authLoading;
+  const isInputDisabled = !activeCaseId || !user || authLoading || isLoading;
+  const placeholderText = authLoading
+    ? "Checking auth..."
+    : !user
+    ? "Please log in first"
+    : activeCaseId
+    ? "Ask BenchWise anything..."
+    : "Please select a case first";
 
   return (
-    <div className="flex flex-col h-full bg-background overflow-hidden">
-        <div className="flex items-center justify-between p-2 border-b">
-            <h2 className="text-lg font-semibold">Chat</h2>
-            <Button 
-                variant="ghost" 
-                size="icon" 
-                onClick={handleNewChatClick} 
-                title="New Chat"
-            >
-                <PlusSquare className="h-5 w-5" />
-            </Button>
+    <TooltipProvider delayDuration={0}>
+      <div className="flex flex-col h-full bg-background">
+        <div className="p-4 border-b flex justify-between items-center">
+          <h2 className="text-lg font-semibold truncate pr-2" title={conversationTitle}>
+            {conversationTitle}
+          </h2>
         </div>
-        <ScrollArea className="flex-grow p-4 space-y-4">
-            {isLoadingHistory && (
-                 <div className="flex justify-center items-center h-full">
-                    <Spinner />
-                 </div>
+
+        <ScrollArea ref={scrollAreaRef} className="flex-1 p-4">
+          <div className="space-y-4">
+            {renderMessages()}
+            {isAiLoading && (
+              <ChatMessage
+                message={{
+                  id: 'loading-indicator',
+                  role: 'assistant',
+                  content: '',
+                  createdAt: new Date().toISOString(),
+                  isLoading: true,
+                }}
+              />
             )}
-            {!isLoadingHistory && error && (
-                <Alert variant="destructive" className="m-4">
-                    <Icons.Alert className="h-4 w-4" />
-                    <AlertTitle>Error</AlertTitle>
-                    <AlertDescription>{error}</AlertDescription>
-                </Alert>
-            )}
-             {!isLoadingHistory && !error && messages.map((msg, index) => (
+            {aiError && (
                 <ChatMessage
-                    key={msg.id || index}
-                    message={msg}
-                    onEditMessage={handleEditMessage}
-                    onRegenerateResponse={handleRegenerateResponse}
-                    onCopyContent={handleCopyContent}
-                    onInsertContent={onInsertContent ? handleInsertToEditor : undefined}
-                />
-            ))}
-             {showEmptyState && (
-                <div className="flex flex-col items-center justify-center h-full text-center p-8">
-                    <Icons.Message className="h-16 w-16 text-muted-foreground/50 mb-6" />
-                    <h3 className="text-lg font-semibold mb-2 text-foreground">Start Chatting</h3>
-                    <p className="text-sm text-muted-foreground mb-6 max-w-xs">
-                        Ask questions, use commands, or interact with your document context.
-                    </p>
-                    <div className="space-y-3 w-full max-w-sm">
-                         {howToUseTips.slice(0, 2).map(tip => (
-                             <div key={tip.title} className="flex items-start p-3 bg-muted/30 rounded-md border border-border/50">
-                                {tip.icon && <div className="mr-3 mt-1 flex-shrink-0">{tip.icon}</div>}
-                                <div>
-                                     <p className="text-sm font-medium text-foreground mb-0.5">{tip.title}</p>
-                                     <p className="text-xs text-muted-foreground">{tip.desc}</p>
-                                </div>
-                            </div>
-                         ))}
-                    </div>
-                 </div>
-            )}
-            {isLoading && (
-                <div className="flex items-start space-x-2 pl-2 pr-4">
-                    <div className={cn(
-                        'flex-shrink-0 mt-1 font-medium text-xs uppercase tracking-wider text-muted-foreground'
-                    )}>
-                        AI
-                    </div>
-                    <div className="flex items-center space-x-1 py-2">
-                        <Spinner size="sm" />
-                    </div>
-                </div>
+                message={{
+                  id: 'error-indicator',
+                  role: 'error',
+                  content: `Error: ${aiError.message}`,
+                  createdAt: new Date().toISOString(),
+                }}
+              />
             )}
             <div ref={messagesEndRef} />
+          </div>
         </ScrollArea>
         
+        <Separator />
+
+        <div className="p-0 border-t">
         <ChatInput 
-            onSendMessage={handleSendMessage} 
-            disabled={isLoading || isLoadingHistory} 
-            initialValue={initialInput}
-            isLoading={isLoading}
-            onFileUpload={handleFileUpload}
-        />
+            input={input}
+            handleInputChange={handleInputChange}
+            handleSubmit={handleFormSubmit}
+            isLoading={isAiLoading} 
+            stop={stop}
+            isDisabled={isInputDisabled}
+            placeholder={placeholderText}
+            activeCaseId={activeCaseId}
+            selectedDocumentIds={selectedDocumentIds}
+            handleDocumentSelection={handleDocumentSelection}
+            maxContextDocuments={MAX_CONTEXT_DOCUMENTS}
+          />
+        </div>
     </div>
+    </TooltipProvider>
   );
-}
+};
 
 export default ChatInterface;

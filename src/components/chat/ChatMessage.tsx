@@ -1,110 +1,211 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Icons } from "@/components/ui/Icons";
+import React, { useState, useRef, useEffect, memo, useMemo } from 'react';
+import { Copy, Edit, RefreshCw, Check, Wand2, ClipboardPaste, User, Bot, Paperclip, FileText } from 'lucide-react';
+import { cn } from '@/lib/utils';
 import { Button } from "@/components/ui/Button";
-import ReactMarkdown from 'react-markdown';
-import { cn } from "@/lib/utils";
-import { Textarea } from "@/components/ui/Textarea";
-import { CourtListenerSnippet, PerplexitySource, SourceInfo } from '@/types/sources';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/Tooltip";
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import rehypeRaw from 'rehype-raw';
+import rehypeSanitize from 'rehype-sanitize';
+import { Icons } from "@/components/ui/Icons";
+import { Spinner } from "@/components/ui/Spinner";
+import { CourtListenerSnippet, PerplexitySource, SourceInfo } from '@/types/sources';
 import { Badge } from "@/components/ui/Badge";
 import { DocumentAnalysisResult } from '@/services/documentAnalysisService'; 
 import { RiskAssessment } from '../documents/RiskAssessment'; 
+import { getDocumentsMetadataByIds, DocumentMetadata } from '@/services/documentService';
 
 export interface Message {
   id: string;
-  role: 'system' | 'user' | 'assistant' | 'error';
+  role: 'user' | 'assistant' | 'system' | 'function' | 'data' | 'tool' | 'error';
   content: string;
-  timestamp: string;
+  createdAt?: string | Date;
+  isLoading?: boolean;
   isStreaming?: boolean;
+  isError?: boolean;
+  model?: string;
+  documentContext?: string;
   conversation_id?: string;
-  documentContext?: string | null; 
-  analysisContext?: DocumentAnalysisResult; // Add analysisContext type
-  isEditing?: boolean; // Add isEditing flag
-  sources?: SourceInfo[]; 
-  isError?: boolean; // Added optional error flag
+  owner_id?: string;
+  analysisContext?: DocumentAnalysisResult;
+  isEditing?: boolean;
+  sources?: SourceInfo[];
+  timestamp?: string;
 }
 
 interface ChatMessageProps {
   message: Message;
-  isStreaming?: boolean;
-  onEditMessage: (id: string, newContent: string) => void;
-  onRegenerateResponse: (id: string) => void;
-  onCopyContent: (content: string) => void;
-  onInsertContent?: (content: string) => void;
 }
 
-const ChatMessage: React.FC<ChatMessageProps> = ({ 
-  message,
-  isStreaming,
-  onEditMessage,
-  onRegenerateResponse,
-  onCopyContent,
-  onInsertContent
+// Type for the context document state
+type ContextDoc = Pick<DocumentMetadata, 'id' | 'filename'>;
+
+const ChatMessage: React.FC<ChatMessageProps> = memo(({ 
+  message, 
 }) => {
-  const [isHovered, setIsHovered] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
   const [editedContent, setEditedContent] = useState(message.content);
-  const editTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const [copied, setCopied] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // State for fetched context document metadata
+  const [contextDocs, setContextDocs] = useState<ContextDoc[]>([]);
+  const [contextLoading, setContextLoading] = useState<boolean>(false);
+  const [contextError, setContextError] = useState<string | null>(null);
 
   const isUser = message.role === 'user';
-  const isAssistant = message.role === 'assistant';
-  const isError = message.role === 'error';
+  const isAssistant = message.role === 'assistant' || message.role === 'error';
+  const isInternal = message.role === 'system' || message.role === 'function' || message.role === 'tool' || message.role === 'data';
+  const isError = message.isError || message.role === 'error';
   const isRiskAnalysis = message.analysisContext?.analysisType === 'risks';
   const isKeyClauses = message.analysisContext?.analysisType === 'clauses';
-  const isDocumentSummary = message.content.startsWith('Summary of document'); // Basic check
+  const isDocumentSummary = message.content.startsWith('Summary of document');
 
-  // Reset edited content if message content changes externally (e.g., streaming ends)
-  useEffect(() => {
-      setEditedContent(message.content);
-  }, [message.content]);
-  
-  // Focus and select text when entering edit mode
-  useEffect(() => {
-    if (message.isEditing && editTextareaRef.current) {
-      editTextareaRef.current.focus();
-      editTextareaRef.current.select();
+  // Memoize the parsed document IDs
+  const contextDocIds = useMemo(() => {
+    if (isAssistant && message.documentContext) {
+      return message.documentContext.split(',').filter(id => id.trim() !== '');
     }
-  }, [message.isEditing]);
+    return [];
+  }, [isAssistant, message.documentContext]);
+
+  // Effect to fetch context document metadata
+  useEffect(() => {
+    if (contextDocIds.length > 0) {
+      let isMounted = true;
+      const fetchContext = async () => {
+        setContextLoading(true);
+        setContextError(null);
+        setContextDocs([]); // Clear previous docs
+        try {
+          const { data, error } = await getDocumentsMetadataByIds(contextDocIds);
+          if (error) throw error;
+          if (isMounted && data) {
+            setContextDocs(data.map(d => ({ id: d.id, filename: d.filename })));
+          }
+        } catch (err) {
+          console.error("Error fetching context document metadata:", err);
+          if (isMounted) {
+            setContextError("Failed to load context document details.");
+          }
+        } finally {
+          if (isMounted) {
+            setContextLoading(false);
+          }
+        }
+      };
+      fetchContext();
+      return () => { isMounted = false; }; // Cleanup function
+    } else {
+      // Reset state if there are no context docs for this message
+      setContextDocs([]);
+      setContextLoading(false);
+      setContextError(null);
+    }
+  }, [contextDocIds]);
 
   const handleCopy = () => {
-    onCopyContent(message.content);
-  };
-
-  const handleInsert = () => {
-    if (onInsertContent) {
-      onInsertContent(message.content);
-    }
-  };
-
-  const handleUpdateEditContent = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
-    setEditedContent(event.target.value);
-    // Auto-resize textarea (optional)
-    if (editTextareaRef.current) {
-      editTextareaRef.current.style.height = 'inherit';
-      editTextareaRef.current.style.height = `${editTextareaRef.current.scrollHeight}px`;
-    }
+    navigator.clipboard.writeText(message.content)
+      .then(() => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      })
+      .catch(err => console.error('Failed to copy text: ', err));
   };
 
   const handleEdit = () => {
-    if (editedContent.trim() && editedContent !== message.content) {
-        onEditMessage(message.id, editedContent);
-    } else {
-         // If content hasn't changed, just exit edit mode
-         // Passing original content signals exit from edit mode in parent
-         onEditMessage(message.id, message.content); 
+    if (isUser) {
+      setIsEditing(true);
+      setEditedContent(message.content);
     }
   };
 
-  const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    // Submit on Enter (if not Shift+Enter)
-    if (event.key === 'Enter' && !event.shiftKey) {
-      event.preventDefault();
-      handleEdit();
+  const handleSaveEdit = () => {
+    console.warn("Saving edited message not implemented yet.");
+    setIsEditing(false);
+  };
+
+  const handleCancelEdit = () => {
+    setIsEditing(false);
+    setEditedContent(message.content);
+  };
+
+  useEffect(() => {
+    if (isEditing && textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+      textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
     }
-    // Cancel on Escape
-    if (event.key === 'Escape') {
-      setEditedContent(message.content); // Reset content
-      onEditMessage(message.id, message.content); // Exit edit mode
+  }, [isEditing, editedContent]);
+
+  const renderContent = () => {
+    if (isEditing) {
+      return (
+        <textarea
+          ref={textareaRef}
+          value={editedContent}
+          onChange={(e) => setEditedContent(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+              e.preventDefault();
+              handleSaveEdit();
+            } else if (e.key === 'Escape') {
+              handleCancelEdit();
+            }
+          }}
+          className="w-full p-2 border rounded-md resize-none focus:outline-none focus:ring-1 focus:ring-primary text-sm bg-background"
+          rows={1}
+        />
+      );
+    } 
+
+    if (message.isLoading) {
+      return (
+        <div className="flex items-center space-x-2 py-2">
+          <Spinner size="sm" />
+          <span className="text-sm text-muted-foreground italic">Generating...</span>
+        </div>
+      );
     }
+
+    return (
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        rehypePlugins={[rehypeRaw, rehypeSanitize]}
+        className="prose prose-sm dark:prose-invert max-w-none break-words"
+        components={{
+        }}
+      >
+        {message.content}
+      </ReactMarkdown>
+    );
+  };
+
+  const renderActions = () => {
+    if (isEditing) {
+      return (
+        <div className="flex items-center space-x-1">
+          <Button size="xs-icon" variant="ghost" onClick={handleSaveEdit} className="text-green-600 hover:text-green-700">
+            <Check className="h-3.5 w-3.5" />
+          </Button>
+          <Button size="xs-icon" variant="ghost" onClick={handleCancelEdit} className="text-muted-foreground hover:text-foreground">
+            <X className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+      );
+    }
+
+    return (
+      <div className="flex items-center space-x-1 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button size="xs-icon" variant="ghost" onClick={handleCopy}>
+              {copied ? <Check className="h-3.5 w-3.5 text-green-600" /> : <Copy className="h-3.5 w-3.5" />}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{copied ? "Copied!" : "Copy"}</TooltipContent>
+        </Tooltip>
+      </div>
+    );
   };
 
   // Conditional styling based on role
@@ -125,11 +226,33 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
           : 'bg-muted/30 rounded-lg px-4 py-3 mr-auto' // Default bubble (system? though system shouldn't be displayed)
   );
 
+  const renderContextIndicator = () => {
+    if (!isAssistant || contextLoading || contextError || contextDocs.length === 0) {
+      return null;
+    }
+
+    const tooltipContent = contextDocs.map(doc => doc.filename).join(', ');
+
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div className="flex items-center text-xs text-muted-foreground mt-1.5 cursor-default">
+            <FileText className="h-3.5 w-3.5 mr-1" />
+            <span>Context ({contextDocs.length})</span>
+          </div>
+        </TooltipTrigger>
+        <TooltipContent side="bottom" align="start">
+          <p className="max-w-xs break-words text-xs">
+            Used context from: {tooltipContent}
+          </p>
+        </TooltipContent>
+      </Tooltip>
+    );
+  };
+
   return (
     <div 
         className={messageContainerClass}
-        onMouseEnter={() => setIsHovered(true)} 
-        onMouseLeave={() => setIsHovered(false)}
     > 
       <TooltipProvider delayDuration={100}> 
            {/* Apply role-specific styling to the content container */}
@@ -169,14 +292,14 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                        )}
                        
                        {/* Context Indicators */} 
-                       {/* ... (Keep existing context indicator rendering) ... */} 
+                       {renderContextIndicator()}
 
                        {/* Message Content Body */}
                        <div className={cn(
                            'text-sm text-foreground prose prose-sm dark:prose-invert max-w-none prose-p:my-1 prose-ul:my-1 prose-li:my-0.5',
                            isAssistant ? 'mt-0' : 'mt-1' // Reduce top margin for assistant
                         )}>
-                         {isStreaming && !isUser ? (
+                         {message.isStreaming && !isUser ? (
                            <div className="whitespace-pre-wrap">
                              {message.content}
                              <span className="inline-flex ml-1">
@@ -234,53 +357,10 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                        {/* Action Buttons (Show below content for Assistant, or on hover for User) */}
                        {/* Modify positioning and visibility based on role */} 
                        <div className={cn(
-                           'flex items-center space-x-1 mt-1.5',
-                           isUser ? 'absolute top-1 right-1 bg-background/80 backdrop-blur-sm p-0.5 rounded border border-border/50 opacity-0 group-hover:opacity-100 transition-opacity' : 'opacity-70 hover:opacity-100' // Always visible but dimmer for AI, fades in for User
+                           'absolute -bottom-4 text-xs text-muted-foreground',
+                           isUser ? "right-1" : "left-1"
                        )}>
-                           {/* Regenerate Button (Assistant only) */} 
-                           {isAssistant && !isStreaming && ( 
-                                <Tooltip>
-                                   <TooltipTrigger asChild>
-                                        <Button variant="ghost" size="sm" className="h-5 w-5 p-0.5 text-muted-foreground hover:text-foreground" onClick={() => onRegenerateResponse(message.id)}>
-                                            <Icons.Refresh className="h-3 w-3" />
-                                        </Button>
-                                    </TooltipTrigger>
-                                    <TooltipContent>Regenerate</TooltipContent>
-                                </Tooltip>
-                           )} 
-                           {/* Edit Button (User only) */} 
-                           {isUser && !message.isEditing && ( 
-                               <Tooltip>
-                                   <TooltipTrigger asChild>
-                                        <Button variant="ghost" size="sm" className="h-5 w-5 p-0.5 text-muted-foreground hover:text-foreground" onClick={() => onEditMessage(message.id, message.content)}>
-                                            <Icons.Edit className="h-3 w-3" />
-                                        </Button>
-                                    </TooltipTrigger>
-                                    <TooltipContent>Edit</TooltipContent>
-                                </Tooltip>
-                           )} 
-                           {/* Copy Button (All non-streaming/non-editing) */} 
-                           {!isStreaming && !message.isEditing && (
-                               <Tooltip>
-                                   <TooltipTrigger asChild>
-                                        <Button variant="ghost" size="sm" className="h-5 w-5 p-0.5 text-muted-foreground hover:text-foreground" onClick={handleCopy}>
-                                            <Icons.Copy className="h-3 w-3" />
-                                        </Button>
-                                    </TooltipTrigger>
-                                    <TooltipContent>Copy</TooltipContent>
-                                </Tooltip>
-                           )}
-                           {/* Insert Button (If handler provided, non-user, non-streaming) */} 
-                           {onInsertContent && !isUser && !isStreaming && !message.isEditing && (
-                               <Tooltip>
-                                   <TooltipTrigger asChild>
-                                        <Button variant="ghost" size="sm" className="h-5 w-5 p-0.5 text-muted-foreground hover:text-foreground" onClick={handleInsert}>
-                                            <Icons.Insert className="h-3 w-3" /> 
-                                        </Button>
-                                   </TooltipTrigger>
-                                   <TooltipContent>Insert into Editor</TooltipContent>
-                                </Tooltip>
-                           )}
+                           {!isEditing && renderActions()}
                        </div>
 
                    </div>
@@ -289,6 +369,8 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
        </TooltipProvider>
     </div>
   );
-};
+});
+
+ChatMessage.displayName = 'ChatMessage';
 
 export default ChatMessage;

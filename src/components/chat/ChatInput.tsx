@@ -1,6 +1,6 @@
 import React, { useState, KeyboardEvent, useRef, useEffect, useCallback, useMemo } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Search, BarChart2, Globe, FileText, HelpCircle, Send, Upload as UploadIcon, X, DraftingCompass, Microscope, Clock, Lightbulb, Puzzle, ChevronsUpDown, Check, SearchCheck, Paperclip, ListChecks } from 'lucide-react';
+import { Search, BarChart2, Globe, FileText, HelpCircle, Send, Upload as UploadIcon, X, DraftingCompass, Microscope, Clock, Lightbulb, Puzzle, ChevronsUpDown, Check, SearchCheck, Paperclip, ListChecks, SendHorizontal, Mic, Loader2, StopCircle, Wand2, PlusSquare } from 'lucide-react';
 import { Button } from "@/components/ui/Button";
 import { Icons } from "@/components/ui/Icons";
 import {
@@ -26,13 +26,22 @@ import {
     chatDocumentContextIdsAtom,
     uploadModalOpenAtom,
     activeEditorItemAtom,
+    initialFilesForUploadAtom,
+    newAIDocumentDraftModalOpenAtom,
+    newAITemplateDraftModalOpenAtom,
+    selectTemplateModalOpenAtom,
+    templateImportModalOpenAtom
 } from '@/atoms/appAtoms';
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/Tooltip";
+import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/components/ui/Tooltip";
+import { Textarea } from "@/components/ui/Textarea";
 import TextareaAutosize from 'react-textarea-autosize';
 import { Spinner } from "@/components/ui/Spinner";
 import { SourceInfo } from '@/types/sources';
 import { ChatAgent } from '@/types/agent';
 import DocumentContextPicker from './DocumentContextPicker';
+import DocumentContextDisplay from './DocumentContextDisplay';
+import { useChat } from '@/hooks/useChat';
+import { Dialog, DialogContent } from "@/components/ui/Dialog";
 
 interface SendMessagePayload {
   content: string;
@@ -46,10 +55,17 @@ interface SendMessagePayload {
 }
 
 interface ChatInputProps {
-  onSendMessage: (payload: SendMessagePayload) => void;
-  disabled?: boolean;
-  initialValue?: string;
+  input: string;
+  handleInputChange: (e: React.ChangeEvent<HTMLTextAreaElement> | React.ChangeEvent<HTMLInputElement>) => void;
+  handleSubmit: (e: React.FormEvent<HTMLFormElement>, chatRequestOptions?: { data?: Record<string, string> }) => void;
   isLoading: boolean;
+  stop?: () => void;
+  isDisabled?: boolean;
+  placeholder?: string;
+  onFileUpload?: (files: File[]) => void;
+  selectedDocumentIds: string[];
+  handleDocumentSelection: (docIds: string[]) => void;
+  maxContextDocuments: number;
 }
 
 interface CommandAction {
@@ -108,7 +124,7 @@ const commandActions: CommandAction[] = [
         id: 'agent-summarize',
         label: '/agent summarize',
         value: '/agent summarize',
-        icon: <Icons.FileText className="h-4 w-4 mr-2 text-lime-500" />,
+        icon: <FileText className="h-4 w-4 mr-2 text-lime-500" />,
         description: 'Summarize a legal document.',
     },
     {
@@ -154,374 +170,246 @@ interface MessageContext {
   analysisType: string;
 }
 
-const ChatInput: React.FC<ChatInputProps> = ({ 
-  onSendMessage, 
-  disabled = false,
-  initialValue,
+const ChatInput: React.FC<ChatInputProps> = ({
+  input,
+  handleInputChange,
+  handleSubmit,
   isLoading,
+  stop,
+  isDisabled = false,
+  placeholder = "Ask anything...",
+  onFileUpload,
+  handleDocumentSelection,
+  maxContextDocuments
 }) => {
-  const [inputValue, setInputValue] = useState(initialValue || '');
-  const [showCommandPalette, setShowCommandPalette] = useState(false);
-  const [isDragging, setIsDragging] = useState(false);
-
-  const [selectedModelId, setSelectedModelId] = useState<string>(availableModels.find(m => m.id === 'default-chat')?.id || availableModels[0].id);
-  const [isWebSearchEnabled, setIsWebSearchEnabled] = useState<boolean>(false);
-  const [modelSelectorOpen, setModelSelectorOpen] = useState(false);
-
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const commandPaletteRef = useRef<HTMLDivElement>(null);
-  const chatInputContainerRef = useRef<HTMLDivElement>(null);
-
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isPopoverOpen, setIsPopoverOpen] = useState(false);
+  const [commandSearch, setCommandSearch] = useState('');
+  const setUploadModalOpen = useSetAtom(uploadModalOpenAtom);
+  const [isDocPickerOpen, setIsDocPickerOpen] = useState(false);
   const activeCaseId = useAtomValue(activeCaseIdAtom);
-  const documents = useAtomValue(currentCaseDocumentsAtom);
-  const [editorTextToQuery, setEditorTextToQuery] = useAtom(editorTextToQueryAtom);
-  const [chatPreloadContext, setChatPreloadContext] = useAtom(chatPreloadContextAtom);
-  const selectedContextIds = useAtomValue(chatDocumentContextIdsAtom);
-  const setIsUploadModalOpen = useSetAtom(uploadModalOpenAtom);
-  const activeEditorItem = useAtomValue(activeEditorItemAtom);
-
-  const [messageContext, setMessageContext] = useState<MessageContext | null>(null);
-
-  const [isContextPickerOpen, setIsContextPickerOpen] = useState(false);
+  const selectedDocumentIds = useAtomValue(chatDocumentContextIdsAtom);
 
   useEffect(() => {
-    if (initialValue) {
-      setInputValue(initialValue);
-      textareaRef.current?.focus();
-      setTimeout(() => {
-         if (textareaRef.current) {
-            textareaRef.current.selectionStart = textareaRef.current.selectionEnd = initialValue.length;
-         }
-      }, 0);
-    }
-  }, [initialValue]);
-
-  useEffect(() => {
-    if (chatPreloadContext) {
-      const { analysisItem, analysisType, documentText } = chatPreloadContext;
-
-      let itemIdentifier = 'this item';
-      if (typeof analysisItem === 'string') {
-        itemIdentifier = 'this summary';
-      } else if (analysisItem.text) {
-        itemIdentifier = `"${analysisItem.text}"`;
-      } else if (analysisItem.title) {
-        itemIdentifier = `the "${analysisItem.title}" clause/risk`;
-      } else if (analysisItem.event && analysisItem.date) {
-        itemIdentifier = `the event on ${new Date(analysisItem.date).toLocaleDateString()}`;
-      } else if (analysisItem.summary) {
-        itemIdentifier = 'this summary/analysis';
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+      const scrollHeight = textareaRef.current.scrollHeight;
+      if (scrollHeight < 200) {
+          textareaRef.current.style.height = `${scrollHeight}px`;
+      } else {
+          textareaRef.current.style.height = `200px`;
       }
-      
-      const promptHint = `Regarding ${itemIdentifier} from the document: `;
-
-      setInputValue(promptHint);
-      setMessageContext({ documentText, analysisItem, analysisType });
-      setChatPreloadContext(null);
-
-      textareaRef.current?.focus();
     }
-  }, [chatPreloadContext, setChatPreloadContext]);
+  }, [input]);
 
-  useEffect(() => {
-    if (editorTextToQuery) {
-      const queryPrefix = `Regarding the selected text "${editorTextToQuery.substring(0, 50)}...": `;
-      setInputValue(prev => queryPrefix + prev);
-      setMessageContext(null);
-      setEditorTextToQuery(null);
-      textareaRef.current?.focus();
-    }
-  }, [editorTextToQuery, setEditorTextToQuery]);
-
-  const handleSubmit = () => {
-    const trimmedValue = inputValue.trim();
-    if (!trimmedValue || disabled || isLoading) return;
-
-    const payload: SendMessagePayload = {
-      content: trimmedValue,
-      documentContext: selectedContextIds,
-      agent: selectedModelId,
-      context: messageContext || null
-    };
-
-    console.log('ChatInput handleSubmit payload:', payload);
-    onSendMessage(payload);
-    setInputValue('');
-    setMessageContext(null);
-    textareaRef.current?.focus();
-  };
-
-  const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey && !showCommandPalette) {
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      handleSubmit();
-    } else if (e.key === '/' && inputValue === '') {
-      setShowCommandPalette(true);
-    } else if (e.key === 'Escape') {
-      if (showCommandPalette) setShowCommandPalette(false);
+      if (!isDisabled && !isLoading && input.trim()) {
+        handleSubmit(e as any, { data: { caseId: activeCaseId || '' } });
+      }
+    }
+    if (e.key === '/' && !input.endsWith('/')) {
+    } else if (e.key === 'Escape' && isPopoverOpen) {
+      setIsPopoverOpen(false);
     }
   };
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+  const handleTextareaChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    handleInputChange(e);
     const value = e.target.value;
-    setInputValue(value);
-    if (value.startsWith('/') && value.length > 0) {
-        setShowCommandPalette(true);
-    } else {
-        setShowCommandPalette(false);
+    if (value.endsWith('/')) {
+      setIsPopoverOpen(true);
+      setCommandSearch('');
+    } else if (isPopoverOpen && !value.includes('/')) {
+      setIsPopoverOpen(false);
+    } else if (isPopoverOpen && value.includes('/')) {
+      const parts = value.split('/');
+      setCommandSearch(parts[parts.length - 1]);
     }
   };
 
   const handleFileButtonClick = () => {
-    if (!activeCaseId) {
-       console.warn("Upload requires an active case.");
-       alert("Please select or create a case before uploading documents.");
-       return;
+    fileInputRef.current?.click();
+  };
+
+  const handleFileSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0 && onFileUpload) {
+      onFileUpload(Array.from(e.target.files));
+      e.target.value = '';
     }
-    setIsUploadModalOpen(true);
   };
 
-  const handleContextPickerOpen = () => {
-      if (!activeCaseId) {
-          console.warn("Context selection requires an active case.");
-          alert("Please select or create a case first.");
-          return;
-      }
-      setIsContextPickerOpen(true);
+  const handleCommandSelect = (command: string) => {
+    const currentValue = input;
+    const lastSlashIndex = currentValue.lastIndexOf('/');
+    const newValue = currentValue.substring(0, lastSlashIndex + 1) + command + ' ';
+    const syntheticEvent = {
+      target: { value: newValue },
+      currentTarget: { value: newValue },
+    } as React.ChangeEvent<HTMLTextAreaElement>;
+    handleInputChange(syntheticEvent);
+    setIsPopoverOpen(false);
+    textareaRef.current?.focus();
   };
 
-  const handleDragEnter = (e: React.DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDragging(true);
-  };
+  const isSending = isLoading;
+  const isEffectivelyDisabled = isDisabled || isSending;
 
-  const handleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setTimeout(() => {
-      if (chatInputContainerRef.current && !chatInputContainerRef.current.contains(e.relatedTarget as Node)) {
-        setIsDragging(false);
-      }
-    }, 50);
-  };
+  const commands = [
+    { command: 'summarize', description: 'Summarize the context or document' },
+    { command: 'identify_risks', description: 'Find potential risks' },
+    { command: 'extract_entities', description: 'List key people, orgs, dates' },
+    { command: 'draft_email', description: 'Draft an email about... (add topic)' },
+  ];
 
-  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    e.stopPropagation();
-    e.dataTransfer.dropEffect = 'copy';
+  const filteredCommands = commands.filter(cmd =>
+    cmd.command.toLowerCase().includes(commandSearch.toLowerCase()) ||
+    cmd.description.toLowerCase().includes(commandSearch.toLowerCase())
+  );
+
+  const handleUploadClick = () => {
+    if (!activeCaseId) return;
+    setUploadModalOpen(true);
   };
 
   const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     e.stopPropagation();
-    setIsDragging(false);
-
-    if (!activeCaseId) {
-       console.warn("Upload via drop requires an active case.");
-       alert("Please select or create a case before uploading documents.");
-       return;
+    if (!activeCaseId) return;
+    console.log("Drop event detected (implement file handling)");
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0 && onFileUpload) {
+      onFileUpload(Array.from(e.dataTransfer.files));
     }
-    
-    const files = Array.from(e.dataTransfer.files);
-    if (files.length > 0) {
-        console.log('Files dropped:', files.map(f => f.name));
-        setIsUploadModalOpen(true);
-    } 
   };
 
-  const handleCommandSelect = (command: CommandAction) => {
-    setInputValue(command.value + ' ');
-    setShowCommandPalette(false);
-    textareaRef.current?.focus();
-  };
-  
-  const closeCommandPalette = () => {
-    setShowCommandPalette(false);
+  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
   };
 
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (commandPaletteRef.current && !commandPaletteRef.current.contains(event.target as Node)) {
-        closeCommandPalette();
-      }
-    };
-    if (showCommandPalette) {
-      document.addEventListener('mousedown', handleClickOutside);
-    } else {
-      document.removeEventListener('mousedown', handleClickOutside);
-    }
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-    };
-  }, [showCommandPalette]);
-
-  const selectedModel = useMemo(() => availableModels.find(m => m.id === selectedModelId), [selectedModelId]);
-
-  useEffect(() => {
-    if (selectedModel && !selectedModel.supportsWebSearch) {
-      setIsWebSearchEnabled(false);
-    }
-  }, [selectedModel]);
+  const handlePickerClose = () => {
+    setIsDocPickerOpen(false);
+  };
 
   return (
-    <div 
-      ref={chatInputContainerRef}
-      className={cn(
-        "relative w-full bg-background border-t",
-        isDragging && "outline-dashed outline-2 outline-offset-4 outline-primary"
-      )}
-      onDragEnter={handleDragEnter}
-      onDragLeave={handleDragLeave}
-      onDragOver={handleDragOver}
-      onDrop={handleDrop}
-    >
-       {isDragging && (
-          <div className="absolute inset-0 bg-primary/10 flex flex-col items-center justify-center pointer-events-none z-10">
-              <UploadIcon className="h-16 w-16 text-primary opacity-80 mb-4" />
-              <p className="text-lg font-semibold text-primary">Drop files here to upload</p>
-          </div>
-       )}
-       {showCommandPalette && (
-          <motion.div
-              ref={commandPaletteRef}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 10 }}
-              transition={{ duration: 0.2 }}
-              className="absolute bottom-full left-0 right-0 mb-2 z-20 mx-4 shadow-lg rounded-lg border bg-popover"
-          >
-              <Command className="rounded-lg">
-                  <CommandInput placeholder="Type a command or search..." />
-                  <CommandList>
-                      <CommandEmpty>No results found.</CommandEmpty>
-                      <CommandGroup heading="Agent Commands">
-                          {commandActions.map((command) => (
-                              <CommandItem
-                                  key={command.id}
-                                  value={command.value}
-                                  onSelect={() => handleCommandSelect(command)}
-                                  className="flex items-center cursor-pointer"
-                              >
-                                  {command.icon}
-                                  <span className="flex-grow ml-1">{command.label}</span>
-                                  <span className="text-xs text-muted-foreground ml-auto">{command.description}</span>
-                              </CommandItem>
-                          ))}
-                      </CommandGroup>
-                  </CommandList>
-              </Command>
-          </motion.div>
-       )}
-
-      <div className="flex items-end p-3 space-x-2">
-        <div className="flex-grow relative">
+    <TooltipProvider delayDuration={0}>
+      <div className="flex flex-col gap-2 p-4 w-full">
+        <div className="relative flex items-end w-full border rounded-md bg-background focus-within:ring-1 focus-within:ring-ring">
           <TextareaAutosize
             ref={textareaRef}
-            value={inputValue}
-            onChange={handleInputChange}
+            minRows={1}
+            maxRows={8}
+            placeholder={isEffectivelyDisabled ? (isDisabled ? placeholder : "AI is responding...") : placeholder}
+            value={input}
+            onChange={handleTextareaChange}
             onKeyDown={handleKeyDown}
-            placeholder={isLoading ? "Assistant is thinking..." : "Type message or / for commands..."}
-            className="w-full resize-none border rounded-md py-2 pr-10 pl-3 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50 min-h-[40px] max-h-[200px] scrollbar-thin scrollbar-thumb-muted-foreground/50 scrollbar-track-transparent"
-            disabled={disabled || isLoading}
-            rows={1}
+            disabled={isEffectivelyDisabled}
+            className={cn(
+              "flex-grow resize-none border-0 shadow-none focus-visible:ring-0 bg-transparent py-2 pl-3 pr-10",
+              "w-full"
+            )}
           />
-          {isLoading && (
-             <div className="absolute right-3 top-1/2 -translate-y-1/2">
-                 <Spinner size="sm" />
-             </div>
-          )}
+
+          <div className="absolute right-1 bottom-1 flex items-center">
+            {isLoading ? (
+              <Button type="button" variant="ghost" size="icon" onClick={stop} className="h-8 w-8">
+                <StopCircle className="h-4 w-4 animate-pulse" />
+                <span className="sr-only">Stop generating</span>
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                disabled={isEffectivelyDisabled || !input.trim()}
+                className="h-8 w-8"
+                onClick={(e) => {
+                  handleSubmit(e as any, { data: { caseId: activeCaseId || '' } });
+                }}
+              >
+                <SendHorizontal className="h-4 w-4" />
+                <span className="sr-only">Send message</span>
+              </Button>
+            )}
+          </div>
         </div>
 
-        <Button 
-            variant="default"
-            size="icon" 
-            className="flex-shrink-0"
-            onClick={handleSubmit}
-            disabled={!inputValue.trim() || disabled || isLoading}
-            aria-label="Send message"
-        >
-            <Send className="h-5 w-5" />
-        </Button>
+        <div className="flex items-center gap-2 justify-between" onDrop={handleDrop} onDragOver={handleDragOver}>
+          <div className="flex-grow min-w-0">
+            {selectedDocumentIds.length > 0 && (
+              <DocumentContextDisplay selectedDocumentIds={selectedDocumentIds} />
+            )}
+          </div>
+
+          <div className="flex-shrink-0 flex items-center gap-2">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="text-muted-foreground hover:text-foreground relative"
+                  disabled={isDisabled || !activeCaseId}
+                  onClick={() => setIsDocPickerOpen(true)}
+                >
+                  <Paperclip className="h-5 w-5" />
+                  {selectedDocumentIds.length > 0 && (
+                    <Badge
+                      variant="secondary"
+                      className="absolute -top-1 -right-1 h-4 w-4 p-0 flex items-center justify-center text-xs rounded-full"
+                    >
+                      {selectedDocumentIds.length}
+                    </Badge>
+                  )}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Select Context Documents{selectedDocumentIds.length > 0 ? ` (${selectedDocumentIds.length})` : ''}</p>
+              </TooltipContent>
+            </Tooltip>
+
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="text-muted-foreground hover:text-foreground"
+                  onClick={handleUploadClick}
+                  disabled={isDisabled || !activeCaseId}
+                >
+                  <PlusSquare className="h-4 w-4 mr-1" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Upload Documents (or drag & drop anywhere)</p>
+              </TooltipContent>
+            </Tooltip>
+            <input
+                type="file"
+                ref={fileInputRef}
+                onChange={handleFileSelected}
+                multiple
+                style={{ display: 'none' }}
+                accept=".pdf,.docx,.txt,.md"
+            />
+          </div>
+        </div>
       </div>
 
-      <div className="flex items-center space-x-1 px-3 pb-2 pt-1 border-t">
-          <Tooltip>
-              <TooltipTrigger asChild>
-                  <Button 
-                      variant="ghost" 
-                      size="icon" 
-                      className="flex-shrink-0 text-muted-foreground hover:text-primary h-8 w-8"
-                      onClick={handleFileButtonClick}
-                      disabled={isLoading || disabled}
-                   >
-                      <Paperclip className="h-4 w-4" />
-                   </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                  <p>Upload Document</p>
-              </TooltipContent>
-          </Tooltip>
-  
-          <Tooltip>
-              <TooltipTrigger asChild>
-                  <Button 
-                      variant="ghost" 
-                      size="icon" 
-                      className={cn(
-                          "flex-shrink-0 text-muted-foreground hover:text-primary h-8 w-8",
-                          selectedContextIds.length > 0 && "text-primary ring-1 ring-primary/50"
-                      )}
-                      onClick={handleContextPickerOpen}
-                      disabled={isLoading || disabled || !activeCaseId}
-                   >
-                      <ListChecks className="h-4 w-4" />
-                      {selectedContextIds.length > 0 && (
-                          <span className="absolute -top-0.5 -right-0.5 flex h-3 w-3 items-center justify-center rounded-full bg-primary text-[9px] font-bold text-primary-foreground">
-                              {selectedContextIds.length}
-                          </span>
-                      )}
-                   </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                  {selectedContextIds.length > 0 
-                      ? <p>Edit Context ({selectedContextIds.length} selected)</p> 
-                      : <p>Select Document Context</p>}
-                  {!activeCaseId && <p className='text-destructive'>(Select a case first)</p>}
-              </TooltipContent>
-          </Tooltip>
-
-          <div className="flex-grow"></div>
-
-          {selectedModel?.supportsWebSearch && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                    <div className="flex items-center space-x-1.5 mr-2">
-                      <Switch
-                        id="web-search-switch-footer"
-                        checked={isWebSearchEnabled}
-                        onCheckedChange={setIsWebSearchEnabled}
-                        disabled={!selectedModel?.supportsWebSearch}
-                        className="scale-75"
-                      />
-                      <Label htmlFor="web-search-switch-footer" className="text-xs text-muted-foreground cursor-pointer">
-                        Web Search
-                      </Label>
-                    </div>
-                </TooltipTrigger>
-                <TooltipContent side="top">
-                    <p>Enable web search for up-to-date info.</p>
-                </TooltipContent>
-              </Tooltip>
+      <Dialog open={isDocPickerOpen} onOpenChange={setIsDocPickerOpen}>
+        <DialogContent className="sm:max-w-[600px] p-0">
+          {isDocPickerOpen && activeCaseId && (
+            <DocumentContextPicker 
+              onClose={handlePickerClose}
+            />
           )}
-      </div>
+        </DialogContent>
+      </Dialog>
 
-      <DocumentContextPicker 
-         isOpen={isContextPickerOpen}
-         onOpenChange={setIsContextPickerOpen}
-      />
-
-    </div>
+    </TooltipProvider>
   );
 };
 

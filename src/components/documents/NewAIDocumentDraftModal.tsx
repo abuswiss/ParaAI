@@ -29,6 +29,8 @@ import {
 import { Alert, AlertDescription } from '@/components/ui/Alert';
 import * as agentService from '@/services/agentService';
 import * as documentService from '@/services/documentService';
+import { useSetAtom } from 'jotai';
+import { chatDocumentContextIdsAtom } from '@/atoms/appAtoms';
 
 // Define common legal document types (can be expanded)
 const DOCUMENT_TYPES = [
@@ -51,6 +53,7 @@ const NewAIDocumentDraftModal: React.FC<NewAIDocumentDraftModalProps> = ({ isOpe
   const [error, setError] = useState<string | null>(null);
   const { user } = useAuth();
   const { toast } = useToast();
+  const setChatDocumentContextIds = useSetAtom(chatDocumentContextIdsAtom);
 
   // Reset state when modal opens or case changes
   useEffect(() => {
@@ -133,6 +136,11 @@ const NewAIDocumentDraftModal: React.FC<NewAIDocumentDraftModalProps> = ({ isOpe
       toast({
           description: "AI document draft generated and saved successfully!",
       });
+
+      // --- Add new document ID to chat context --- 
+      console.log(`Adding newly generated document ${newDoc.id} to chat context.`);
+      setChatDocumentContextIds(prev => [...new Set([...prev, newDoc.id])]);
+      // -------------------------------------------
 
       if (onSuccess) {
         onSuccess(newDoc.id);

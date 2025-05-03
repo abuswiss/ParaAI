@@ -623,4 +623,49 @@ export const semanticSearchDocuments = async (
   }
 };
 
+/**
+ * Get metadata for multiple documents by their IDs.
+ */
+export const getDocumentsMetadataByIds = async (
+  documentIds: string[]
+): Promise<{ data: DocumentMetadata[] | null; error: Error | null }> => {
+  if (!documentIds || documentIds.length === 0) {
+    return { data: [], error: null }; // Return empty array if no IDs provided
+  }
+
+  try {
+    // Assuming RLS restricts access to documents the user owns or has access to via case
+    const { data, error } = await supabase
+      .from('documents')
+      .select('id, filename, case_id') // Select only needed fields (id, filename, maybe case_id)
+      .in('id', documentIds)
+      .eq('is_deleted', false); // Ensure we don't fetch deleted docs
+
+    if (error) {
+      console.error('Error fetching documents by IDs:', error);
+      throw error;
+    }
+
+    // Minimal transformation, primarily ensuring type safety
+    const documents: DocumentMetadata[] = (data || []).map((doc) => ({
+      id: doc.id,
+      filename: doc.filename || 'Untitled Document', // Provide default
+      // Include other essential fields if needed, but keep it minimal for this use case
+      // Defaulting other fields as they are not explicitly fetched or needed for display here
+      contentType: '',
+      size: 0,
+      uploadedAt: new Date().toISOString(),
+      caseId: doc.case_id,
+      storagePath: null,
+      processingStatus: 'completed',
+      isDeleted: false,
+      ownerId: '', // Not fetched, assumed RLS handles access
+    }));
+
+    return { data: documents, error: null };
+  } catch (error) {
+    return handleError<DocumentMetadata[]>(error, 'getting documents metadata by IDs');
+  }
+};
+
 // --- Utility Functions (if any) ---

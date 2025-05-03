@@ -131,31 +131,88 @@ export const addDocumentToConversation = async (
 };
 
 /**
- * Delete a conversation by ID
+ * Deletes a specific conversation and its messages.
+ * Uses Supabase RPC call for potential cascade delete or explicit deletion.
  */
-export const deleteConversation = async (
-  conversationId: string
-): Promise<{ success: boolean; error: Error | null }> => {
+export const deleteConversation = async (conversationId: string): Promise<{ success: boolean, error?: Error }> => {
+  console.log(`Attempting to delete conversation: ${conversationId}`);
   try {
     const { error } = await supabase
       .from('conversations')
       .delete()
-      .eq('id', conversationId);
+      .match({ id: conversationId });
 
     if (error) {
-      console.error('Error deleting conversation:', error);
-      throw error;
+        console.error('Supabase delete error:', error);
+        // Attempt to delete messages explicitly if conversation delete failed (maybe RLS issue)
+        console.log('Attempting to delete messages for conversation:', conversationId);
+        const { error: msgError } = await supabase
+            .from('messages')
+            .delete()
+            .match({ conversation_id: conversationId });
+            
+        if (msgError) {
+             console.error('Supabase message delete error:', msgError);
+             // If both failed, return the original conversation delete error
+              throw new Error(`Failed to delete conversation or messages: ${error.message}`);
+        } else {
+            // If messages deleted, retry conversation deletion (might work now if messages were the blocker)
+             const { error: retryError } = await supabase
+                .from('conversations')
+                .delete()
+                .match({ id: conversationId });
+            if (retryError) {
+                console.error('Supabase conversation delete retry error:', retryError);
+                 throw new Error(`Deleted messages, but failed to delete conversation: ${retryError.message}`);
+            }
+        }
+    }
+    console.log(`Conversation ${conversationId} deleted successfully.`);
+    return { success: true };
+  } catch (error: unknown) {
+    console.error('Error in deleteConversation service:', error);
+    return { success: false, error: error instanceof Error ? error : new Error(String(error)) };
+  }
+};
+
+/**
+ * Deletes ALL conversations and associated messages for the currently authenticated user.
+ * Calls the 'delete-all-user-conversations' Supabase Edge Function.
+ */
+export const deleteAllUserConversations = async (): Promise<{ success: boolean, deletedCount?: number, error?: Error }> => {
+  console.log('Attempting to delete all conversations for the current user...');
+  try {
+    const { data, error } = await supabase.functions.invoke('delete-all-user-conversations', {
+        // No body needed, function uses user context from Authorization header
+    });
+
+    if (error) {
+      console.error('Supabase function invoke error:', error);
+      throw new Error(`Function invocation failed: ${error.message}`);
     }
 
-    // Optionally, you might want to delete related messages or context here too
-    // e.g., delete messages associated with this conversationId
+    // Check the response structure from the function
+    if (!data || typeof data !== 'object') {
+      throw new Error('Invalid response from delete function.');
+    }
 
-    console.log(`Conversation ${conversationId} deleted successfully.`);
-    return { success: true, error: null };
+    if (data.error) {
+      console.error('Backend function error:', data.error);
+      throw new Error(`Deletion failed: ${data.error}`);
+    }
+
+    if (data.success) {
+      const deletedCount = data.deletedCount ?? 0;
+      console.log(`Successfully deleted ${deletedCount} conversations.`);
+      return { success: true, deletedCount };
+    } else {
+        // Handle cases where success is false but no specific error is given
+        throw new Error('Deletion operation failed on the backend.');
+    }
+
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : 'Unknown error deleting conversation';
-    console.error('Error in deleteConversation:', message);
-    return { success: false, error: error instanceof Error ? error : new Error(message) };
+    console.error('Error in deleteAllUserConversations service:', error);
+    return { success: false, error: error instanceof Error ? error : new Error(String(error)) };
   }
 };
 

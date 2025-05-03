@@ -10,6 +10,8 @@ import DocumentViewer from '@/components/documents/DocumentViewer';
 // import BreadcrumbNav from '@/components/layout/BreadcrumbNav';
 import BreadcrumbNav, { BreadcrumbItem } from '@/components/layout/BreadcrumbNav';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { useSetAtom } from 'jotai';
+import { chatDocumentContextIdsAtom } from '@/atoms/appAtoms';
 
 const DocumentViewPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -18,6 +20,7 @@ const DocumentViewPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isDownloading, setIsDownloading] = useState(false);
+  const setChatDocumentContextIds = useSetAtom(chatDocumentContextIdsAtom);
 
   useEffect(() => {
     if (!id) {
@@ -49,8 +52,17 @@ const DocumentViewPage: React.FC = () => {
     fetchDocumentData();
   }, [id]);
 
+  useEffect(() => {
+    if (id) {
+      console.log(`DocumentViewPage: Setting document ${id} in chat context.`);
+      setChatDocumentContextIds(prev => [...new Set([...prev, id])]);
+    }
+  }, [id, setChatDocumentContextIds]);
+
   const handleEditClick = () => {
     if (id) {
+      console.log(`DocumentViewPage: Setting document ${id} in chat context before navigating to edit.`);
+      setChatDocumentContextIds(prev => [...new Set([...prev, id])]);
       navigate(`/edit/document/${id}`);
     }
   };

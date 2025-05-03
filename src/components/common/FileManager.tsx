@@ -10,7 +10,8 @@ import {
     templateImportModalOpenAtom,
     currentCaseDocumentsAtom,
     newAIDocumentDraftModalOpenAtom,
-    initialFilesForUploadAtom
+    initialFilesForUploadAtom,
+    chatDocumentContextIdsAtom
 } from '@/atoms/appAtoms';
 import { cn } from "@/lib/utils";
 import { Folder, FileText, LayoutGrid, List, Plus, Upload, FolderPlus, FilePlus, Sparkles, Edit, FileUp, Play } from 'lucide-react';
@@ -164,6 +165,7 @@ const FileManager: React.FC<FileManagerProps> = () => {
     const [isNewAIDocumentDraftModalOpen, setIsNewAIDocumentDraftModalOpen] = useAtom(newAIDocumentDraftModalOpenAtom); // Use the new atom
     const setIsTemplateImportModalOpen = useSetAtom(templateImportModalOpenAtom);
     const setCurrentDocuments = useSetAtom(currentCaseDocumentsAtom as any); // Get setter for the shared atom
+    const setChatDocumentContextIds = useSetAtom(chatDocumentContextIdsAtom); // Get setter for context IDs
     const [isDraggingOver, setIsDraggingOver] = useState(false); // State for visual feedback
 
     // State for managing case management modal
@@ -391,6 +393,9 @@ const FileManager: React.FC<FileManagerProps> = () => {
     // Handle item click (use template or view document)
     const handleItemClick = async (itemId: string, itemType: ItemType) => {
         if (itemType === 'document') {
+            // Add document to context automatically
+            console.log(`Adding document ${itemId} to chat context.`);
+            setChatDocumentContextIds(prev => [...new Set([...prev, itemId])]); // Add ID, ensure uniqueness
             navigate(`/view/document/${itemId}`);
         } else if (itemType === 'template') {
             // Store the template ID in case we need to use it after case selection
@@ -429,13 +434,16 @@ const FileManager: React.FC<FileManagerProps> = () => {
         switch (action) {
             case 'view': // Only for documents now
                 if (itemType === 'document') {
-                    handleItemClick(itemId, itemType); // Navigate to view page
+                    handleItemClick(itemId, itemType); // Navigate to view page (will also add to context)
                 }
                 break;
             case 'edit': 
                 if (itemType === 'template') {
                     navigate(`/edit/template/${itemId}`);
                 } else if (itemType === 'document') {
+                     // Add document to context automatically when editing
+                    console.log(`Adding document ${itemId} to chat context before editing.`);
+                    setChatDocumentContextIds(prev => [...new Set([...prev, itemId])]); // Add ID, ensure uniqueness
                     navigate(`/edit/document/${itemId}`); // Added navigation for document
                 }
                 break;
