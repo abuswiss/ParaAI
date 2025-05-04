@@ -1,17 +1,13 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { useSetAtom, useAtomValue, useAtom } from 'jotai';
-import { addTaskAtom, updateTaskAtom, removeTaskAtom, chatPreloadContextAtom, activeEditorItemAtom, activeDocumentContextIdAtom, activeCaseIdAtom } from '@/atoms/appAtoms';
+import { useSetAtom, useAtom } from 'jotai';
+import { addTaskAtom, updateTaskAtom, removeTaskAtom, chatPreloadContextAtom, activeEditorItemAtom, activeCaseIdAtom } from '@/atoms/appAtoms';
 import { getDocumentById, getDocumentUrl, DocumentMetadata } from '@/services/documentService';
 import {
-  analyzeDocument, 
+  analyzeDocument,
   getDocumentAnalyses,
-  DocumentAnalysisResult, 
+  DocumentAnalysisResult,
   AnalysisType,
-  StructuredAnalysisResult,
-  Entity,
-  Clause,
-  Risk,
-  TimelineEvent,
+  StructuredAnalysisResult
 } from '@/services/documentAnalysisService';
 import { Button } from '@/components/ui/Button';
 import { Spinner } from '@/components/ui/Spinner';
@@ -21,7 +17,6 @@ import { TextSelect, Users, ListChecks, ShieldAlert, CalendarDays, FileWarning, 
 import TiptapEditor, { TiptapEditorRef } from '../editor/TiptapEditor';
 import ReactMarkdown from 'react-markdown';
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Badge, BadgeVariant } from "@/components/ui/Badge";
 import Breadcrumb from '../common/Breadcrumb';
 import { getCaseById } from '@/services/caseService';
 import { Case } from '@/types/case';
@@ -35,11 +30,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import DocumentAnalyzer from './DocumentAnalyzer';
-import { useNavigate } from 'react-router-dom';
-
-interface DocumentViewerProps {
-  documentId: string;
-}
 
 // *** ADDED & EXPORTED: Define type for highlight position ***
 export interface HighlightPosition {
@@ -50,7 +40,7 @@ export interface HighlightPosition {
 // *** ADDED & EXPORTED: Define type for a single highlight item ***
 export interface HighlightInfo extends HighlightPosition {
     type: AnalysisType;
-    details: any; // Contains the specific entity, clause, risk etc.
+    details: ProcessedAnalysisItem;
 }
 
 // *** EXPORTED AnalysisType ***
@@ -64,6 +54,19 @@ const analysisOptions: { value: AnalysisType; label: string; icon?: React.Elemen
   { value: 'timeline', label: 'Timeline', icon: CalendarDays },
   { value: 'privilegedTerms', label: 'Privileged Terms', icon: Gavel },
 ];
+
+interface ProcessedAnalysisItem { // Defined locally
+  text?: string;
+  type?: string;
+  title?: string;
+  start: number | null;
+  end: number | null;
+}
+
+// Restore DocumentViewerProps interface
+interface DocumentViewerProps {
+  documentId: string;
+}
 
 const DocumentViewer: React.FC<DocumentViewerProps> = ({ documentId }) => {
   const [document, setDocument] = useState<DocumentMetadata | null>(null);
@@ -82,7 +85,6 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ documentId }) => {
   const [activeHighlightPosition, setActiveHighlightPosition] = useState<HighlightPosition | null>(null);
   const [hoveredHighlightPosition, setHoveredHighlightPosition] = useState<HighlightPosition | null>(null);
 
-  const navigate = useNavigate();
   const addTask = useSetAtom(addTaskAtom);
   const updateTask = useSetAtom(updateTaskAtom);
   const removeTask = useSetAtom(removeTaskAtom);
@@ -94,59 +96,70 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ documentId }) => {
 
   // Replace the existing useMemo with the new version from the user query
   const allHighlights = useMemo(() => {
-    if (!analysisHistory) return [];
+    // Only show highlights for the currently selected analysis type
+    if (!selectedAnalysisType || !analysisHistory) {
+      // console.log('[DocumentViewer] No selected analysis type or history, returning empty highlights.'); // Keep logs minimal
+      return [];
+    }
     
     const highlights: HighlightInfo[] = [];
-    console.log('[DocumentViewer] Calculating highlights from analysisHistory with new logic...');
+    console.log(`[DocumentViewer] Calculating highlights for selected type: ${selectedAnalysisType}`);
     
     try {
-      analysisHistory.forEach(analysis => {
-        if (!analysis || typeof analysis !== 'object' || !analysis.result || typeof analysis.result !== 'object') return;
-        
-        // Helper to process items - includes items with null positions in logging but not in final highlights array
-        const processItems = (items: any[] | undefined, type: AnalysisType) => { 
-          if (!Array.isArray(items)) return;
-          
-          items.forEach(item => {
-            // Only add items with valid, non-null positions to the highlights for rendering
-            if (item && typeof item.start === 'number' && typeof item.end === 'number' && item.start < item.end) {
-              highlights.push({
-                type, // Use the correct type
-                start: item.start,
-                end: item.end,
-                details: { ...item } // Include all original details
-              });
-            } 
-            // Log items with null positions but don't add them to the renderable highlights
-            else if (item && (item.start === null || item.end === null)) {
-              console.debug(`[DocumentViewer] Item with null position not added to highlights: ${type}`, 
-                item.text ? item.text.substring(0, 30) + '...' : 'no text');
-            }
-             // Implicitly skips items with invalid/missing start/end types
-          });
-        };
-        
-        // Process each analysis type using the helper
-        const resultData = analysis.result;
-        if ('entities' in resultData) processItems((resultData as any).entities, 'entities');
-        if ('clauses' in resultData) processItems((resultData as any).clauses, 'clauses');
-        if ('risks' in resultData) processItems((resultData as any).risks, 'risks');
-        if ('timeline' in resultData) processItems((resultData as any).timeline, 'timeline');
-        if ('privilegedTerms' in resultData) processItems((resultData as any).privilegedTerms, 'privilegedTerms');
-      });
-      
-      // Optional: Filter duplicates if needed (though backend might handle this better)
-      const uniqueHighlights = highlights.filter((highlight, index, self) => 
-         index === self.findIndex(h => h.start === highlight.start && h.end === highlight.end)
-      );
-      console.log(`[DocumentViewer] Calculated ${uniqueHighlights.length} renderable highlights from history.`);
-      return uniqueHighlights; // Return only highlights with valid positions
+      // Find the latest analysis result matching the selected type
+      const relevantAnalysis = analysisHistory
+          .filter(a => a.analysisType === selectedAnalysisType)
+          .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0]; // Get the most recent one
 
+      if (!relevantAnalysis || !relevantAnalysis.result) {
+        console.log(`[DocumentViewer] No matching analysis found for type: ${selectedAnalysisType}`);
+        return [];
+      }
+
+      // Debug the actual shape of the result data
+      console.log(`[DocumentViewer] Found analysis result structure:`, relevantAnalysis.result);
+      
+      // Make sure to access the right property based on analysis type
+      const resultData = relevantAnalysis.result;
+
+      // Extract items based on the selected analysis type key
+      const items: ProcessedAnalysisItem[] | undefined = (resultData as { [key: string]: ProcessedAnalysisItem[] })[selectedAnalysisType];
+
+      console.log(`[DocumentViewer] Items for ${selectedAnalysisType}:`, items);
+
+      if (Array.isArray(items)) {
+          items.forEach(item => {
+              // Only add items with valid positions
+              if (item && typeof item.start === 'number' && typeof item.end === 'number' && item.start < item.end) {
+                  highlights.push({
+                      type: selectedAnalysisType, // Type is now guaranteed to be the selected one
+                      start: item.start,
+                      end: item.end,
+                      details: { ...item } // Include all original details
+                  });
+                  // console.log(`[DocumentViewer] Added highlight: ${item.start}-${item.end}`); // Keep logs minimal
+              } else {
+                  console.debug(`[DocumentViewer] Item with invalid position not added: ${JSON.stringify(item)}`);
+              }
+          });
+      } else if (selectedAnalysisType === 'summary') {
+          // Handle summary - it doesn't have highlights
+          console.log('[DocumentViewer] Summary type selected, no highlights to generate.');
+      } else {
+          console.warn(`[DocumentViewer] Result for type ${selectedAnalysisType} exists but is not an array:`, items);
+      }
+
+      // Filter duplicates - might still be useful if AI returns overlapping items for the *same* analysis
+      const uniqueHighlights = highlights.filter((highlight, index, self) => 
+          index === self.findIndex(h => h.start === highlight.start && h.end === highlight.end)
+      );
+      console.log(`[DocumentViewer] Total unique highlights calculated: ${uniqueHighlights.length}`);
+      return uniqueHighlights;
     } catch (error) {
       console.error('[DocumentViewer] Error processing highlights from history:', error);
       return [];
     }
-  }, [analysisHistory]);
+  }, [analysisHistory, selectedAnalysisType]);
 
   useEffect(() => {
     let isMounted = true;
@@ -217,22 +230,28 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ documentId }) => {
              setSummaryCompleted(false);
         }
 
-        // Using 'as any' as a temporary workaround for persistent linter errors on mime_type
-        const mimeType = (docData as any).mime_type;
-        if (mimeType && typeof mimeType === 'string' && !['text/plain', 'application/json', 'text/markdown'].includes(mimeType)) {
-          const { data: urlData, error: urlError } = await getDocumentUrl(documentId);
-          if (!isMounted) return;
-          if (urlError) console.warn('Could not fetch document URL:', urlError);
-          // Using 'as any' as a temporary workaround for persistent linter errors on signedUrl
-          else setDocumentUrl(typeof urlData === 'object' && urlData !== null && 'signedUrl' in urlData && typeof (urlData as any).signedUrl === 'string' ? (urlData as any).signedUrl : null);
+        // Access the array based on the key, asserting the type
+        const contentType = docData?.contentType;
+        if (contentType && typeof contentType === 'string' && !['text/plain', 'application/json', 'text/markdown'].includes(contentType)) {
+          // Only fetch URL if storagePath exists
+          if (docData.storagePath) {
+            const { data: urlData, error: urlError } = await getDocumentUrl(docData.storagePath);
+            if (!isMounted) return;
+            if (urlError) console.warn('Could not fetch document URL:', urlError); 
+            else setDocumentUrl(urlData ?? null);
+          } else {
+            console.warn(`Document ${documentId} has non-text content type but no storage path.`);
+            setDocumentUrl(null);
+          }
         } else {
-          setDocumentUrl(null);
+          setDocumentUrl(null); // It's plain text or similar, no preview URL needed
         }
 
-      } catch (err: any) {
+      } catch (err: unknown) { // Explicitly type catch variable
         console.error("Error fetching document data:", err);
         if (isMounted) {
-          setError(err.message || "Failed to load document.");
+          const message = err instanceof Error ? err.message : "Failed to load document.";
+          setError(message);
         }
       } finally {
         if (isMounted) {
@@ -245,6 +264,10 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ documentId }) => {
 
     return () => {
       isMounted = false;
+      console.log(`[DocumentViewer ${documentId}] Unmounting, clearing highlight positions.`);
+      // Explicitly clear highlight state on unmount
+      setActiveHighlightPosition(null);
+      setHoveredHighlightPosition(null);
     };
   }, [documentId, setActiveEditorItem, activeCaseId, setActiveCaseId]);
 
@@ -334,7 +357,7 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ documentId }) => {
     }
   };
 
-  const handleInitiateChat = (analysisItem: any, analysisType: AnalysisType) => {
+  const handleInitiateChat = (analysisItem: ProcessedAnalysisItem, analysisType: AnalysisType) => {
     if (!document?.extractedText) {
         console.warn('Cannot initiate chat without document text.');
         return; 
@@ -404,7 +427,7 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ documentId }) => {
   const renderTextContent = () => {
     if (!document) return renderLoading(); 
 
-    if (!document.editedContent && !document.extractedText && !loading) {
+    if (!document?.editedContent && !document?.extractedText && !loading) {
       return (
         <div className="text-center p-8 flex flex-col justify-center items-center h-full">
           <FileSearch className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
@@ -414,14 +437,14 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ documentId }) => {
       );
     }
 
-    const displayContent = document.editedContent || document.extractedText || '';
+    const displayContent = document?.editedContent || document?.extractedText || '';
 
     return (
       <div className="flex h-full">
         <div className="flex-1 h-full border-r overflow-hidden"> 
           <TiptapEditor
               ref={editorRef} 
-              content={displayContent}
+              content={displayContent || ''}
               editable={false}
               className="h-full border-0 shadow-none rounded-none"
               placeholder="Loading document text..."
@@ -437,17 +460,17 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ documentId }) => {
   const renderPreviewContent = () => {
     if (!document) return renderLoading();
 
-    const isPlainText = document.contentType === 'text/plain' || document.fileType === 'txt' || document.storagePath === 'ai-generated';
+    const isPlainText = document?.contentType === 'text/plain' || document?.fileType === 'txt';
 
     if (isPlainText) {
-      const displayContent = document.editedContent || document.extractedText;
+      const displayContent = document?.editedContent || document?.extractedText || '';
       if (displayContent) {
         return (
           <div className="flex h-full">
             <div className="flex-1 h-full p-1">
               <TiptapEditor
                 ref={editorRef}
-                content={displayContent}
+                content={displayContent || ''}
                 editable={false}
                 className="h-full border-0 shadow-none bg-transparent"
                 allHighlights={allHighlights}
@@ -478,7 +501,7 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ documentId }) => {
         </div>
     );
     
-    const fileType = document.contentType || '';
+    const fileType = document?.contentType || '';
     const containerStyle = "w-full h-[calc(100vh-200px)] flex justify-center items-center p-4";
     const iframeStyle = "w-full h-full border-0";
     const imgStyle = "max-w-full max-h-full object-contain";
@@ -581,7 +604,7 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ documentId }) => {
               )} 
               {error && !loading && renderError(error)} 
               {!loading && !error && (
-                 <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as any)} className="flex flex-col h-full">
+                 <Tabs value={activeTab} onValueChange={(value: string) => setActiveTab(value as 'text' | 'preview' | 'summary')} className="flex flex-col h-full">
                      <TabsList className="flex-shrink-0 rounded-none border-b justify-start px-3 bg-muted/30">
                          <TabsTrigger value="text" disabled={!document?.extractedText}><TextSelect size={14} className="mr-1.5"/> Text</TabsTrigger>
                          <TabsTrigger value="preview" disabled={!document?.storagePath}><ImageIcon size={14} className="mr-1.5"/> Preview</TabsTrigger>

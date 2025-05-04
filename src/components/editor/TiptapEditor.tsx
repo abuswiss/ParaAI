@@ -141,54 +141,48 @@ const TiptapEditor = forwardRef<TiptapEditorRef, TiptapEditorProps>((
       }
     },
   }, [
-    // Make dependencies more resilient with null checks and defaults
-    content || '',
-    editable !== undefined ? editable : true,
-    placeholder || 'Start typing...',
-    // Only include the minimal necessary highlight properties
-    // that might trigger a legitimate re-creation
-    allHighlights?.length,  // Just track length changes
-    !!activeHighlightPosition, // Just track presence, not the whole object
-    !!hoveredHighlightPosition // Just track presence, not the whole object
+    // CRITICAL: Only include props that should cause editor recreation
+    content,
+    editable,
+    placeholder,
+    allHighlights?.length
   ]);
 
-  // Effect to scroll to the active highlight position
+  // Effect to scroll to the active highlight position (Updated as per user suggestion)
   useEffect(() => {
-    // Only run this effect after editor is FULLY initialized
-    if (editor && !editor.isDestroyed && activeHighlightPosition && editor.state) {
+    if (!editor || editor.isDestroyed) return;
+    
+    // Important: Only attempt scrolling if the editor is fully initialized
+    if (activeHighlightPosition && editor.view && editor.state) {
       const { start, end } = activeHighlightPosition;
       
       try {
-        // Check that editor's state and doc are properly initialized
+        // Validate positions against current document size
         if (typeof start === 'number' && 
             typeof end === 'number' && 
             start < end && 
-            editor.state.doc && 
+            start >= 0 && 
             end <= editor.state.doc.content.size) {
-          
+              
           console.log(`TiptapEditor: Scrolling to active highlight:`, activeHighlightPosition);
           
-          // We'll use a setTimeout to ensure the editor is fully rendered
+          // Use setTimeout to ensure the editor has completed rendering
+          // This is crucial to prevent initialization errors
           setTimeout(() => {
             if (editor && !editor.isDestroyed) {
-              // First scroll to the position
               editor.commands.scrollIntoView();
-              
-              // Then optionally set the selection if needed
-              // Uncomment if you want selection behavior
-              // editor.commands.setTextSelection({ from: start, to: end });
             }
-          }, 0);
+          }, 50); // Increased delay slightly
         } else {
-          console.warn('TiptapEditor: Invalid activeHighlightPosition or editor state:', 
+          console.warn('TiptapEditor: Invalid highlight position:', 
             activeHighlightPosition, 
             'Doc size:', editor.state?.doc?.content?.size);
         }
       } catch (err) {
-        console.error('Error in highlight scrolling effect:', err);
+        console.error('Error in highlight scrolling:', err);
       }
     }
-  }, [editor, activeHighlightPosition]); // Scrolling effect depends only on editor and active position
+  }, [editor, activeHighlightPosition]); // Only depend on these two props
 
   // Effect to update editor decorations when highlight props change
   useEffect(() => {
@@ -197,39 +191,59 @@ const TiptapEditor = forwardRef<TiptapEditorRef, TiptapEditorProps>((
       editor.setOptions({
         editorProps: {
           decorations(state: EditorState): DecorationSet | undefined {
+            if (!state || !state.doc) {
+              return DecorationSet.empty;
+            }
+            
             const { doc } = state;
             const allDecos: Decoration[] = [];
             
-            // --- Placeholder Decorations --- 
-            const placeholderDecosSet = createPlaceholderDecorations(doc);
-            placeholderDecosSet.find().forEach(deco => allDecos.push(deco));
-
-            // --- Analysis Highlights --- 
-            allHighlights?.forEach(highlight => {
-              if (typeof highlight.start === 'number' && typeof highlight.end === 'number' && highlight.start < highlight.end && highlight.start >= 0 && highlight.end <= doc.content.size) {
-                let highlightClass = `highlight highlight-${highlight.type}`; // Base class
-                const isActive = activeHighlightPosition?.start === highlight.start && activeHighlightPosition?.end === highlight.end;
-                const isHovered = hoveredHighlightPosition?.start === highlight.start && hoveredHighlightPosition?.end === highlight.end;
-
-                if (isActive) {
-                  highlightClass += ' highlight-active';
+            // --- Placeholder Decorations --- (Assuming createPlaceholderDecorations exists)
+            try {
+              const placeholderDecosSet = createPlaceholderDecorations(doc);
+              placeholderDecosSet.find().forEach(deco => allDecos.push(deco));
+            } catch (err) {
+              console.error("Error creating placeholder decorations:", err);
+            }
+            
+            // Safely process highlights with thorough validation
+            if (Array.isArray(allHighlights)) {
+              allHighlights.forEach(highlight => {
+                try {
+                  if (highlight && 
+                      typeof highlight.start === 'number' && 
+                      typeof highlight.end === 'number' && 
+                      highlight.start < highlight.end && 
+                      highlight.start >= 0 && 
+                      highlight.end <= doc.content.size) {
+                    
+                    let highlightClass = `highlight highlight-${highlight.type || 'default'}`;
+                    
+                    // Apply active/hovered classes
+                    if (activeHighlightPosition?.start === highlight.start && 
+                        activeHighlightPosition?.end === highlight.end) {
+                      highlightClass += ' highlight-active';
+                    }
+                    
+                    if (hoveredHighlightPosition?.start === highlight.start && 
+                        hoveredHighlightPosition?.end === highlight.end) {
+                      highlightClass += ' highlight-hovered'; 
+                    }
+                    
+                    allDecos.push(
+                      Decoration.inline(highlight.start, highlight.end, {
+                        class: highlightClass,
+                        nodeName: 'span',
+                      })
+                    );
+                  }
+                } catch (err) {
+                  console.error('Error processing highlight:', highlight, err);
                 }
-                if (isHovered) {
-                   highlightClass += ' highlight-hovered'; 
-                }
-
-                allDecos.push(
-                  Decoration.inline(highlight.start, highlight.end, {
-                    class: highlightClass,
-                    nodeName: 'span',
-                  })
-                );
-              } else {
-                 console.warn('[TiptapEditor] Skipping invalid highlight data in setOptions:', highlight);
-              }
-            });
-
-            console.log(`[TiptapEditor setOptions Decor Func] Calculated: ${allDecos.length} total decorations`);
+              });
+            }
+            
+            console.log(`[TiptapEditor Decoration Func] Calculated: ${allDecos.length} total decorations`);
             return DecorationSet.create(doc, allDecos);
           }
         }
