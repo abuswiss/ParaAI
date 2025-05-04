@@ -115,6 +115,22 @@ const EditPage: React.FC = () => {
   
   const isCreatingFromTemplate = isNew && type === 'document' && !!templateId;
 
+  // Determine the definitive case ID for breadcrumbs in document scenarios
+  // Prioritize URL param if creating from template, otherwise use atom state
+  const caseIdForBreadcrumb = (isCreatingFromTemplate && caseIdFromQuery) ? caseIdFromQuery : activeCaseId;
+
+  // State for the case name to show in the breadcrumb
+  const [breadcrumbCaseName, setBreadcrumbCaseName] = useState<string | null>(null);
+
+  // Fetch the case name when caseIdForBreadcrumb changes
+  useEffect(() => {
+    if (caseIdForBreadcrumb) {
+      caseService.getCaseById(caseIdForBreadcrumb).then(({ data }) => {
+        setBreadcrumbCaseName(data?.name || `Case (${caseIdForBreadcrumb.substring(0, 6)}...)`);
+      });
+    }
+  }, [caseIdForBreadcrumb]);
+
   // Effect to control layout state
   useEffect(() => {
     if (type) {
@@ -545,16 +561,36 @@ const EditPage: React.FC = () => {
 
   const breadcrumbItems: BreadcrumbItemDef[] = useMemo(() => {
     const items: BreadcrumbItemDef[] = [];
-    if (type === 'document' && activeCaseId) {
-      items.push({ name: 'Cases', path: '/cases' });
-      items.push({ name: `Case ${activeCaseId}`, path: `/cases/${activeCaseId}` }); // Link to specific case needed?
-      items.push({ name: isCreatingFromTemplate ? `New Document from ${editorItem?.templateName}` : (editorItem?.name || (isNew ? 'New Document' : 'Edit Document')) });
-    } else if (type === 'template') {
+
+    // Scenario 1: Creating document FROM A SPECIFIC CASE using a template
+    if (type === 'document' && isCreatingFromTemplate && caseIdForBreadcrumb) {
+      items.push({ name: 'Cases', path: '/files' });
+      items.push({ name: breadcrumbCaseName || `Case (${caseIdForBreadcrumb.substring(0, 6)}...)`, path: `/files?caseId=${caseIdForBreadcrumb}` });
+      items.push({ name: `New from ${editorItem?.templateName || 'Template'}` }); // Use template name
+    }
+    // Scenario 2: Editing an EXISTING document (which MUST have a case)
+    else if (type === 'document' && !isNew && caseIdForBreadcrumb) {
+      items.push({ name: 'Cases', path: '/files' });
+      items.push({ name: breadcrumbCaseName || `Case (${caseIdForBreadcrumb.substring(0, 6)}...)`, path: `/files?caseId=${caseIdForBreadcrumb}` });
+      items.push({ name: editorItem?.name || 'Edit Document' });
+    }
+    // Scenario 3: Creating document FROM TEMPLATE LIST (NO case context yet)
+    else if (type === 'document' && isCreatingFromTemplate && !caseIdForBreadcrumb) {
+      items.push({ name: 'Templates', path: '/templates' });
+      // Link to template details if possible, otherwise just text
+      items.push({ name: editorItem?.templateName || 'Selected Template', path: editorItem?.templateId ? `/templates/${editorItem.templateId}` : undefined });
+      items.push({ name: 'Create Document' });
+    }
+    // Scenario 4: Editing/Creating a Template
+    else if (type === 'template') {
       items.push({ name: 'Templates', path: '/templates' });
       items.push({ name: editorItem?.name || (isNew ? 'New Template' : 'Edit Template') });
     }
+    // Add a fallback or handle other cases if necessary
+
     return items;
-  }, [type, activeCaseId, editorItem, isNew, isCreatingFromTemplate]);
+    // Update dependencies array as needed
+  }, [type, activeCaseId, caseIdFromQuery, editorItem, isNew, isCreatingFromTemplate, breadcrumbCaseName]);
 
   // --- Render Logic ---
   if (isLoading) {
