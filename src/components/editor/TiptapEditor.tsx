@@ -145,6 +145,9 @@ const TiptapEditor = forwardRef<TiptapEditorRef, TiptapEditorProps>((
     originalText: string;   // The original selected text
   } | null>(null);
 
+  // Ref to block suggestion re-trigger after Accept/Decline
+  const justHandledSuggestion = useRef(false);
+
   const handleSummarize = useCallback(async (editorInstance: Editor) => {
     if (!caseId || !documentId || isSummarizing || !editable || !editorInstance || editorInstance.isDestroyed) return;
     const { from, to, empty } = editorInstance.state.selection;
@@ -292,27 +295,34 @@ const TiptapEditor = forwardRef<TiptapEditorRef, TiptapEditorProps>((
   });
 
   // --- Accept/Decline Handlers (Updated) ---
-  const handleAcceptSuggestion = useCallback(() => {
+  const handleAcceptSuggestion = useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation(); // Prevent event bubbling
     if (!editor || !suggestion) return;
-    // Text is already updated, just clear the suggestion state
+    justHandledSuggestion.current = true; // Block re-trigger
     setSuggestion(null);
-    // Optional: Move cursor to end of accepted text
-    editor.chain().focus().setTextSelection(suggestion.newTo).run();
+    editor.chain().setTextSelection(suggestion.newTo).run();
   }, [editor, suggestion]);
 
-  const handleDeclineSuggestion = useCallback(() => {
+  const handleDeclineSuggestion = useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation(); // Prevent event bubbling
     if (!editor || !suggestion) return;
-    // Revert to original text using the stored info
-    editor.chain().focus()
-          .insertContentAt({ from: suggestion.from, to: suggestion.newTo }, suggestion.originalText)
-          .setTextSelection(suggestion.from + suggestion.originalText.length)
-          .run();
+    const { from, newTo, originalText } = suggestion;
+    justHandledSuggestion.current = true; // Block re-trigger
     setSuggestion(null);
+    editor.chain()
+      .insertContentAt({ from, to: newTo }, originalText)
+      .setTextSelection(from + originalText.length)
+      .run();
   }, [editor, suggestion]);
 
   // --- Add suggestion highlight to decorations ---
   useEffect(() => {
     if (!editor || editor.isDestroyed) return;
+    // Block suggestion logic if just handled
+    if (justHandledSuggestion.current) {
+      justHandledSuggestion.current = false;
+      return;
+    }
     editor.setOptions({
       editorProps: {
         decorations(state: EditorState): DecorationSet | undefined {
@@ -429,34 +439,6 @@ const TiptapEditor = forwardRef<TiptapEditorRef, TiptapEditorProps>((
       ),
     });
   }, [editor, suggestion]);
-
-  // --- Portal Container Setup ---
-  useEffect(() => {
-    // Check if portal root already exists (e.g., due to fast refresh)
-    let portalRoot = document.getElementById(SUGGESTION_PORTAL_ID);
-    if (!portalRoot) {
-      portalRoot = document.createElement('div');
-      portalRoot.id = SUGGESTION_PORTAL_ID;
-      // Style the portal root to position it correctly (e.g., above the editor)
-      // This might need adjustment based on your overall layout
-      portalRoot.style.position = 'fixed'; // Or absolute relative to a container
-      portalRoot.style.top = '80px'; // Example: Adjust as needed
-      portalRoot.style.left = '0';
-      portalRoot.style.right = '0';
-      portalRoot.style.zIndex = '1050'; // High z-index
-      portalRoot.style.pointerEvents = 'none'; // Allow clicks through by default
-
-      document.body.appendChild(portalRoot);
-    }
-
-    // Cleanup function
-    return () => {
-      const existingPortalRoot = document.getElementById(SUGGESTION_PORTAL_ID);
-      if (existingPortalRoot && existingPortalRoot.parentNode === document.body) {
-        document.body.removeChild(existingPortalRoot);
-      }
-    };
-  }, []); // Run only once on mount
 
   // *** ADDED: Expose editor instance via ref ***
   useImperativeHandle(ref, () => ({
@@ -584,11 +566,10 @@ const TiptapEditor = forwardRef<TiptapEditorRef, TiptapEditorProps>((
     return createPortal(
       <div
         className="ai-suggestion-banner"
-        // Removed position/z-index styles as they are on the portal root now
         style={{
           width: '100%',
-          maxWidth: 'calc(100% - 40px)', // Example: Prevent full width bleed
-          margin: '0 auto', // Center the banner
+          maxWidth: '100%',
+          margin: '0 auto',
           background: '#fffbe6',
           border: '1.5px solid #ffe066',
           borderRadius: '8px',
@@ -601,12 +582,31 @@ const TiptapEditor = forwardRef<TiptapEditorRef, TiptapEditorProps>((
           fontSize: '1rem',
           fontWeight: 500,
           animation: 'fadeIn 0.2s',
-          pointerEvents: 'auto', // Enable pointer events for the banner itself
+          pointerEvents: 'auto',
+          position: 'sticky',
+          top: 0,
+          zIndex: 9,
         }}
       >
         <span className="text-neutral-800">AI suggestion ready. Accept or decline?</span>
-        <Button size="sm" variant="default" onClick={handleAcceptSuggestion}>Accept</Button>
-        <Button size="sm" variant="destructive" onClick={handleDeclineSuggestion}>Decline</Button>
+        <Button
+          size="sm"
+          variant="default"
+          tabIndex={-1}
+          onMouseDown={e => e.preventDefault()}
+          onClick={handleAcceptSuggestion}
+        >
+          Accept
+        </Button>
+        <Button
+          size="sm"
+          variant="destructive"
+          tabIndex={-1}
+          onMouseDown={e => e.preventDefault()}
+          onClick={handleDeclineSuggestion}
+        >
+          Decline
+        </Button>
       </div>,
       portalContainer // Target the portal root div
     );
@@ -714,6 +714,8 @@ const TiptapEditor = forwardRef<TiptapEditorRef, TiptapEditorProps>((
           </div>
         </ToolbarProvider>
       </div>
+      {/* Portal root for suggestion banner, just above the document content */}
+      <div id={SUGGESTION_PORTAL_ID} style={{ width: '100%', position: 'relative', zIndex: 9 }} />
       {/* Render the FloatingToolbarComponent for inline actions */}
       {editor && (
         <FloatingToolbarComponent
