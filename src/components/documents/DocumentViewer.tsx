@@ -80,6 +80,7 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ documentId }) => {
   const [activeCase, setActiveCase] = useState<Case | null>(null);
   const [summaryCompleted, setSummaryCompleted] = useState<boolean>(false);
   const [activeHighlightPosition, setActiveHighlightPosition] = useState<HighlightPosition | null>(null);
+  const [hoveredHighlightPosition, setHoveredHighlightPosition] = useState<HighlightPosition | null>(null);
 
   const navigate = useNavigate();
   const addTask = useSetAtom(addTaskAtom);
@@ -91,108 +92,58 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ documentId }) => {
 
   const editorRef = useRef<TiptapEditorRef>(null);
 
+  // Replace the existing useMemo with the new version from the user query
   const allHighlights = useMemo(() => {
     if (!analysisHistory) return [];
     
     const highlights: HighlightInfo[] = [];
+    console.log('[DocumentViewer] Calculating highlights from analysisHistory with new logic...');
     
     try {
       analysisHistory.forEach(analysis => {
-        if (!analysis || typeof analysis !== 'object') return;
+        if (!analysis || typeof analysis !== 'object' || !analysis.result || typeof analysis.result !== 'object') return;
         
-        if ('entities' in analysis && Array.isArray(analysis.entities)) {
-          analysis.entities.forEach(entity => {
-            if (typeof entity.start === 'number' && typeof entity.end === 'number' && entity.start < entity.end) {
+        // Helper to process items - includes items with null positions in logging but not in final highlights array
+        const processItems = (items: any[] | undefined, type: AnalysisType) => { 
+          if (!Array.isArray(items)) return;
+          
+          items.forEach(item => {
+            // Only add items with valid, non-null positions to the highlights for rendering
+            if (item && typeof item.start === 'number' && typeof item.end === 'number' && item.start < item.end) {
               highlights.push({
-                type: 'entities',
-                start: entity.start,
-                end: entity.end,
-                details: {
-                  text: entity.text,
-                  type: entity.type,
-                  explanation: entity.explanation
-                }
+                type, // Use the correct type
+                start: item.start,
+                end: item.end,
+                details: { ...item } // Include all original details
               });
+            } 
+            // Log items with null positions but don't add them to the renderable highlights
+            else if (item && (item.start === null || item.end === null)) {
+              console.debug(`[DocumentViewer] Item with null position not added to highlights: ${type}`, 
+                item.text ? item.text.substring(0, 30) + '...' : 'no text');
             }
+             // Implicitly skips items with invalid/missing start/end types
           });
-        }
+        };
         
-        if ('clauses' in analysis && Array.isArray(analysis.clauses)) {
-          analysis.clauses.forEach(clause => {
-            if (typeof clause.start === 'number' && typeof clause.end === 'number' && clause.start < clause.end) {
-              highlights.push({
-                type: 'clauses',
-                start: clause.start,
-                end: clause.end,
-                details: {
-                  title: clause.title,
-                  text: clause.text,
-                  analysis: clause.analysis
-                }
-              });
-            }
-          });
-        }
-        
-        if ('risks' in analysis && Array.isArray(analysis.risks)) {
-          analysis.risks.forEach(risk => {
-            if (typeof risk.start === 'number' && typeof risk.end === 'number' && risk.start < risk.end) {
-              highlights.push({
-                type: 'risks',
-                start: risk.start,
-                end: risk.end,
-                details: {
-                  explanation: risk.explanation,
-                  severity: risk.severity,
-                  suggestion: risk.suggestion
-                }
-              });
-            }
-          });
-        }
-        
-        if ('timeline' in analysis && Array.isArray(analysis.timeline)) {
-          analysis.timeline.forEach(event => {
-            if (typeof event.start === 'number' && typeof event.end === 'number' && event.start < event.end) {
-              highlights.push({
-                type: 'timeline',
-                start: event.start,
-                end: event.end,
-                details: {
-                  date: event.date,
-                  event: event.event,
-                  type: event.type
-                }
-              });
-            }
-          });
-        }
-        
-        if ('privilegedTerms' in analysis && Array.isArray(analysis.privilegedTerms)) {
-          analysis.privilegedTerms.forEach(term => {
-            if (typeof term.start === 'number' && typeof term.end === 'number' && term.start < term.end) {
-              highlights.push({
-                type: 'privilegedTerms',
-                start: term.start,
-                end: term.end,
-                details: {
-                  text: term.text,
-                  category: term.category,
-                  explanation: term.explanation
-                }
-              });
-            }
-          });
-        }
+        // Process each analysis type using the helper
+        const resultData = analysis.result;
+        if ('entities' in resultData) processItems((resultData as any).entities, 'entities');
+        if ('clauses' in resultData) processItems((resultData as any).clauses, 'clauses');
+        if ('risks' in resultData) processItems((resultData as any).risks, 'risks');
+        if ('timeline' in resultData) processItems((resultData as any).timeline, 'timeline');
+        if ('privilegedTerms' in resultData) processItems((resultData as any).privilegedTerms, 'privilegedTerms');
       });
       
+      // Optional: Filter duplicates if needed (though backend might handle this better)
       const uniqueHighlights = highlights.filter((highlight, index, self) => 
-        index === self.findIndex(h => h.start === highlight.start && h.end === highlight.end)
+         index === self.findIndex(h => h.start === highlight.start && h.end === highlight.end)
       );
-      
-      return uniqueHighlights;
+      console.log(`[DocumentViewer] Calculated ${uniqueHighlights.length} renderable highlights from history.`);
+      return uniqueHighlights; // Return only highlights with valid positions
+
     } catch (error) {
-      console.error('Error processing highlights:', error);
+      console.error('[DocumentViewer] Error processing highlights from history:', error);
       return [];
     }
   }, [analysisHistory]);
@@ -203,16 +154,22 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ documentId }) => {
     const fetchAllData = async () => {
       if (!isMounted) return;
       try {
+        // Reset analysis state on document change/mount
+        console.log(`[DocumentViewer ${documentId}] Resetting analysis state...`);
+        setAnalysisHistory([]);
+        setCurrentAnalysisResult(null);
+        setSelectedAnalysisType(null);
+        setSummaryContent(null);
+        setSummaryCompleted(false);
+        setActiveHighlightPosition(null);
+        setHoveredHighlightPosition(null);
+        setAnalysisError(null); // Also clear previous errors
+
         setLoading(true);
         setError(null);
         setDocument(null);
         setActiveCase(null);
         setDocumentUrl(null);
-        setAnalysisHistory([]);
-        setSelectedAnalysisType(null);
-        setCurrentAnalysisResult(null);
-        setAnalysisError(null);
-        setSummaryContent(null);
 
         setActiveEditorItem({ type: 'document', id: documentId });
 
@@ -260,11 +217,14 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ documentId }) => {
              setSummaryCompleted(false);
         }
 
-        if (docData.mime_type && !['text/plain', 'application/json', 'text/markdown'].includes(docData.mime_type)) {
+        // Using 'as any' as a temporary workaround for persistent linter errors on mime_type
+        const mimeType = (docData as any).mime_type;
+        if (mimeType && typeof mimeType === 'string' && !['text/plain', 'application/json', 'text/markdown'].includes(mimeType)) {
           const { data: urlData, error: urlError } = await getDocumentUrl(documentId);
           if (!isMounted) return;
           if (urlError) console.warn('Could not fetch document URL:', urlError);
-          else setDocumentUrl(urlData?.signedUrl || null);
+          // Using 'as any' as a temporary workaround for persistent linter errors on signedUrl
+          else setDocumentUrl(typeof urlData === 'object' && urlData !== null && 'signedUrl' in urlData && typeof (urlData as any).signedUrl === 'string' ? (urlData as any).signedUrl : null);
         } else {
           setDocumentUrl(null);
         }
@@ -287,21 +247,6 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ documentId }) => {
       isMounted = false;
     };
   }, [documentId, setActiveEditorItem, activeCaseId, setActiveCaseId]);
-
-  useEffect(() => {
-    if (activeHighlightPosition && editorRef.current) {
-      const editorInstance = editorRef.current.getEditor();
-      if (editorInstance) {
-        console.log('Scrolling to highlight:', activeHighlightPosition);
-        editorInstance
-          .chain()
-          .focus()
-          .setTextSelection(activeHighlightPosition)
-          .scrollIntoView()
-          .run();
-      }
-    }
-  }, [activeHighlightPosition]);
 
   useEffect(() => {
     if (activeTab === 'preview' && !documentUrl && document?.storagePath && !loading) {
@@ -398,36 +343,23 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ documentId }) => {
     setChatPreloadContext({
       analysisItem,
       analysisType,
-      documentText: document.extractedText,
-      documentId: document.id,
-      documentName: document.filename
+      documentText: document.extractedText, 
     });
   };
 
   const handleFindingClick = useCallback((position: HighlightPosition | null) => {
     setActiveHighlightPosition(position);
-    
-    if (!position) return;
-    
-    const flashTimeout = setTimeout(() => {
-      const editorInstance = editorRef.current?.getEditor();
-      if (editorInstance) {
-        try {
-          editorInstance.commands.setTextSelection({
-            from: position.start,
-            to: position.end
-          });
-          
-          setTimeout(() => {
-            editorInstance.commands.blur();
-          }, 800);
-        } catch (err) {
-          console.error('Error setting text selection:', err);
-        }
-      }
-    }, 100);
-    
-    return () => clearTimeout(flashTimeout);
+    setHoveredHighlightPosition(null);
+  }, []);
+
+  const handleFindingHoverEnter = useCallback((position: HighlightPosition | null) => {
+    if (position) {
+      setHoveredHighlightPosition(position);
+    }
+  }, []);
+
+  const handleFindingHoverLeave = useCallback(() => {
+    setHoveredHighlightPosition(null);
   }, []);
 
   const renderLoading = () => (
@@ -461,6 +393,9 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ documentId }) => {
         error={analysisError}
         onInitiateChat={handleInitiateChat}
         onFindingClick={handleFindingClick}
+        onFindingHoverEnter={handleFindingHoverEnter}
+        onFindingHoverLeave={handleFindingHoverLeave}
+        hoveredHighlightPosition={hoveredHighlightPosition}
         onRegenerateAnalysis={handleRunAnalysis}
       />
     );
@@ -492,7 +427,7 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ documentId }) => {
               placeholder="Loading document text..."
               allHighlights={allHighlights}
               activeHighlightPosition={activeHighlightPosition}
-              analysisResult={selectedAnalysisType === 'privilegedTerms' ? { type: 'privilegedTerms', result: (currentAnalysisResult as any)?.result } : undefined}
+              hoveredHighlightPosition={hoveredHighlightPosition}
           />
         </div>
       </div>
@@ -517,6 +452,7 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({ documentId }) => {
                 className="h-full border-0 shadow-none bg-transparent"
                 allHighlights={allHighlights}
                 activeHighlightPosition={activeHighlightPosition}
+                hoveredHighlightPosition={hoveredHighlightPosition}
               />
             </div>
           </div>

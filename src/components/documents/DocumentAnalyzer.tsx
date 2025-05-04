@@ -54,6 +54,9 @@ interface DocumentAnalyzerProps {
   error: string | null;
   onInitiateChat: (item: any, type: AnalysisType) => void; // Add prop type
   onFindingClick: (position: HighlightPosition | null) => void; // Add callback prop
+  onFindingHoverEnter: (position: HighlightPosition | null) => void; // <-- Add prop type
+  onFindingHoverLeave: () => void; // <-- Add prop type
+  hoveredHighlightPosition: HighlightPosition | null; // <-- Add prop type
   onRegenerateAnalysis: (type: AnalysisType) => void; // ** ADDED: Callback to rerun analysis **
 }
 
@@ -85,6 +88,9 @@ const DocumentAnalyzer: React.FC<DocumentAnalyzerProps> = ({
     error,
     onInitiateChat, // Destructure prop
     onFindingClick, // Destructure prop
+    onFindingHoverEnter, // <-- Destructure prop
+    onFindingHoverLeave, // <-- Destructure prop
+    hoveredHighlightPosition, // <-- Destructure prop
     onRegenerateAnalysis // ** ADDED: Destructure prop **
 }) => {
   
@@ -195,16 +201,25 @@ const DocumentAnalyzer: React.FC<DocumentAnalyzerProps> = ({
                                 <ul className="list-none space-y-1">
                                     {items.map((entity, index) => (
                                         <li 
-                                            key={`${type}-${index}-${entity.start}`}
-                                            className="border-b border-border/50 py-1 flex justify-between items-center pr-1 cursor-pointer hover:bg-muted/50 rounded-sm transition-colors"
-                                            onClick={() => onFindingClick({ start: entity.start, end: entity.end })} // Added onClick handler
-                                            title="Go to entity in document"
+                                            key={`${type}-${index}-${entity.start ?? 'null'}`}
+                                            className={cn(
+                                                "border-b border-border/50 py-1 flex justify-between items-center pr-1 transition-colors",
+                                                (entity.start === null || entity.end === null)
+                                                    ? "opacity-50 cursor-not-allowed text-muted-foreground"
+                                                    : (hoveredHighlightPosition?.start === entity.start && hoveredHighlightPosition?.end === entity.end)
+                                                        ? "cursor-pointer bg-primary/10 rounded-sm"
+                                                        : "cursor-pointer hover:bg-muted/50 rounded-sm"
+                                            )}
+                                            onClick={() => (entity.start !== null && entity.end !== null) ? onFindingClick({ start: entity.start, end: entity.end }) : undefined}
+                                            onMouseEnter={() => (entity.start !== null && entity.end !== null) ? onFindingHoverEnter({ start: entity.start, end: entity.end }) : undefined}
+                                            onMouseLeave={onFindingHoverLeave}
+                                            title={(entity.start === null || entity.end === null) ? "Could not locate this entity in the document text" : "Go to entity in document"}
                                         >
                                             <span>{entity.text}</span>
                                             <Button 
                                                 variant="ghost" size="icon_xs" 
                                                 className="text-muted-foreground hover:text-primary flex-shrink-0 ml-2"
-                                                onClick={() => onInitiateChat(entity, 'entities')}
+                                                onClick={(e) => { e.stopPropagation(); onInitiateChat(entity, 'entities'); }} // Keep chat button active
                                                 title="Discuss this entity in chat"
                                             >
                                                 <MessageSquarePlus className="h-3 w-3" />
@@ -228,11 +243,21 @@ const DocumentAnalyzer: React.FC<DocumentAnalyzerProps> = ({
             <ScrollArea className="h-[calc(100vh-250px)] p-4"> 
               <Accordion type="single" collapsible className="w-full space-y-2">
                   {clauses.map((clause, index) => (
-                      <AccordionItem value={`clause-${index}`} key={`${clause.start}-${index}`} className="border rounded bg-muted/30">
+                      <AccordionItem value={`clause-${index}`} key={`${clause.start ?? 'null'}-${index}`} className="border rounded bg-muted/30">
                           <AccordionTrigger 
-                                className="p-3 text-sm text-left hover:no-underline cursor-pointer" // Added cursor-pointer
-                                onClick={() => onFindingClick({ start: clause.start, end: clause.end })} // Added onClick handler
-                                title="Go to clause in document"
+                                className={cn(
+                                    "p-3 text-sm text-left hover:no-underline space-x-2",
+                                    (clause.start === null || clause.end === null) 
+                                        ? "opacity-50 cursor-not-allowed text-muted-foreground" 
+                                        : (hoveredHighlightPosition?.start === clause.start && hoveredHighlightPosition?.end === clause.end)
+                                            ? "cursor-pointer text-foreground bg-primary/10 rounded-t-md"
+                                            : "cursor-pointer text-foreground"
+                                )}
+                                onClick={() => (clause.start !== null && clause.end !== null) ? onFindingClick({ start: clause.start, end: clause.end }) : undefined} 
+                                onMouseEnter={() => (clause.start !== null && clause.end !== null) ? onFindingHoverEnter({ start: clause.start, end: clause.end }) : undefined}
+                                onMouseLeave={onFindingHoverLeave}
+                                title={(clause.start === null || clause.end === null) ? "Could not locate this clause in the document text" : "Go to clause in document"}
+                                disabled={clause.start === null || clause.end === null} // Disable trigger if unlocated
                            >
                               <span className="font-medium flex-1 text-foreground">{clause.title || `Clause ${index + 1}`}</span>
                           </AccordionTrigger>
@@ -240,13 +265,13 @@ const DocumentAnalyzer: React.FC<DocumentAnalyzerProps> = ({
                                 <Button 
                                     variant="ghost" size="icon_xs" 
                                     className="absolute top-1 right-1 text-muted-foreground hover:text-primary"
-                                    onClick={() => onInitiateChat(clause, 'clauses')}
+                                    onClick={(e) => { e.stopPropagation(); onInitiateChat(clause, 'clauses'); }}
                                     title="Discuss this clause in chat"
                                 >
                                     <MessageSquarePlus className="h-3 w-3" />
                                 </Button>
-                              {clause.text && <p className="text-muted-foreground text-xs italic mb-2 pr-6">"{clause.text}"</p>}
-                              {clause.analysis && <p className="pr-6">{clause.analysis}</p>}
+                              {clause.text && <p className={cn("text-muted-foreground text-xs italic mb-2 pr-6", (clause.start === null || clause.end === null) && "opacity-70")}>"{clause.text}"</p>}
+                              {clause.analysis && <p className={cn("pr-6", (clause.start === null || clause.end === null) && "opacity-70")}>{clause.analysis}</p>}
                           </AccordionContent>
                       </AccordionItem>
                   ))}
@@ -286,13 +311,23 @@ const DocumentAnalyzer: React.FC<DocumentAnalyzerProps> = ({
            <ScrollArea className="h-[calc(100vh-250px)] p-4"> 
              <Accordion type="single" collapsible className="w-full space-y-2">
                  {sortedRisks.map((risk, index) => (
-                     <AccordionItem value={`risk-${index}`} key={`${risk.start}-${index}`} className="border rounded bg-muted/30">
+                     <AccordionItem value={`risk-${index}`} key={`${risk.start ?? 'null'}-${index}`} className="border rounded bg-muted/30">
                          <AccordionTrigger 
-                            className="p-3 text-sm text-left hover:no-underline space-x-2 cursor-pointer" // Added cursor-pointer
-                            onClick={() => onFindingClick({ start: risk.start, end: risk.end })} // Added onClick handler
-                            title="Go to relevant passage in document"
+                            className={cn(
+                                "p-3 text-sm text-left hover:no-underline space-x-2",
+                                (risk.start === null || risk.end === null) 
+                                    ? "opacity-50 cursor-not-allowed text-muted-foreground" 
+                                    : (hoveredHighlightPosition?.start === risk.start && hoveredHighlightPosition?.end === risk.end)
+                                        ? "cursor-pointer text-foreground bg-primary/10 rounded-t-md"
+                                        : "cursor-pointer text-foreground"
+                            )}
+                            onClick={() => (risk.start !== null && risk.end !== null) ? onFindingClick({ start: risk.start, end: risk.end }) : undefined}
+                            onMouseEnter={() => (risk.start !== null && risk.end !== null) ? onFindingHoverEnter({ start: risk.start, end: risk.end }) : undefined}
+                            onMouseLeave={onFindingHoverLeave}
+                            title={(risk.start === null || risk.end === null) ? "Could not locate this risk passage in the document text" : "Go to relevant passage in document"}
+                            disabled={risk.start === null || risk.end === null} // Disable trigger if unlocated
                          >
-                            <ShieldAlert className={cn("h-4 w-4 flex-shrink-0", getRiskIconColor(risk.severity))} />
+                            <ShieldAlert className={cn("h-4 w-4 flex-shrink-0", getRiskIconColor(risk.severity), (risk.start === null || risk.end === null) && "opacity-50")} />
                              <span className="font-medium flex-1 text-foreground">{risk.title || `Risk ${index + 1}`}</span>
                              <Badge variant={getRiskBadgeVariant(risk.severity)}>{risk.severity}</Badge>
                          </AccordionTrigger>
@@ -300,12 +335,12 @@ const DocumentAnalyzer: React.FC<DocumentAnalyzerProps> = ({
                              <Button 
                                  variant="ghost" size="icon_xs" 
                                  className="absolute top-1 right-1 text-muted-foreground hover:text-primary"
-                                 onClick={() => onInitiateChat(risk, 'risks')}
+                                 onClick={(e) => { e.stopPropagation(); onInitiateChat(risk, 'risks'); }}
                                  title="Discuss this risk in chat"
                              >
                                  <MessageSquarePlus className="h-3 w-3" />
                              </Button>
-                             {risk.explanation && <p className="pr-6">{risk.explanation}</p>}
+                             {risk.explanation && <p className={cn("pr-6", (risk.start === null || risk.end === null) && "opacity-70")}>{risk.explanation}</p>}
                          </AccordionContent>
                      </AccordionItem>
                  ))}
@@ -355,23 +390,31 @@ const DocumentAnalyzer: React.FC<DocumentAnalyzerProps> = ({
                                  <ul className="list-none space-y-2">
                                      {items.map((term, index) => (
                                          <li 
-                                             key={`${category}-${index}-${term.start}`}
-                                             className="border rounded p-2 cursor-pointer hover:bg-muted/50 transition-colors relative bg-card"
-                                             onClick={() => onFindingClick({ start: term.start, end: term.end })}
-                                             title="Go to term in document"
+                                             key={`${category}-${index}-${term.start ?? 'null'}`}
+                                             className={cn(
+                                                 "border rounded p-2 transition-colors relative bg-card",
+                                                 (term.start === null || term.end === null)
+                                                     ? "opacity-50 cursor-not-allowed"
+                                                     : (hoveredHighlightPosition?.start === term.start && hoveredHighlightPosition?.end === term.end)
+                                                         ? "cursor-pointer bg-primary/10"
+                                                         : "cursor-pointer hover:bg-muted/50"
+                                             )}
+                                             onClick={() => (term.start !== null && term.end !== null) ? onFindingClick({ start: term.start, end: term.end }) : undefined}
+                                             onMouseEnter={() => (term.start !== null && term.end !== null) ? onFindingHoverEnter({ start: term.start, end: term.end }) : undefined}
+                                             onMouseLeave={onFindingHoverLeave}
+                                             title={(term.start === null || term.end === null) ? "Could not locate this term in the document text" : "Go to term in document"}
                                          >
                                             <Button 
                                                 variant="ghost" size="icon_xs" 
                                                 className="absolute top-1 right-1 text-muted-foreground hover:text-primary"
-                                                onClick={(e) => { e.stopPropagation(); onInitiateChat(term, 'privilegedTerms'); }}
+                                                onClick={(e) => { e.stopPropagation(); onInitiateChat(term, 'privilegedTerms'); }} // Keep chat active
                                                 title="Discuss this term in chat"
                                             >
                                                 <MessageSquarePlus className="h-3 w-3" />
                                             </Button>
-                                            {/* IMPROVEMENT: Show text and explanation with wrapping */}
-                                             <p className="font-medium mb-1 pr-6 break-words">{term.text}</p>
-                                             <p className="text-xs text-muted-foreground whitespace-pre-wrap break-words pr-6">{term.explanation}</p>
-                                             <Badge variant="secondary" className='mt-1 text-[10px]'>{term.category}</Badge>
+                                            <p className={cn("font-medium mb-1 pr-6 break-words", (term.start === null || term.end === null) && "text-muted-foreground")}>{term.text}</p>
+                                            <p className={cn("text-xs text-muted-foreground whitespace-pre-wrap break-words pr-6", (term.start === null || term.end === null) && "opacity-70")}>{term.explanation}</p>
+                                            <Badge variant="secondary" className='mt-1 text-[10px]'>{term.category}</Badge>
                                          </li>
                                      ))}
                                  </ul>

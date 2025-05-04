@@ -1,5 +1,5 @@
-import React, { useEffect, useRef, useState, useCallback, forwardRef, useImperativeHandle } from 'react';
-import { useEditor, EditorContent, Editor, BubbleMenu, FloatingMenu } from '@tiptap/react';
+import React, { useEffect, useState, useCallback, forwardRef, useImperativeHandle } from 'react';
+import { useEditor, EditorContent, Editor, BubbleMenu } from '@tiptap/react';
 import { Decoration, DecorationSet } from '@tiptap/pm/view'; 
 import { Node } from '@tiptap/pm/model'; 
 import { EditorState } from '@tiptap/pm/state';
@@ -25,11 +25,10 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-  DropdownMenuSeparator,
 } from "@/components/ui/DropdownMenu";
-import { PilcrowSquare, ArrowDownToLine, ArrowUpToLine, StickyNote, Bot, ChevronDown, Sparkles, FileText, Type, BookOpen, ClipboardCopy, Check } from 'lucide-react';
+import { PilcrowSquare, ArrowDownToLine, ArrowUpToLine, StickyNote, Sparkles, FileText, Type, BookOpen, ClipboardCopy, Check } from 'lucide-react';
 import { toast } from 'sonner';
-import { Extension } from '@tiptap/core';
+import { AnyExtension } from '@tiptap/core';
 import { EditorExtensionsOptions } from '@/lib/editor/extensions';
 import { HighlightInfo, HighlightPosition } from '@/components/documents/DocumentViewer';
 import {
@@ -41,8 +40,6 @@ import {
   DialogTitle,
 } from "@/components/ui/Dialog";
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { EditorToolbar } from '@/components/editor/toolbars/editor-toolbar';
-import { FloatingToolbar } from '@/lib/editor/extensions/FloatingToolbar';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -105,6 +102,7 @@ interface TiptapEditorProps {
   documentId?: string;
   allHighlights?: HighlightInfo[];
   activeHighlightPosition?: HighlightPosition | null;
+  hoveredHighlightPosition?: HighlightPosition | null;
 }
 
 // *** ADDED: Define Ref type ***
@@ -123,13 +121,124 @@ const TiptapEditor = forwardRef<TiptapEditorRef, TiptapEditorProps>((
     caseId,
     documentId,
     allHighlights = [],
-    activeHighlightPosition = null
+    activeHighlightPosition = null,
+    hoveredHighlightPosition = null
   },
   ref // *** ADDED: Accept ref ***
 ) => {
+  const editor = useEditor({
+    extensions: [
+      ...(getEditorExtensions({ placeholder, editable } as EditorExtensionsOptions) as AnyExtension[]),
+    ],
+    content: content,
+    editable: editable,
+    onUpdate: ({ editor }) => {
+      if (onChange) {
+        onChange(editor.getHTML());
+      }
+      if (onJsonChange) {
+        onJsonChange(editor.getJSON());
+      }
+    },
+  }, [
+    // Make dependencies more resilient with null checks and defaults
+    content || '',
+    editable !== undefined ? editable : true,
+    placeholder || 'Start typing...',
+    // Only include the minimal necessary highlight properties
+    // that might trigger a legitimate re-creation
+    allHighlights?.length,  // Just track length changes
+    !!activeHighlightPosition, // Just track presence, not the whole object
+    !!hoveredHighlightPosition // Just track presence, not the whole object
+  ]);
+
+  // Effect to scroll to the active highlight position
+  useEffect(() => {
+    // Only run this effect after editor is FULLY initialized
+    if (editor && !editor.isDestroyed && activeHighlightPosition && editor.state) {
+      const { start, end } = activeHighlightPosition;
+      
+      try {
+        // Check that editor's state and doc are properly initialized
+        if (typeof start === 'number' && 
+            typeof end === 'number' && 
+            start < end && 
+            editor.state.doc && 
+            end <= editor.state.doc.content.size) {
+          
+          console.log(`TiptapEditor: Scrolling to active highlight:`, activeHighlightPosition);
+          
+          // We'll use a setTimeout to ensure the editor is fully rendered
+          setTimeout(() => {
+            if (editor && !editor.isDestroyed) {
+              // First scroll to the position
+              editor.commands.scrollIntoView();
+              
+              // Then optionally set the selection if needed
+              // Uncomment if you want selection behavior
+              // editor.commands.setTextSelection({ from: start, to: end });
+            }
+          }, 0);
+        } else {
+          console.warn('TiptapEditor: Invalid activeHighlightPosition or editor state:', 
+            activeHighlightPosition, 
+            'Doc size:', editor.state?.doc?.content?.size);
+        }
+      } catch (err) {
+        console.error('Error in highlight scrolling effect:', err);
+      }
+    }
+  }, [editor, activeHighlightPosition]); // Scrolling effect depends only on editor and active position
+
+  // Effect to update editor decorations when highlight props change
+  useEffect(() => {
+    if (editor && !editor.isDestroyed) {
+      console.log('[TiptapEditor Effect] Updating editorProps for decorations...');
+      editor.setOptions({
+        editorProps: {
+          decorations(state: EditorState): DecorationSet | undefined {
+            const { doc } = state;
+            const allDecos: Decoration[] = [];
+            
+            // --- Placeholder Decorations --- 
+            const placeholderDecosSet = createPlaceholderDecorations(doc);
+            placeholderDecosSet.find().forEach(deco => allDecos.push(deco));
+
+            // --- Analysis Highlights --- 
+            allHighlights?.forEach(highlight => {
+              if (typeof highlight.start === 'number' && typeof highlight.end === 'number' && highlight.start < highlight.end && highlight.start >= 0 && highlight.end <= doc.content.size) {
+                let highlightClass = `highlight highlight-${highlight.type}`; // Base class
+                const isActive = activeHighlightPosition?.start === highlight.start && activeHighlightPosition?.end === highlight.end;
+                const isHovered = hoveredHighlightPosition?.start === highlight.start && hoveredHighlightPosition?.end === highlight.end;
+
+                if (isActive) {
+                  highlightClass += ' highlight-active';
+                }
+                if (isHovered) {
+                   highlightClass += ' highlight-hovered'; 
+                }
+
+                allDecos.push(
+                  Decoration.inline(highlight.start, highlight.end, {
+                    class: highlightClass,
+                    nodeName: 'span',
+                  })
+                );
+              } else {
+                 console.warn('[TiptapEditor] Skipping invalid highlight data in setOptions:', highlight);
+              }
+            });
+
+            console.log(`[TiptapEditor setOptions Decor Func] Calculated: ${allDecos.length} total decorations`);
+            return DecorationSet.create(doc, allDecos);
+          }
+        }
+      });
+    }
+  }, [editor, allHighlights, activeHighlightPosition, hoveredHighlightPosition]); // Re-run when highlight props change
+
   const [isSummarizing, setIsSummarizing] = useState(false);
   const [isRewriting, setIsRewriting] = useState(false);
-  const isFirstChunkRef = useRef(true);
   const [summaryResult, setSummaryResult] = useState<string | null>(null);
   const [showSummaryDialog, setShowSummaryDialog] = useState(false);
   const [copySuccess, setCopySuccess] = useState(false);
@@ -150,7 +259,7 @@ const TiptapEditor = forwardRef<TiptapEditorRef, TiptapEditorProps>((
 
     try {
       // Define a dummy onChunk callback to satisfy the function signature
-      const dummyOnChunk = (chunk: string) => { 
+      const dummyOnChunk = (/*chunk: string*/) => { 
         // console.log("Summarize chunk (ignored):", chunk);
       }; 
 
@@ -201,7 +310,7 @@ const TiptapEditor = forwardRef<TiptapEditorRef, TiptapEditorProps>((
 
     try {
       // Define a dummy onChunk callback with explicit type
-      const dummyOnChunk: (chunk: string) => void = (chunk: string) => { 
+      const dummyOnChunk: (chunk: string) => void = (/*chunk: string*/) => { 
         // console.log("Rewrite chunk (ignored):", chunk); 
       };
 
@@ -238,107 +347,6 @@ const TiptapEditor = forwardRef<TiptapEditorRef, TiptapEditorProps>((
     }
   }, [caseId, documentId, isRewriting, editable]);
 
-  // Initialize editor AFTER handlers are defined
-  const editor = useEditor({
-    extensions: getEditorExtensions({
-      placeholder: placeholder,
-    } as EditorExtensionsOptions) as Extension[],
-    content: content || '',
-    editable: editable,
-    editorProps: {
-      attributes: {
-        class: cn(
-          'prose dark:prose-invert prose-sm sm:prose-base focus:outline-none min-h-[150px] w-full max-w-full',
-          '[&_p]:my-2 [&_h1]:my-4 [&_h2]:my-3 [&_h3]:my-2',
-          editable ? 'cursor-text' : 'cursor-default',
-        ),
-      },
-      decorations(state: EditorState): DecorationSet {
-          let allDecorations: Decoration[] = [];
-
-          // 1. Create decorations from allHighlights prop (our primary interactive highlights)
-          if (allHighlights && Array.isArray(allHighlights)) {
-              allHighlights.forEach(highlight => {
-                  // Strict validation and error handling
-                  if (
-                    typeof highlight.start !== 'number' || 
-                    typeof highlight.end !== 'number' || 
-                    highlight.start < 0 || 
-                    highlight.end <= highlight.start || 
-                    highlight.end > state.doc.content.size
-                  ) {
-                      // Skip invalid highlights without error logs in production
-                      return;
-                  }
-                  
-                  const from = Math.max(0, highlight.start);
-                  const to = Math.min(state.doc.content.size, highlight.end);
-                  
-                  try {
-                      let highlightClass = `analysis-highlight type-${highlight.type}`;
-                      
-                      // Add risk severity class if present
-                      if (highlight.details?.severity) {
-                          highlightClass += ` risk-${highlight.details.severity.toLowerCase()}`;
-                      }
-                      
-                      // Check if this highlight is the currently active one
-                      if (activeHighlightPosition && 
-                          highlight.start === activeHighlightPosition.start && 
-                          highlight.end === activeHighlightPosition.end) {
-                          highlightClass += ' active-highlight';
-                      }
-
-                      // Create a tooltip attribute from details if available
-                      let tooltipAttr = '';
-                      if (highlight.details) {
-                          tooltipAttr = typeof highlight.details === 'string' 
-                              ? highlight.details 
-                              : (highlight.details.title || highlight.details.explanation || JSON.stringify(highlight.details));
-                      }
-
-                      allDecorations.push(
-                          Decoration.inline(from, to, {
-                              class: highlightClass,
-                              'data-highlight-type': highlight.type,
-                              'data-highlight-details': JSON.stringify(highlight.details || {}),
-                              'title': tooltipAttr || `${highlight.type} highlight`
-                          })
-                      );
-                  } catch (err) {
-                      // Silent error in production, log only in development
-                      if (process.env.NODE_ENV === 'development') {
-                          console.warn('Error creating highlight decoration:', highlight, err);
-                      }
-                  }
-              });
-          }
-
-          // 2. Create placeholder decorations (non-interactive, different style)
-          try {
-              const placeholderDecorations = createPlaceholderDecorations(state.doc);
-              allDecorations = allDecorations.concat(placeholderDecorations.find());
-          } catch (err) {
-              // Silent error in production, log only in development
-              if (process.env.NODE_ENV === 'development') {
-                  console.warn('Error creating placeholder decorations:', err);
-              }
-          }
-
-          // 3. Combine and return
-          return DecorationSet.create(state.doc, allDecorations);
-      }
-    },
-    onUpdate: ({ editor }) => {
-      if (onChange) {
-        onChange(editor.getHTML());
-      }
-      if (onJsonChange) {
-        onJsonChange(editor.getJSON());
-      }
-    },
-  }, [editable, placeholder, content]);
-
   // *** ADDED: Expose editor instance via ref ***
   useImperativeHandle(ref, () => ({
     getEditor: () => editor,
@@ -350,12 +358,6 @@ const TiptapEditor = forwardRef<TiptapEditorRef, TiptapEditorProps>((
       handleSummarize(editor);
     }
   }, [editor, handleSummarize]);
-
-  const handleRewriteClick = useCallback((mode: RewriteMode) => {
-    if (editor) {
-      handleRewrite(mode, editor);
-    }
-  }, [editor, handleRewrite]);
 
   const findAndSelectPlaceholder = useCallback((direction: 'next' | 'previous') => {
     if (!editor || !editable) return;
@@ -437,32 +439,6 @@ const TiptapEditor = forwardRef<TiptapEditorRef, TiptapEditorProps>((
     const { from, to } = editor.state.selection;
     return from !== to; // Show when text is selected
   }, [editor]);
-
-  // Add useEffect to scroll to active highlight when it changes
-  useEffect(() => {
-    if (editor && activeHighlightPosition) {
-      // Add a small delay to ensure rendering is complete
-      const timer = setTimeout(() => {
-        try {
-          // Find the active highlight element and scroll to it
-          const highlightElement = document.querySelector('.analysis-highlight.active-highlight');
-          if (highlightElement) {
-            highlightElement.scrollIntoView({ 
-              behavior: 'smooth', 
-              block: 'center'
-            });
-          }
-        } catch (err) {
-          // Silent error in production
-          if (process.env.NODE_ENV === 'development') {
-            console.warn('Error scrolling to active highlight:', err);
-          }
-        }
-      }, 100);
-      
-      return () => clearTimeout(timer);
-    }
-  }, [editor, activeHighlightPosition]);
 
   // Copy summary to clipboard
   const copySummaryToClipboard = useCallback(async () => {
@@ -548,7 +524,7 @@ const TiptapEditor = forwardRef<TiptapEditorRef, TiptapEditorProps>((
                 <TooltipContent>AI Rewrite Options</TooltipContent>
               </Tooltip>
               <DropdownMenuContent align="start">
-                {aiMenuItems.map((item, index) => (
+                {aiMenuItems.map((item) => (
                   <DropdownMenuItem
                     key={item.label}
                     className="hover:bg-muted focus:bg-muted cursor-pointer"
@@ -646,7 +622,7 @@ const TiptapEditor = forwardRef<TiptapEditorRef, TiptapEditorProps>((
                 </Tooltip>
               </TooltipProvider>
               <DropdownMenuContent align="start">
-                {aiMenuItems.map((item, index) => (
+                {aiMenuItems.map((item) => (
                   <DropdownMenuItem
                     key={item.label}
                     className="hover:bg-muted focus:bg-muted cursor-pointer"
