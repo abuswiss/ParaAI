@@ -50,7 +50,9 @@ const TemplateFiller: React.FC = () => {
 
   const parseVariablesFromHTML = useCallback((htmlContent: string): ParsedTemplateVariable[] => {
     if (typeof DOMParser === 'undefined') {
-      // Fallback regex-based parsing when DOMParser is unavailable (e.g. during SSR)
+      // DOMParser isn't available (e.g. during SSR). Fallback to a basic
+      // regex which only detects {{variable}} placeholders. This approach
+      // won't provide highlighting or other advanced parsing features.
       const regex = /\{\{\s*([^}\s]+)\s*\}\}/g;
       const found: Record<string, ParsedTemplateVariable> = {};
       let match: RegExpExecArray | null;
@@ -80,7 +82,13 @@ const TemplateFiller: React.FC = () => {
 
   const generatePreviewHtml = useCallback((baseHtml: string, currentValues: Record<string, string>, highlightVar?: string | null): string => {
     if (!baseHtml) return '<p></p>';
-    if (typeof DOMParser === 'undefined') return baseHtml;
+    if (typeof DOMParser === 'undefined') {
+      // DOMParser isn't available (e.g. SSR). Replace {{variable}} placeholders
+      // directly in the HTML. Highlighting will not be applied in this mode.
+      return baseHtml.replace(/\{\{\s*([^}\s]+)\s*\}\}/g, (_, v) => {
+        return currentValues[v] ?? `{{${v}}}`;
+      });
+    }
 
     const parser = new DOMParser();
     const doc = parser.parseFromString(baseHtml, 'text/html');
