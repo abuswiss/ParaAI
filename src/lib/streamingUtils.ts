@@ -37,8 +37,8 @@ export async function processSupabaseStream(
 
         // --- Use fetch instead of invoke --- 
         const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-        if (sessionError || !session) {
-            throw new Error(sessionError?.message || 'Not authenticated');
+        if (sessionError) {
+            throw new Error(sessionError.message);
         }
         
         const supabaseUrl = import.meta.env.VITE_SUPABASE_URL; 
@@ -50,13 +50,17 @@ export async function processSupabaseStream(
         
         const functionUrl = `${supabaseUrl}/functions/v1/${functionName}`;
 
+        const headers: Record<string, string> = {
+            'Content-Type': 'application/json',
+            apikey: anonKey,
+        };
+        if (session && session.access_token) {
+            headers['Authorization'] = `Bearer ${session.access_token}`;
+        }
+
         const response = await fetch(functionUrl, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVubGpvZHlobXJybHVpdGJsbnJtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDU1OTIxMzksImV4cCI6MjA2MTE2ODEzOX0.VZGEyEm-jLTNK9wuN3tCf9GciPCxymSH8nIRlKp0Pdg',
-                'apikey': anonKey, // Include the anon key as well
-            },
+            headers,
             body: JSON.stringify(payload),
         });
         // --- End fetch logic --- 
