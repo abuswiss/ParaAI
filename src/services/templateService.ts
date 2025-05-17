@@ -3,6 +3,10 @@ import { openai } from '../lib/openaiClient';
 import { v4 as uuidv4 } from 'uuid';
 import { PostgrestError } from '@supabase/supabase-js';
 
+// Utility to escape RegExp special characters when replacing variables
+const escapeRegExp = (str: string): string =>
+  str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 /**
  * Interface for document template
  */
@@ -554,7 +558,9 @@ export const createDraftFromTemplate = async (
     
     for (const variable of template.variables) {
       const value = variableValues[variable] || `[${variable}]`;
-      content = content.replace(new RegExp(`\\{\\{${variable}\\}\\}`, 'g'), value);
+      const escaped = escapeRegExp(variable);
+      const regex = new RegExp(`\\{\\{${escaped}\\}\\}`, 'g');
+      content = content.replace(regex, value);
     }
 
     // Create the draft

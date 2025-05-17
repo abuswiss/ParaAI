@@ -50,15 +50,22 @@ const TemplateFiller: React.FC = () => {
 
   const parseVariablesFromHTML = useCallback((htmlContent: string): ParsedTemplateVariable[] => {
     if (typeof DOMParser === 'undefined') {
-      console.warn('DOMParser not available for variable parsing. Placeholders might not be fully interactive.');
-      // Fallback or simpler regex might be needed if DOMParser is not available (e.g., some SSR contexts)
-      // For now, assume browser environment.
-      return [];
+      // Fallback regex-based parsing when DOMParser is unavailable (e.g. during SSR)
+      const regex = /\{\{\s*([^}\s]+)\s*\}\}/g;
+      const found: Record<string, ParsedTemplateVariable> = {};
+      let match: RegExpExecArray | null;
+      while ((match = regex.exec(htmlContent)) !== null) {
+        const name = match[1];
+        if (name && !found[name]) {
+          found[name] = { name, description: name };
+        }
+      }
+      return Object.values(found);
     }
     const parser = new DOMParser();
     const doc = parser.parseFromString(htmlContent, 'text/html');
     const variableElements = Array.from(doc.querySelectorAll('span[data-variable-name].variable-highlight'));
-    
+
     const uniqueVariables: Record<string, ParsedTemplateVariable> = {};
 
     variableElements.forEach(el => {
