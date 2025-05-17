@@ -7,6 +7,7 @@ import { Textarea } from '../ui/Textarea';
 import { Spinner } from '../ui/Spinner';
 import { Icons } from '../ui/Icons';
 import { toast } from 'react-hot-toast';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/Alert';
 
 interface CaseFormProps {
   isOpen: boolean;
@@ -75,7 +76,7 @@ const CaseForm: React.FC<CaseFormProps> = ({ isOpen, onClose, caseData }) => {
     e.preventDefault();
 
     if (!formData.name.trim()) {
-      setError('Case name is required');
+      setError('Matter name is required');
       return;
     }
 
@@ -107,7 +108,7 @@ const CaseForm: React.FC<CaseFormProps> = ({ isOpen, onClose, caseData }) => {
         const { data: newCase, error } = await createCase(updates);
         if (error) throw error;
         // console.log('Case created successfully:', newCase);
-        toast.success("Case created successfully!");
+        toast.success("Matter created successfully!");
         onClose(true);
       }
 
@@ -118,7 +119,7 @@ const CaseForm: React.FC<CaseFormProps> = ({ isOpen, onClose, caseData }) => {
 
     } catch (err) {
       console.error('Error submitting case form:', err);
-      const errorMessage = err instanceof Error ? err.message : `Failed to ${isEditMode ? 'update' : 'create'} case.`;
+      const errorMessage = err instanceof Error ? err.message : `Failed to ${isEditMode ? 'update' : 'create'} matter.`;
       setError(errorMessage);
     } finally {
       setLoading(false);
@@ -129,14 +130,14 @@ const CaseForm: React.FC<CaseFormProps> = ({ isOpen, onClose, caseData }) => {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-        <div className="fixed inset-0 bg-black/70 z-40" onClick={() => onClose()} />
+        <div className="fixed inset-0 bg-background/80 dark:bg-dark-background/80 backdrop-blur-sm z-40" onClick={() => onClose()} />
 
-        <div className="relative z-50 w-full max-w-2xl bg-surface rounded-lg shadow-xl p-6">
+        <div className="relative z-50 w-full max-w-2xl bg-card dark:bg-dark-card backdrop-blur-md border border-border dark:border-dark-border rounded-lg shadow-xl p-6">
              <div className="flex justify-between items-center mb-4">
-                <h3 className="text-lg font-semibold text-text-primary">
-                {isEditMode ? 'Edit Case' : 'Create New Case'}
+                <h3 className="text-lg font-semibold text-foreground dark:text-dark-foreground">
+                {isEditMode ? 'Edit Matter' : 'Create New Matter'}
                 </h3>
-                <Button variant="ghost" size="sm" onClick={() => onClose()} className="-mr-2">
+                <Button variant="ghost" size="sm" onClick={() => onClose()} className="-mr-2 text-muted-foreground hover:text-foreground dark:text-dark-muted-foreground dark:hover:text-dark-foreground">
                     <Icons.Close className="h-4 w-4" />
                     <span className="sr-only">Close</span>
                 </Button>
@@ -144,14 +145,14 @@ const CaseForm: React.FC<CaseFormProps> = ({ isOpen, onClose, caseData }) => {
 
             <form onSubmit={handleSubmit} className="space-y-4">
             {error && (
-                <div className="mb-4 text-sm text-red-500 bg-red-100 dark:bg-red-900/20 p-3 rounded-md border border-red-300 dark:border-red-600">
-                {error}
-                </div>
+                <Alert variant="destructive" className="mb-4">
+                    <AlertDescription>{error}</AlertDescription>
+                </Alert>
             )}
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                    <Label>Case Name *</Label>
+                    <Label>Matter Name *</Label>
                     <Input
                         id="name"
                         name="name"
@@ -168,7 +169,7 @@ const CaseForm: React.FC<CaseFormProps> = ({ isOpen, onClose, caseData }) => {
                         name="status"
                         value={formData.status}
                         onChange={handleInputChange}
-                        className="block w-full mt-1 rounded-md border border-border dark:border-gray-600 shadow-sm focus:border-primary focus:ring focus:ring-primary focus:ring-opacity-50 bg-input text-foreground dark:bg-gray-700! dark:text-white p-2 text-sm"
+                        className="block w-full mt-1 rounded-md border border-input dark:border-dark-input shadow-sm focus:border-primary dark:focus:border-dark-primary focus:ring-ring dark:focus:ring-dark-ring bg-input dark:bg-dark-input text-foreground dark:text-dark-foreground p-2 text-sm"
                     >
                         <option value="active">Active</option>
                         <option value="closed">Closed</option>
@@ -235,7 +236,7 @@ const CaseForm: React.FC<CaseFormProps> = ({ isOpen, onClose, caseData }) => {
                 />
             </div>
 
-            <div className="flex justify-end space-x-3 pt-4 border-t border-border mt-6">
+            <div className="flex justify-end space-x-3 pt-4 border-t border-border dark:border-dark-border mt-6">
                 <Button
                 type="button"
                 variant="outline"
@@ -247,14 +248,18 @@ const CaseForm: React.FC<CaseFormProps> = ({ isOpen, onClose, caseData }) => {
                 <Button
                 type="submit"
                 disabled={loading || success}
-                className={`min-w-[100px] ${success ? 'bg-green-600 hover:bg-green-700' : ''}`}
+                variant={success ? undefined : "primary"} 
+                className={`min-w-[120px] flex items-center justify-center ${success ? 'bg-success hover:bg-success/90 text-success-foreground' : ''}`}
                 >
-                {loading ? <Spinner size="sm" /> :
-                 success ? <Icons.Check className="h-4 w-4" /> :
-                 isEditMode ? 'Save Changes' : 'Create Case'}
-                <span className="ml-2">
-                    {loading ? 'Saving...' : success ? 'Saved!' : ''}
-                 </span>
+                {loading ? (
+                    <><Spinner size="sm" className="mr-2" /> Saving...</>
+                ) : success ? (
+                    <><Icons.Check className="h-4 w-4 mr-2 text-success-foreground" /> Saved!</>
+                ) : isEditMode ? (
+                    'Save Changes'
+                ) : (
+                    'Create Matter'
+                )}
                 </Button>
             </div>
             </form>

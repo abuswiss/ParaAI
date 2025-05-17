@@ -46,7 +46,7 @@ interface ModalOverlayProps {
 export const ModalOverlay: React.FC<ModalOverlayProps> = ({ className = '' }) => {
   return (
     <div 
-      className={`fixed inset-0 bg-black/70 backdrop-blur-sm transition-opacity ${className}`} 
+      className={`fixed inset-0 bg-black/50 dark:bg-black/70 backdrop-blur-sm transition-opacity ${className}`} 
       aria-hidden="true"
     />
   );
@@ -65,7 +65,7 @@ export const ModalContent: React.FC<ModalContentProps> = ({ children, className 
     <div
       // Prevent closing when clicking inside content
       onClick={(e) => e.stopPropagation()}
-      className={`relative z-10 w-full rounded-lg bg-surface dark:bg-gray-800 shadow-xl overflow-hidden transition-all ${sizeClass} ${className}`}
+      className={`relative z-10 w-full rounded-lg bg-card text-card-foreground dark:bg-dark-card dark:text-dark-card-foreground shadow-xl dark:shadow-dark-xl border border-card-border dark:border-dark-card-border backdrop-blur-md overflow-hidden transition-all ${sizeClass} ${className}`}
     >
       {children}
     </div>
@@ -81,8 +81,8 @@ interface ModalHeaderProps {
 
 export const ModalHeader: React.FC<ModalHeaderProps> = ({ children, className = '' }) => {
   return (
-    <div className={`px-4 sm:px-6 py-4 border-b border-gray-200 dark:border-gray-700 ${className}`}>
-      <h3 className="text-lg font-semibold text-gray-900 dark:text-white" id="modal-title">
+    <div className={`px-4 sm:px-6 py-4 border-b border-border dark:border-dark-border ${className}`}>
+      <h3 className="text-lg font-semibold text-card-foreground dark:text-dark-card-foreground" id="modal-title">
         {children}
       </h3>
     </div>
@@ -113,7 +113,8 @@ interface ModalFooterProps {
 
 export const ModalFooter: React.FC<ModalFooterProps> = ({ children, className = '' }) => {
   return (
-    <div className={`flex justify-end space-x-3 px-4 sm:px-6 py-3 bg-gray-50 dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 rounded-b-lg ${className}`}>
+    // Removed specific bg-* to let ModalContent's glass effect show through
+    <div className={`flex justify-end space-x-3 px-4 sm:px-6 py-3 border-t border-border dark:border-dark-border rounded-b-lg ${className}`}>
       {children}
     </div>
   );
@@ -131,7 +132,7 @@ export const ModalCloseButton: React.FC<ModalCloseButtonProps> = ({ onClick, cla
     <button
       type="button"
       onClick={onClick}
-      className={`absolute top-3 right-3 p-1 rounded-full text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-600 dark:hover:text-gray-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary dark:focus:ring-offset-gray-800 ${className}`}
+      className={`absolute top-3 right-3 p-1 rounded-full text-muted-foreground dark:text-dark-muted-foreground hover:bg-secondary dark:hover:bg-dark-secondary hover:text-secondary-foreground dark:hover:text-dark-secondary-foreground focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary dark:focus:ring-offset-dark-card ${className}`}
       aria-label="Close modal"
     >
       <X className="h-5 w-5" />

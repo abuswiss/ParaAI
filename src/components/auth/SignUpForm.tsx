@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useAuth } from '@/hooks/useAuth';
+import * as authService from '@/services/authService';
 import { Label } from "@/components/ui/Label";
 import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
@@ -19,34 +20,42 @@ const SignUpForm: React.FC<SignUpFormProps> = ({ onSuccess }) => {
   const [showPassword, setShowPassword] = useState(false);
   const [localSuccessMessage, setLocalSuccessMessage] = useState<string | null>(null);
   
-  const { signUp, loading, error } = useAuth();
+  const { loading: authLoading } = useAuth();
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLocalSuccessMessage(null);
+    setFormError(null);
     
     if (!acceptTerms) {
-      alert('Please review and accept the Terms & Conditions to create your BenchWise account.');
+      setFormError('Please review and accept the Terms & Conditions to create your BenchWise account.');
       return;
     }
     
-    const success = await signUp(email, password);
-    if (success) {
+    setIsSubmitting(true);
+    const { error: signUpError } = await authService.signUp({ email, password });
+
+    if (!signUpError) {
       setLocalSuccessMessage('Welcome to BenchWise! Please check your email to confirm your account.');
       onSuccess?.();
       setEmail('');
       setPassword('');
       setAcceptTerms(false);
+    } else {
+      setFormError(signUpError.message || "An unexpected error occurred during sign up.");
     }
+    setIsSubmitting(false);
   };
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      {error && (
+      {formError && !localSuccessMessage && (
         <Alert variant="destructive">
           <Icons.AlertTriangle className="h-4 w-4" />
           <AlertTitle>Sign Up Failed</AlertTitle>
-          <AlertDescription>{error}</AlertDescription>
+          <AlertDescription>{formError}</AlertDescription>
         </Alert>
       )}
       
@@ -63,7 +72,7 @@ const SignUpForm: React.FC<SignUpFormProps> = ({ onSuccess }) => {
               <div className="space-y-1.5">
                 <Label htmlFor="signup-email">Email Address</Label>
                 <div className="relative">
-                    <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                    <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground dark:text-purple-gray" />
                     <Input
                         id="signup-email"
                         type="email"
@@ -72,7 +81,7 @@ const SignUpForm: React.FC<SignUpFormProps> = ({ onSuccess }) => {
                         placeholder="you@example.com"
                         required
                         className="pl-10"
-                        disabled={loading}
+                        disabled={isSubmitting || authLoading}
                     />
                 </div>
               </div>
@@ -80,7 +89,7 @@ const SignUpForm: React.FC<SignUpFormProps> = ({ onSuccess }) => {
               <div className="space-y-1.5">
                 <Label htmlFor="signup-password">Password</Label>
                 <div className="relative">
-                    <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                    <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground dark:text-purple-gray" />
                     <Input
                         id="signup-password"
                         type={showPassword ? "text" : "password"}
@@ -89,16 +98,16 @@ const SignUpForm: React.FC<SignUpFormProps> = ({ onSuccess }) => {
                         placeholder="Create a password"
                         required
                         className="pl-10 pr-10"
-                        disabled={loading}
+                        disabled={isSubmitting || authLoading}
                     />
                     <Button
                         type="button"
                         variant="ghost"
                         size="icon"
-                        className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2 text-muted-foreground hover:bg-transparent hover:text-foreground"
+                        className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2 text-muted-foreground hover:bg-transparent hover:text-foreground dark:hover:text-off-white"
                         onClick={() => setShowPassword(!showPassword)}
                         aria-label={showPassword ? "Hide password" : "Show password"}
-                        disabled={loading}
+                        disabled={isSubmitting || authLoading}
                     >
                         {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                     </Button>
@@ -110,19 +119,19 @@ const SignUpForm: React.FC<SignUpFormProps> = ({ onSuccess }) => {
                     id="terms" 
                     checked={acceptTerms}
                     onCheckedChange={(checked) => setAcceptTerms(Boolean(checked))}
-                    disabled={loading}
+                    disabled={isSubmitting || authLoading}
                   />
-                <Label htmlFor="terms" className="text-sm font-normal text-muted-foreground">
-                   I agree to the <a href="#" className="text-primary hover:underline">Terms and Conditions</a>
+                <Label htmlFor="terms" className="text-sm font-normal text-muted-foreground dark:text-soft-purple">
+                   I agree to the <a href="#" className="text-primary hover:underline dark:text-legal-purple dark:hover:text-royal-purple">Terms and Conditions</a>
                 </Label>
               </div>
               
               <Button
                 type="submit"
                 className="w-full"
-                disabled={loading || !acceptTerms}
+                disabled={isSubmitting || authLoading || !acceptTerms}
               >
-                {loading ? (
+                {isSubmitting ? (
                   <Icons.Loader className="mr-2 h-4 w-4 animate-spin" />
                 ) : (
                   "Create BenchWise Account"

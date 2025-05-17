@@ -74,12 +74,12 @@ const DocumentContextPicker: React.FC<DocumentContextPickerProps> = ({
     <div className="flex flex-col space-y-4 pt-2">
       <div className="px-6 pb-2">
         <h3 className="text-lg font-semibold text-foreground">Select Document Context</h3>
-        <p className="text-sm text-muted-foreground">
+        <p className="text-sm text-muted-foreground dark:text-dark-muted-foreground">
           Choose one or more documents to provide context for your chat.
         </p>
       </div>
       <div className="relative px-6">
-          <Search className="absolute left-8 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Search className="absolute left-8 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground dark:text-dark-muted-foreground" />
           <Input 
               placeholder="Search documents in this case..."
               value={searchTerm}
@@ -87,8 +87,8 @@ const DocumentContextPicker: React.FC<DocumentContextPickerProps> = ({
               className="pl-9"
           />
       </div>
-      <ScrollArea className="h-[300px] border rounded-md mx-6">
-         <div className="p-4">
+      <ScrollArea className="h-[300px] border border-card-border dark:border-dark-card-border bg-card/70 dark:bg-dark-card/70 backdrop-blur-md shadow-lg rounded-md mx-6">
+         <div className="p-4 w-full">
            {loading ? (
                <div className="flex justify-center items-center h-full">
                    <Spinner />
@@ -98,26 +98,32 @@ const DocumentContextPicker: React.FC<DocumentContextPickerProps> = ({
                    <AlertDescription>{error}</AlertDescription>
                </Alert>
            ) : filteredDocuments.length === 0 ? (
-               <p className="text-sm text-muted-foreground text-center py-4">
+               <p className="text-sm text-muted-foreground dark:text-dark-muted-foreground text-center py-4">
                    No documents found {searchTerm ? 'matching search' : (activeCaseId ? 'in this case' : ' - Please select a case first')}.
                </p>
            ) : (
                <div className="space-y-1">
                   {filteredDocuments.map(doc => (
-                       <div key={doc.id} className="flex items-center space-x-2 p-2 rounded-md hover:bg-accent cursor-pointer">
-                         <Label 
-                            className={cn(
-                                "flex items-center flex-grow cursor-pointer text-sm space-x-2",
-                                selectedContextIds.includes(doc.id) ? "text-accent-foreground font-medium" : "text-muted-foreground"
-                            )}
-                         >
-                            <Checkbox 
+                       <div 
+                          key={doc.id} 
+                          className="grid grid-cols-[auto_1fr] items-center gap-x-2 p-2 rounded-md hover:bg-accent dark:hover:bg-dark-accent cursor-pointer w-full"
+                       >
+                         <div className="flex items-center space-x-2">
+                             <Checkbox 
                                 id={`doc-${doc.id}`}
                                 checked={selectedContextIds.includes(doc.id)}
                                 onCheckedChange={() => handleCheckboxChange(doc.id)}
-                            />
-                            <FileText className="h-4 w-4 flex-shrink-0"/> 
-                            <span className="truncate flex-1">{doc.filename}</span>
+                             />
+                             <FileText className="h-4 w-4 flex-shrink-0 text-muted-foreground dark:text-dark-muted-foreground"/> 
+                         </div>
+                         <Label 
+                            htmlFor={`doc-${doc.id}`}
+                            className={cn(
+                                "cursor-pointer text-sm truncate min-w-0",
+                                selectedContextIds.includes(doc.id) ? "text-accent-foreground font-medium" : "text-muted-foreground dark:text-dark-muted-foreground"
+                            )}
+                         >
+                            {doc.filename}
                          </Label>
                        </div>
                    ))}

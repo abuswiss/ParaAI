@@ -34,10 +34,10 @@ const AuthTabs: React.FC<AuthTabsProps> = ({
         <TabsTrigger value={tab1Value}>{tabNames[0]}</TabsTrigger>
         <TabsTrigger value={tab2Value}>{tabNames[1]}</TabsTrigger>
       </TabsList>
-      <TabsContent value={tab1Value} className="p-6 pt-4">
+      <TabsContent value={tab1Value} className="pt-6">
         {children[0]}
       </TabsContent>
-      <TabsContent value={tab2Value} className="p-6 pt-4">
+      <TabsContent value={tab2Value} className="pt-6">
         {children[1]}
       </TabsContent>
     </Tabs>

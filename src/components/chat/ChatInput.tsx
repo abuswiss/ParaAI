@@ -30,7 +30,8 @@ import {
     newAIDocumentDraftModalOpenAtom,
     newAITemplateDraftModalOpenAtom,
     selectTemplateModalOpenAtom,
-    templateImportModalOpenAtom
+    templateImportModalOpenAtom,
+    deepResearchModeAtom
 } from '@/atoms/appAtoms';
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/components/ui/Tooltip";
 import { Textarea } from "@/components/ui/Textarea";
@@ -38,10 +39,8 @@ import TextareaAutosize from 'react-textarea-autosize';
 import { Spinner } from "@/components/ui/Spinner";
 import { SourceInfo } from '@/types/sources';
 import { ChatAgent } from '@/types/agent';
-import DocumentContextPicker from './DocumentContextPicker';
 import DocumentContextDisplay from './DocumentContextDisplay';
 import { useChat } from '@/hooks/useChat';
-import { Dialog, DialogContent } from "@/components/ui/Dialog";
 
 interface SendMessagePayload {
   content: string;
@@ -55,17 +54,15 @@ interface SendMessagePayload {
 }
 
 interface ChatInputProps {
-  input: string;
-  handleInputChange: (e: React.ChangeEvent<HTMLTextAreaElement> | React.ChangeEvent<HTMLInputElement>) => void;
-  handleSubmit: (e: React.FormEvent<HTMLFormElement>, chatRequestOptions?: { data?: Record<string, string> }) => void;
+  onSendMessage: (message: string) => void;
   isLoading: boolean;
   stop?: () => void;
   isDisabled?: boolean;
   placeholder?: string;
   onFileUpload?: (files: File[]) => void;
   selectedDocumentIds: string[];
-  handleDocumentSelection: (docIds: string[]) => void;
   maxContextDocuments: number;
+  onDocumentPickerOpen?: () => void;
 }
 
 interface CommandAction {
@@ -89,77 +86,77 @@ const commandActions: CommandAction[] = [
       id: 'agent-live-search',
       label: '/agent perplexity',
       value: '/agent perplexity',
-      icon: <Globe className="h-4 w-4 mr-2 text-cyan-400" />,
+      icon: <Globe className="h-4 w-4 mr-2 text-primary" />,
       description: 'Ask AI Live Search any question.',
     },
     {
       id: 'research',
       label: '/research',
       value: '/research',
-      icon: <Search className="h-4 w-4 mr-2 text-blue-500" />,
+      icon: <Search className="h-4 w-4 mr-2 text-primary" />,
       description: 'Legal research using CourtListener.',
     },
     {
         id: 'agent-analyze',
         label: '/agent analyze',
         value: '/agent analyze',
-        icon: <Microscope className="h-4 w-4 mr-2 text-purple-400" />,
+        icon: <Microscope className="h-4 w-4 mr-2 text-primary" />,
         description: 'Analyze a legal document for risks/clauses.',
     },
     {
       id: 'agent-compare',
       label: '/agent compare',
       value: '/agent compare',
-      icon: <BarChart2 className="h-4 w-4 mr-2 text-pink-400" />,
+      icon: <BarChart2 className="h-4 w-4 mr-2 text-primary" />,
       description: 'Compare two documents.',
     },
     {
       id: 'agent-draft',
       label: '/agent draft',
       value: '/agent draft',
-      icon: <DraftingCompass className="h-4 w-4 mr-2 text-orange-500" />,
+      icon: <DraftingCompass className="h-4 w-4 mr-2 text-primary" />,
       description: 'Draft a legal document or email.',
     },
     {
         id: 'agent-summarize',
         label: '/agent summarize',
         value: '/agent summarize',
-        icon: <FileText className="h-4 w-4 mr-2 text-lime-500" />,
+        icon: <FileText className="h-4 w-4 mr-2 text-primary" />,
         description: 'Summarize a legal document.',
     },
     {
         id: 'agent-find-clause',
         label: '/agent find-clause',
         value: '/agent find-clause',
-        icon: <Puzzle className="h-4 w-4 mr-2 text-indigo-400" />,
+        icon: <Puzzle className="h-4 w-4 mr-2 text-primary" />,
         description: 'Find a specific clause in a document.',
     },
     {
         id: 'agent-explain',
         label: '/agent explain',
         value: '/agent explain',
-        icon: <Lightbulb className="h-4 w-4 mr-2 text-yellow-500" />,
+        icon: <Lightbulb className="h-4 w-4 mr-2 text-primary" />,
         description: 'Explain a legal term or concept.',
     },
     {
         id: 'agent-timeline',
         label: '/agent timeline',
         value: '/agent timeline',
-        icon: <Clock className="h-4 w-4 mr-2 text-teal-400" />,
+        icon: <Clock className="h-4 w-4 mr-2 text-primary" />,
         description: 'Generate a timeline from document events.',
     },
     {
         id: 'agent-template-ai',
         label: '/agent template-ai',
         value: '/agent template-ai',
-        icon: <FileText className="h-4 w-4 mr-2 text-rose-400" />,
+        icon: <FileText className="h-4 w-4 mr-2 text-primary" />,
         description: 'Generate a template based on a description.',
     },
     {
       id: 'agent-help',
       label: '/agent help',
       value: '/agent help',
-      icon: <HelpCircle className="h-4 w-4 mr-2 text-green-500" />,
+      icon: <HelpCircle className="h-4 w-4 mr-2 text-primary" />,
       description: 'Show available agent commands.',
     },
 ];
@@ -171,26 +168,30 @@ interface MessageContext {
 }
 
 const ChatInput: React.FC<ChatInputProps> = ({
-  input,
-  handleInputChange,
-  handleSubmit,
+  onSendMessage,
   isLoading,
   stop,
   isDisabled = false,
   placeholder = "Ask anything...",
   onFileUpload,
-  handleDocumentSelection,
-  maxContextDocuments
+  maxContextDocuments,
+  onDocumentPickerOpen,
+  selectedDocumentIds: selectedDocumentIdsFromProp
 }) => {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [internalInputValue, setInternalInputValue] = useState('');
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
   const [commandSearch, setCommandSearch] = useState('');
   const setUploadModalOpen = useSetAtom(uploadModalOpenAtom);
-  const [isDocPickerOpen, setIsDocPickerOpen] = useState(false);
   const activeCaseId = useAtomValue(activeCaseIdAtom);
-  const selectedDocumentIds = useAtomValue(chatDocumentContextIdsAtom);
-
+  const [selectedDocumentIds] = useAtom(chatDocumentContextIdsAtom);
+  const [isDragOver, setIsDragOver] = useState(false);
+  const [isAIAgentPopoverOpen, setIsAIAgentPopoverOpen] = useState(false);
+  const [showContextBadge, setShowContextBadge] = useState(false);
+  const isDeepResearchModeActive = useAtomValue(deepResearchModeAtom);
+  const [preloadedContext, setPreloadedContext] = useAtom(chatPreloadContextAtom);
+  
   useEffect(() => {
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
@@ -201,23 +202,28 @@ const ChatInput: React.FC<ChatInputProps> = ({
           textareaRef.current.style.height = `200px`;
       }
     }
-  }, [input]);
+  }, [internalInputValue]);
+
+  useEffect(() => {
+    setShowContextBadge(selectedDocumentIds.length > 0);
+  }, [selectedDocumentIds]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      if (!isDisabled && !isLoading && input.trim()) {
-        handleSubmit(e as any, { data: { caseId: activeCaseId || '' } });
+      if (!isDisabled && !isLoading && internalInputValue.trim()) {
+        onSendMessage(internalInputValue.trim());
+        setInternalInputValue('');
       }
     }
-    if (e.key === '/' && !input.endsWith('/')) {
+    if (e.key === '/' && !internalInputValue.endsWith('/')) {
     } else if (e.key === 'Escape' && isPopoverOpen) {
       setIsPopoverOpen(false);
     }
   };
 
   const handleTextareaChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    handleInputChange(e);
+    setInternalInputValue(e.target.value);
     const value = e.target.value;
     if (value.endsWith('/')) {
       setIsPopoverOpen(true);
@@ -242,14 +248,14 @@ const ChatInput: React.FC<ChatInputProps> = ({
   };
 
   const handleCommandSelect = (command: string) => {
-    const currentValue = input;
+    const currentValue = internalInputValue;
     const lastSlashIndex = currentValue.lastIndexOf('/');
     const newValue = currentValue.substring(0, lastSlashIndex + 1) + command + ' ';
     const syntheticEvent = {
       target: { value: newValue },
       currentTarget: { value: newValue },
     } as React.ChangeEvent<HTMLTextAreaElement>;
-    handleInputChange(syntheticEvent);
+    setInternalInputValue(newValue);
     setIsPopoverOpen(false);
     textareaRef.current?.focus();
   };
@@ -289,126 +295,161 @@ const ChatInput: React.FC<ChatInputProps> = ({
     e.stopPropagation();
   };
 
-  const handlePickerClose = () => {
-    setIsDocPickerOpen(false);
+  const onFormSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!isDisabled && !isLoading && internalInputValue.trim()) {
+      onSendMessage(internalInputValue.trim());
+      setInternalInputValue('');
+    }
   };
 
+  useEffect(() => {
+    if (preloadedContext && internalInputValue === '' && !isLoading) {
+      // If input is cleared while preloaded context exists, assume user wants to abandon it.
+      // However, ClaudeChatInterface clears it on send. This local clear might be too aggressive.
+      // For now, let's rely on ClaudeChatInterface to clear it upon successful message send.
+      // If user wants to clear it *before* send, they use the dismiss button.
+    }
+  }, [internalInputValue, preloadedContext, isLoading]);
+
   return (
-    <TooltipProvider delayDuration={0}>
-      <div className="flex flex-col gap-2 p-4 w-full">
-        <div className="relative flex w-full border rounded-md bg-background focus-within:ring-1 focus-within:ring-ring">
-          <TextareaAutosize
-            ref={textareaRef}
-            minRows={1}
-            maxRows={8}
-            placeholder={isEffectivelyDisabled ? (isDisabled ? placeholder : "AI is responding...") : placeholder}
-            value={input}
-            onChange={handleTextareaChange}
-            onKeyDown={handleKeyDown}
-            disabled={isEffectivelyDisabled}
-            className={cn(
-              "flex-grow resize-none border-0 shadow-none focus-visible:ring-0 bg-transparent py-2 pl-3 pr-10",
-              "w-full"
-            )}
-          />
-
-          <div className="absolute right-1 bottom-1 flex items-center">
-            {isLoading ? (
-              <Button type="button" variant="ghost" size="icon" onClick={stop} className="h-8 w-8">
-                <StopCircle className="h-4 w-4 animate-pulse" />
-                <span className="sr-only">Stop generating</span>
-              </Button>
-            ) : (
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                disabled={isEffectivelyDisabled || !input.trim()}
-                className="h-8 w-8"
-                onClick={(e) => {
-                  handleSubmit(e as any, { data: { caseId: activeCaseId || '' } });
-                }}
-              >
-                <SendHorizontal className="h-4 w-4" />
-                <span className="sr-only">Send message</span>
-              </Button>
-            )}
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2 justify-between" onDrop={handleDrop} onDragOver={handleDragOver}>
-          <div className="flex-grow min-w-0">
-            {selectedDocumentIds.length > 0 && (
-              <DocumentContextDisplay selectedDocumentIds={selectedDocumentIds} />
-            )}
-          </div>
-
-          <div className="flex-shrink-0 flex items-center gap-2">
+    <TooltipProvider>
+      <form
+        onSubmit={onFormSubmit}
+        className={cn(
+          "relative w-full",
+          // Glassy, 3D effect - using card styles for the base glass
+          "backdrop-blur-md bg-card/70 dark:bg-dark-card/60 border-t border-card-border dark:border-dark-card-border shadow-xl rounded-xl",
+          "transition-all duration-200",
+          "ring-1 ring-black/5 dark:ring-white/5", // Softer ring
+          "before:absolute before:inset-0 before:rounded-xl before:shadow-[0_4px_32px_0_rgba(0,0,0,0.08)] dark:before:shadow-[0_4px_32px_0_rgba(0,0,0,0.2)] before:pointer-events-none"
+        )}
+      >
+        <DocumentContextDisplay
+           selectedDocumentIds={selectedDocumentIds}
+           onDocumentPickerOpen={onDocumentPickerOpen}
+        />
+        <div
+          className={cn(
+            "flex items-end gap-1.5 p-2 rounded-xl border border-transparent",
+            // Inner background slightly more transparent or different if needed, using card as a base
+            "bg-card/50 dark:bg-dark-card/50",
+            isDragOver && "ring-2 ring-primary dark:ring-primary" // Use theme primary for ring
+          )}
+          onDrop={handleDrop}
+          onDragOver={handleDragOver}
+          onDragLeave={() => setIsDragOver(false)}
+        >
+          {/* Left-side action buttons */}
+          <div className="flex items-center gap-0.5">
+            {/* Document Context Picker Button */}
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
                   type="button"
-                  variant="ghost"
+                  variant={showContextBadge ? "secondary" : "ghost"}
                   size="icon"
-                  className="text-muted-foreground hover:text-foreground relative"
-                  disabled={isDisabled || !activeCaseId}
-                  onClick={() => setIsDocPickerOpen(true)}
+                  onClick={onDocumentPickerOpen}
+                  className={cn(
+                    "text-muted-foreground dark:text-dark-muted-foreground hover:text-primary dark:hover:text-primary relative",
+                    showContextBadge && "bg-primary/20 border-primary"
+                  )}
+                  aria-label="Select document context"
                 >
-                  <Paperclip className="h-5 w-5" />
-                  {selectedDocumentIds.length > 0 && (
-                    <Badge
-                      variant="secondary"
-                      className="absolute -top-1 -right-1 h-4 w-4 p-0 flex items-center justify-center text-xs rounded-full"
-                    >
-                      {selectedDocumentIds.length}
-                    </Badge>
+                  <FileText className="h-5 w-5" />
+                  {showContextBadge && (
+                    <span className="absolute top-0 right-0 block h-2 w-2 rounded-full bg-primary border-2 border-background dark:border-dark-background" />
                   )}
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>
-                <p>Select Context Documents{selectedDocumentIds.length > 0 ? ` (${selectedDocumentIds.length})` : ''}</p>
-              </TooltipContent>
+              <TooltipContent>Select documents for context</TooltipContent>
             </Tooltip>
-
+            {/* Upload/Attach Button */}
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="text-muted-foreground hover:text-foreground"
-                  onClick={handleUploadClick}
-                  disabled={isDisabled || !activeCaseId}
-                >
-                  <PlusSquare className="h-4 w-4 mr-1" />
+                <Button type="button" variant="ghost" size="icon" onClick={handleUploadClick} className="text-muted-foreground dark:text-dark-muted-foreground hover:text-primary dark:hover:text-primary">
+                  <Paperclip className="h-5 w-5" />
+                  <span className="sr-only">Attach files</span>
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>
-                <p>Upload Documents (or drag & drop anywhere)</p>
-              </TooltipContent>
+              <TooltipContent>Attach files (max 2MB each)</TooltipContent>
             </Tooltip>
-            <input
-                type="file"
-                ref={fileInputRef}
-                onChange={handleFileSelected}
-                multiple
-                style={{ display: 'none' }}
-                accept=".pdf,.docx,.txt,.md"
-            />
+            {/* AI Agent Popover (Magic Icon) */}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span>
+                  <Button 
+                    variant="ghost" 
+                    size="icon" 
+                    className="text-muted-foreground dark:text-dark-muted-foreground opacity-50 cursor-not-allowed" 
+                    title="AI Agent Actions (Coming soon)" 
+                    disabled
+                    tabIndex={-1}
+                  >
+                    <Wand2 className="h-5 w-5" />
+                  </Button>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>Coming soon</TooltipContent>
+            </Tooltip>
           </div>
+          <TextareaAutosize
+            ref={textareaRef}
+            value={internalInputValue}
+            onChange={handleTextareaChange}
+            onKeyDown={handleKeyDown}
+            placeholder={isDisabled ? "Loading..." : placeholder}
+            className="flex-1 resize-none overflow-y-auto bg-transparent p-2.5 text-sm text-foreground dark:text-dark-foreground placeholder:text-muted-foreground dark:placeholder:text-dark-muted-foreground focus:outline-none disabled:opacity-70 scrollbar-thin scrollbar-thumb-border dark:scrollbar-thumb-dark-border scrollbar-track-transparent"
+            disabled={isDisabled || isLoading}
+            rows={1}
+            maxRows={8}
+          />
+          <div className="flex items-center gap-0.5">
+            {isLoading && stop && (
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <Button type="button" variant="ghost" size="icon" onClick={stop} className="text-muted-foreground dark:text-dark-muted-foreground hover:text-destructive dark:hover:text-destructive">
+                            <StopCircle className="h-5 w-5" />
+                            <span className="sr-only">Stop generation</span>
+                        </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Stop generation</TooltipContent>
+                </Tooltip>
+            )}
+            <Tooltip>
+                <TooltipTrigger asChild>
+                    <Button type="submit" variant="ghost" size="icon" disabled={isDisabled || isLoading || !internalInputValue.trim()} className="text-muted-foreground dark:text-dark-muted-foreground enabled:hover:text-primary enabled:dark:hover:text-primary disabled:opacity-50">
+                        <SendHorizontal className="h-5 w-5" />
+                        <span className="sr-only">Send message</span>
+                    </Button>
+                </TooltipTrigger>
+                <TooltipContent>Send message</TooltipContent>
+            </Tooltip>
+           </div>
         </div>
-      </div>
-
-      <Dialog open={isDocPickerOpen} onOpenChange={setIsDocPickerOpen}>
-        <DialogContent className="sm:max-w-[600px] p-0">
-          {isDocPickerOpen && activeCaseId && (
-            <DocumentContextPicker 
-              onClose={handlePickerClose}
-            />
-          )}
-        </DialogContent>
-      </Dialog>
-
+      </form>
+      {preloadedContext && (
+        <div className="absolute bottom-full left-0 right-0 mb-1 p-2 bg-background dark:bg-dark-background border border-border dark:border-dark-border rounded-md shadow-sm flex items-center justify-between text-xs">
+          <div className="flex items-center overflow-hidden">
+            <span className="font-semibold mr-1.5 shrink-0">Context:</span>
+            <span className="text-muted-foreground dark:text-dark-muted-foreground mr-1 shrink-0">
+              {preloadedContext.analysisType} -
+            </span>
+            <span className="italic truncate text-foreground dark:text-dark-foreground">
+              "{preloadedContext.analysisItem.substring(0, 100)}{preloadedContext.analysisItem.length > 100 ? '...' : ''}"
+            </span>
+          </div>
+          <Button 
+            variant="ghost"
+            size="xs-icon" 
+            className="h-5 w-5 p-0.5 text-muted-foreground dark:text-dark-muted-foreground hover:text-destructive dark:hover:text-dark-destructive shrink-0 ml-2"
+            onClick={() => setPreloadedContext(null)}
+            title="Clear context snippet"
+          >
+            <X className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+      )}
     </TooltipProvider>
   );
 };

@@ -75,34 +75,34 @@ const DocumentContextDisplay: React.FC<DocumentContextDisplayProps> = ({ isLoadi
 
     return (
         <TooltipProvider delayDuration={0}>
-            <div className="mb-2 p-2 border rounded-md bg-muted/50 max-h-24 overflow-y-auto scrollbar-thin">
+            <div className="w-full mb-2 p-2 border border-border dark:border-dark-border rounded-md bg-muted/30 dark:bg-dark-card/30 max-h-24 overflow-y-auto overflow-x-hidden scrollbar-thin scrollbar-thumb-border dark:scrollbar-thumb-dark-border scrollbar-track-transparent">
                 <div className="flex items-center mb-1">
-                    <FileText className="h-4 w-4 mr-2 text-muted-foreground flex-shrink-0" />
-                    <span className="text-xs font-medium text-muted-foreground mr-2">Context:</span>
-                    {isFetchingNames && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
+                    <FileText className="h-4 w-4 mr-2 text-muted-foreground dark:text-dark-muted-foreground flex-shrink-0" />
+                    <span className="text-xs font-medium text-muted-foreground dark:text-dark-muted-foreground mr-2">Context:</span>
+                    {isFetchingNames && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground dark:text-dark-muted-foreground" />}
                 </div>
                 <div className="flex flex-wrap gap-1.5">
                     {documentsInfo.map((doc) => (
                         <Tooltip key={doc.id}>
                             <TooltipTrigger asChild>
                                 <Badge 
-                                    variant="secondary" 
+                                    variant="secondary" // Relies on Badge.tsx for dark mode variant
                                     className="pl-2 pr-1 py-0.5 text-xs font-normal cursor-default truncate max-w-[150px] sm:max-w-[200px]"
                                 >
                                     <span className="truncate" title={doc.filename}>{doc.filename}</span>
                                     <Button
                                         variant="ghost"
-                                        size="xs-icon" // Custom size? Or use padding/size classes
+                                        size="xs-icon"
                                         onClick={() => handleRemoveDocument(doc.id)}
-                                        disabled={isLoading} // Disable if parent is loading
-                                        className="ml-1 h-4 w-4 p-0 rounded-full hover:bg-destructive/20 hover:text-destructive"
+                                        disabled={isLoading}
+                                        className="ml-1 h-4 w-4 p-0 rounded-full text-muted-foreground dark:text-dark-muted-foreground hover:bg-destructive/20 dark:hover:bg-destructive/30 hover:text-destructive dark:hover:text-destructive-foreground"
                                         aria-label={`Remove ${doc.filename} from context`}
                                     >
                                         <X className="h-3 w-3" />
                                     </Button>
                                 </Badge>
                             </TooltipTrigger>
-                            <TooltipContent>
+                            <TooltipContent className="bg-popover text-popover-foreground border-popover-border dark:bg-dark-popover dark:text-dark-popover-foreground dark:border-dark-popover-border">
                                 <p>{doc.filename}</p>
                             </TooltipContent>
                         </Tooltip>

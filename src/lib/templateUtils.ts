@@ -1,49 +1,115 @@
 import { Case } from '@/types/case';
-
-/**
- * Type definition for an extracted variable from a template
- */
-export interface ExtractedVariable {
-  name: string;         // The name of the variable (e.g., "client_name")
-  placeholder: string;  // The full placeholder text (e.g., "{{client_name}}")
-}
+import { JSONContent, Editor, Mark } from '@tiptap/react'; // Import Tiptap JSON type, Editor, Mark
+import { toast } from 'sonner'; // Import toast for messages
 
 /**
  * Type definition for variable state during prefilling/editing
  */
 export interface TemplateVariableState {
-  name: string;                 // The name of the variable
-  value: string | null;         // Current value (prefilled or user-entered)
-  status: 'pending' | 'prefilled' | 'missing' | 'user-filled';  // Status of the variable
-  originalPlaceholder: string;  // The original placeholder text for accurate replacement
+  name: string;                 
+  value: string | null;         
+  status: 'pending' | 'prefilled' | 'missing' | 'user-filled';  
+  position?: { from: number; to: number }; // ADDED: Optional position
+}
+
+interface TiptapNode {
+  type: string;
+  attrs?: Record<string, any>;
+  content?: TiptapNode[];
+  marks?: TiptapMark[];
+  text?: string;
+}
+
+interface TiptapMark {
+  type: string;
+  attrs?: Record<string, any>;
 }
 
 /**
- * Extract variables from template content
- * @param content HTML content with variables in {{variable_name}} format
- * @returns Array of extracted variables with their names and original placeholders
+ * Represents a variable extracted from Tiptap JSON content.
  */
-export function extractVariables(content: string): ExtractedVariable[] {
-  // Regex to match {{variable_name}} patterns, allowing for spacing
-  const regex = /\{\{\s*([^}]+?)\s*\}\}/g;
-  const matches = Array.from(content.matchAll(regex));
-  
-  // Use a Set to deduplicate variable names
-  const uniqueVars = new Map<string, ExtractedVariable>();
-  
-  for (const match of matches) {
-    const fullMatch = match[0]; // e.g., "{{ client_name }}"
-    const varName = match[1].trim(); // e.g., "client_name"
-    
-    if (!uniqueVars.has(varName)) {
-      uniqueVars.set(varName, {
-        name: varName,
-        placeholder: fullMatch
-      });
+export interface JsonExtractedVariable {
+  name: string;
+  description?: string | null; // Add optional description
+  position: { from: number; to: number }; // ADDED: Position of the mark
+}
+
+// Renamed from getNodeFlatSize and refined for accuracy
+function getNodeSize(node: TiptapNode): number {
+  if (typeof node.text === 'string') {
+    return node.text.length; // Text node size is its length
+  }
+  if (node.content && Array.isArray(node.content)) {
+    // Element node: 1 (for opening tag) + sum of children sizes + 1 (for closing tag)
+    let contentSize = 0;
+    for (const child of node.content) {
+      contentSize += getNodeSize(child);
+    }
+    return 1 + contentSize + 1;
+  }
+  // Leaf node (e.g., horizontalRule, image) or unknown type
+  return 1; 
+}
+
+function findVariablesInNode(
+  node: TiptapNode,
+  foundVariables: Map<string, JsonExtractedVariable>,
+  currentPos: number // currentPos is the starting position of *this* node
+) {
+  if (node.type === 'text' && node.text && node.marks) {
+    for (const mark of node.marks) {
+      if (mark.type === 'variable' && mark.attrs && mark.attrs['data-variable-name']) {
+        const variableName = mark.attrs['data-variable-name'];
+        const variableDescription = mark.attrs['data-variable-description'] || null;
+        if (!foundVariables.has(variableName)) {
+          // Position of the variable mark is the text node's position range
+          const from = currentPos;
+          const to = currentPos + node.text.length;
+          foundVariables.set(variableName, { 
+            name: variableName, 
+            description: variableDescription,
+            position: { from, to }
+          });
+        }
+      }
     }
   }
-  
-  return Array.from(uniqueVars.values());
+
+  if (node.content && Array.isArray(node.content)) {
+    let childNodePos = currentPos + 1; // Content starts after the parent node's opening tag
+    for (const childNode of node.content) {
+      findVariablesInNode(childNode, foundVariables, childNodePos);
+      childNodePos += getNodeSize(childNode); // Advance position by the size of the processed child
+    }
+  }
+}
+
+/**
+ * Extracts variables defined by VariableMark from Tiptap JSON content.
+ * @param jsonContent Tiptap document content in JSON format.
+ * @returns Array of unique extracted variable names and their positions.
+ */
+export function extractVariablesFromJson(jsonContent: JSONContent): JsonExtractedVariable[] {
+  const foundVariables = new Map<string, JsonExtractedVariable>();
+  if (jsonContent && jsonContent.type === 'doc' && Array.isArray(jsonContent.content)) {
+    // The document itself is a node. Its content starts at position 1.
+    // Iterate through the top-level children of the 'doc' node.
+    let currentPos = 1; // ProseMirror positions are 1-indexed within the document content
+    for (const childNode of jsonContent.content) {
+      findVariablesInNode(childNode as TiptapNode, foundVariables, currentPos);
+      currentPos += getNodeSize(childNode as TiptapNode);
+    }
+  } else if (jsonContent) {
+    // Fallback for a single node that is not a 'doc' - though typically jsonContent is a doc.
+    // This path is less common for full documents.
+    // Treat the jsonContent itself as the first node starting at an assumed pos 1 if it's not a doc.
+    // This might need adjustment based on how non-doc JSONContent is structured/used.
+    // For safety, we can wrap it in a conceptual doc if it's not one.
+    // However, prefillVariableStates usually gets a full doc.
+    // If jsonContent is a single node, its own position relative to a doc is 1.
+    findVariablesInNode(jsonContent as TiptapNode, foundVariables, 1);
+  }
+  return Array.from(foundVariables.values());
 }
 
 /**
@@ -122,110 +188,66 @@ function formatValue(value: any): string {
 }
 
 /**
- * Prefill variables in a template using case data
+ * Prefill variable states based on Tiptap JSON content and case data.
+ * This function EXTRACTS variables from JSON and finds corresponding Case data,
+ * but it DOES NOT modify the editor content directly.
  * 
- * @param content The original template content
- * @param caseData The case data for prefilling
- * @param extractedVariables Array of variables to prefill
- * @returns Object containing updated content and variable states
+ * @param jsonContent The Tiptap JSON document content.
+ * @param caseData The case data for prefilling.
+ * @returns Array of variable states with prefilled values where possible.
  */
-export function prefillVariables(
-  content: string, 
-  caseData: Case, 
-  extractedVariables: ExtractedVariable[]
-): { 
-  content: string; 
-  variableStates: TemplateVariableState[] 
-} {
-  let processedContent = content;
+export function prefillVariableStates(
+  jsonContent: JSONContent | null, 
+  caseData: Case | null, 
+): TemplateVariableState[] {
+  if (!caseData || !jsonContent) return [];
+  
+  const extractedVariables = extractVariablesFromJson(jsonContent);
   const variableStates: TemplateVariableState[] = [];
   
   for (const variable of extractedVariables) {
-    // Get the property path for this variable
     const propertyPath = mapVariableToPropertyPath(variable.name);
-    
-    // Extract value from case data using the property path
     const value = getValueByPath(caseData, propertyPath);
-    
-    // Format the value as a string
     const formattedValue = formatValue(value);
-    
-    // Determine the status
     const status = formattedValue ? 'prefilled' : 'missing';
     
-    // Store the variable state
     variableStates.push({
       name: variable.name,
       value: formattedValue || null,
       status,
-      originalPlaceholder: variable.placeholder
+      position: variable.position, // STORE POSITION
     });
-    
-    // Replace the placeholder in the content if we have a value
-    if (formattedValue) {
-      processedContent = processedContent.replace(
-        variable.placeholder, 
-        formattedValue
-      );
-    }
   }
   
-  return { 
-    content: processedContent, 
-    variableStates 
-  };
+  return variableStates;
 }
 
 /**
- * Final resolution of variables in a template
- * Replaces all placeholders with their values
- * 
- * @param content The original template content
- * @param variables Array of variable states with values
- * @returns The fully resolved content
- */
-export function resolveVariables(
-  content: string, 
-  variables: TemplateVariableState[]
-): string {
-  return variables.reduce((result, variable) => {
-    // Skip variables without values
-    if (!variable.value) return result;
-    
-    // Replace all instances of the placeholder with the value
-    return result.replace(
-      new RegExp(escapeRegExp(variable.originalPlaceholder), 'g'), 
-      variable.value
-    );
-  }, content);
-}
-
-/**
- * Escape special characters in a string for use in a regular expression
- */
-function escapeRegExp(string: string): string {
-  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-/**
- * Handles template selection and navigation to the editor
+ * Handles template selection and navigation for creating a document FROM a template.
  * @param navigate - React Router navigate function
  * @param templateId - ID of the selected template
- * @param activeCaseId - Current active case ID (or null if none)
+ * @param activeCaseId - Current active case ID (must be provided)
  * @param onComplete - Optional callback after successful navigation
- * @returns boolean indicating if navigation was successful
+ * @returns boolean indicating if navigation was successful or if prerequisites were missing
  */
-export const useTemplate = (
-  navigate: any,
+export const createDocumentFromTemplate = (
+  navigate: (path: string, options?: { replace?: boolean; state?: any }) => void, // More specific type for navigate
   templateId: string,
   activeCaseId: string | null,
   onComplete?: () => void
 ): boolean => {
   if (!activeCaseId) {
+    toast.warning("Please select an active case before creating a document from a template.");
+    return false;
+  }
+  if (!templateId) {
+    toast.warning("No template selected to create a document from.");
     return false;
   }
   
-  navigate(`/edit/document/new?templateId=${templateId}&caseId=${activeCaseId}`);
+  // Navigate to the template filling page, which handles document creation.
+  // Pass activeCaseId as a query parameter so the fill page can use it.
+  navigate(`/ai/templates/${templateId}/fill?caseId=${activeCaseId}`);
   
   if (onComplete) {
     onComplete();

@@ -61,20 +61,20 @@ const CaseManagementModal: React.FC<CaseManagementModalProps> = ({ isOpen, onClo
     const handleCreateCase = async () => {
         const trimmedName = newCaseName.trim();
         if (!trimmedName) {
-            toast.warning("Please enter a name for the new case.");
+            toast.warning("Please enter a name for the new matter.");
             return;
         }
         setIsCreating(true);
         try {
             const { error: createError } = await caseService.createCase({ name: trimmedName });
             if (createError) throw createError;
-            toast.success(`Case "${trimmedName}" created successfully.`);
+            toast.success(`Matter "${trimmedName}" created successfully.`);
             setNewCaseName(''); // Clear input
             await fetchCases(); // Refresh list within the modal
             onCasesUpdated(); // Notify FileManager to refresh its list
         } catch (err: any) {
-            console.error("Failed to create case:", err);
-            toast.error(`Failed to create case: ${err.message}`);
+            console.error("Failed to create matter:", err);
+            toast.error(`Failed to create matter: ${err.message}`);
         } finally {
             setIsCreating(false);
         }
@@ -86,30 +86,30 @@ const CaseManagementModal: React.FC<CaseManagementModalProps> = ({ isOpen, onClo
         <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
             <DialogContent className="sm:max-w-2xl">
                 <DialogHeader>
-                    <DialogTitle>Manage Cases</DialogTitle>
+                    <DialogTitle>Manage Matters</DialogTitle>
                     <DialogDescription>
-                        Create new cases, or rename/delete existing ones.
+                        Create new matters, or rename/delete existing ones.
                     </DialogDescription>
                 </DialogHeader>
 
                 {/* Create New Case Section */}
                 <div className="flex items-center gap-2 mt-4">
                     <Input 
-                        placeholder="New case name..."
+                        placeholder="New matter name..."
                         value={newCaseName}
                         onChange={(e) => setNewCaseName(e.target.value)}
                         disabled={isCreating}
                         onKeyDown={(e) => e.key === 'Enter' && !isCreating && handleCreateCase()}
                     />
-                    <Button onClick={handleCreateCase} disabled={!newCaseName.trim() || isCreating}>
-                        {isCreating ? <Spinner size="sm" className="mr-2" /> : <Plus className="h-4 w-4 mr-2" />}
-                        Create Case
+                    <Button variant="primary" onClick={handleCreateCase} disabled={!newCaseName.trim() || isCreating}>
+                        {isCreating ? <Spinner size="sm" className="mr-2" /> : <Plus className="h-4 w-4 mr-2 text-primary-foreground" />}
+                        Create Matter
                     </Button>
                 </div>
 
                 {/* Existing Cases List */}
-                <div className="mt-4 border-t pt-4">
-                    <h4 className="text-sm font-medium mb-2">Existing Cases</h4>
+                <div className="mt-4 border-t border-border dark:border-dark-border pt-4">
+                    <h4 className="text-sm font-medium text-foreground dark:text-dark-foreground mb-2">Existing Matters</h4>
                     {error && <Alert variant="destructive" className="mb-2"><AlertDescription>{error}</AlertDescription></Alert>}
                     <ScrollArea className="h-[300px] pr-3">
                         {isLoading ? (
@@ -119,15 +119,15 @@ const CaseManagementModal: React.FC<CaseManagementModalProps> = ({ isOpen, onClo
                         ) : cases.length > 0 ? (
                             <ul className="space-y-2">
                                 {cases.map((c) => (
-                                    <li key={c.id} className="flex items-center justify-between p-2 bg-muted/50 rounded text-sm">
-                                        <span className="font-medium truncate pr-2">{c.name}</span>
+                                    <li key={c.id} className="flex items-center justify-between p-2 bg-muted/50 dark:bg-dark-muted/50 rounded text-sm">
+                                        <span className="font-medium truncate pr-2 text-foreground dark:text-dark-foreground">{c.name}</span>
                                         <div className="flex items-center gap-1 flex-shrink-0">
                                             <Button 
                                                 variant="ghost" 
                                                 size="icon" 
                                                 className="h-7 w-7 text-muted-foreground hover:text-foreground"
                                                 // onClick={() => handleInitiateRename(c)} // TODO
-                                                title="Rename Case"
+                                                title="Rename Matter"
                                             >
                                                 <Edit className="h-4 w-4" />
                                             </Button>
@@ -136,7 +136,7 @@ const CaseManagementModal: React.FC<CaseManagementModalProps> = ({ isOpen, onClo
                                                 size="icon" 
                                                 className="h-7 w-7 text-destructive hover:text-destructive/80"
                                                 // onClick={() => handleInitiateDelete(c)} // TODO
-                                                title="Delete Case"
+                                                title="Delete Matter"
                                             >
                                                 <Trash2 className="h-4 w-4" />
                                             </Button>
@@ -145,7 +145,7 @@ const CaseManagementModal: React.FC<CaseManagementModalProps> = ({ isOpen, onClo
                                 ))}
                             </ul>
                         ) : (
-                            <p className="text-center text-muted-foreground italic py-4">No cases found.</p>
+                            <p className="text-center text-muted-foreground italic py-4">No matters found.</p>
                         )}
                     </ScrollArea>
                 </div>

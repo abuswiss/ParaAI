@@ -1,4 +1,5 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+@import './styles/editor-custom.css'; /* Import custom editor styles */
 
 @tailwind base;
 @tailwind components;
@@ -12,64 +13,85 @@
   }
   
   body {
-    @apply bg-background text-text-primary min-h-screen;
+    @apply bg-background text-text-primary min-h-screen overflow-hidden;
     font-synthesis: none;
     text-rendering: optimizeLegibility;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    position: fixed;
+    width: 100%;
+    height: 100%;
   }
   :root {
     --background: 0 0% 100%;
-    --foreground: 0 0% 3.9%;
+    --foreground: 240 10% 3.9%;
     --card: 0 0% 100%;
-    --card-foreground: 0 0% 3.9%;
+    --card-foreground: 240 10% 3.9%;
     --popover: 0 0% 100%;
-    --popover-foreground: 0 0% 3.9%;
-    --primary: 0 0% 9%;
+    --popover-foreground: 240 10% 3.9%;
+    --primary: 240 5.9% 10%;
     --primary-foreground: 0 0% 98%;
-    --secondary: 0 0% 96.1%;
-    --secondary-foreground: 0 0% 9%;
-    --muted: 0 0% 96.1%;
-    --muted-foreground: 0 0% 45.1%;
-    --accent: 0 0% 96.1%;
-    --accent-foreground: 0 0% 9%;
+    --secondary: 240 4.8% 95.9%;
+    --secondary-foreground: 240 5.9% 10%;
+    --muted: 240 4.8% 95.9%;
+    --muted-foreground: 240 10% 25%; /* Darker muted text for better visibility */
+    --accent: 240 4.8% 95.9%;
+    --accent-foreground: 240 5.9% 10%;
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 0 0% 98%;
-    --border: 0 0% 89.8%;
-    --input: 0 0% 89.8%;
-    --ring: 0 0% 3.9%;
+    --border: 240 5.9% 90%;
+    --input: 240 5.9% 90%;
+    --ring: 240 5.9% 10%;
     --chart-1: 12 76% 61%;
     --chart-2: 173 58% 39%;
     --chart-3: 197 37% 24%;
     --chart-4: 43 74% 66%;
     --chart-5: 27 87% 67%;
     --radius: 0.5rem;
+    
+    /* Placeholder text color for better visibility */
+    --placeholder: 240 10% 30%;
+
+    /* Custom Sidebar Variables */
+    --sidebar: 240 4.8% 95.9%; /* Example: Light gray */
+    --sidebar-foreground: 240 5.9% 10%; /* Example: Dark gray/black */
+
+    /* Theme Colors for Gradient Animation */
+    --gradient-color-1: 210 40% 96%; /* Light Blue */
+    --gradient-color-2: 220 30% 90%; /* Slightly darker muted blue */
+    --gradient-color-3: 210 40% 85%; /* Medium Blue */
+    --gradient-color-4: 240 5% 96%;  /* Light Gray */
   }
   .dark {
-    --background: 0 0% 3.9%;
+    --background: 240 10% 3.9%;
     --foreground: 0 0% 98%;
-    --card: 0 0% 3.9%;
+    --card: 240 10% 3.9%;
     --card-foreground: 0 0% 98%;
-    --popover: 0 0% 3.9%;
+    --popover: 240 10% 3.9%;
     --popover-foreground: 0 0% 98%;
     --primary: 0 0% 98%;
-    --primary-foreground: 0 0% 9%;
-    --secondary: 0 0% 14.9%;
+    --primary-foreground: 240 5.9% 10%;
+    --secondary: 240 3.7% 15.9%;
     --secondary-foreground: 0 0% 98%;
-    --muted: 0 0% 14.9%;
-    --muted-foreground: 0 0% 63.9%;
-    --accent: 0 0% 14.9%;
+    --muted: 240 3.7% 15.9%;
+    --muted-foreground: 240 5% 64.9%;
+    --accent: 240 3.7% 15.9%;
     --accent-foreground: 0 0% 98%;
     --destructive: 0 62.8% 30.6%;
     --destructive-foreground: 0 0% 98%;
-    --border: 0 0% 14.9%;
-    --input: 0 0% 14.9%;
-    --ring: 0 0% 83.1%;
-    --chart-1: 220 70% 50%;
-    --chart-2: 160 60% 45%;
-    --chart-3: 30 80% 55%;
-    --chart-4: 280 65% 60%;
-    --chart-5: 340 75% 55%;
+    --border: 240 3.7% 15.9%;
+    --input: 240 3.7% 15.9%;
+    --ring: 240 4.9% 83.9%;
+
+    /* Custom Sidebar Variables */
+    --sidebar: 240 3.7% 15.9%; /* Example: Dark gray */
+    --sidebar-foreground: 0 0% 98%;   /* Example: Light gray/white */
+
+    /* Dark Theme Colors for Gradient Animation */
+    --gradient-color-1: 210 30% 15%; /* Dark Blue */
+    --gradient-color-2: 220 25% 25%; /* Darker muted blue */
+    --gradient-color-3: 210 30% 35%; /* Medium Dark Blue */
+    --gradient-color-4: 240 5% 15%;  /* Dark Gray */
   }
 }
 
@@ -129,7 +151,7 @@
   -webkit-box-decoration-break: clone; 
 }
 
-/* Analysis Highlight Styles (from TiptapEditor.css or similar) */
+/* Analysis Highlight Styles are now in styles/editor-custom.css */
 .analysis-highlight {
   border-radius: 3px;
   padding: 0.5px 2px;
@@ -193,4 +215,61 @@
 }
 
 /* Add other necessary styles for editor elements */
+
+/* Gradient Animation - REMOVED */
+/* @keyframes gradient-flow {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+} */
+
+/* Animated Gradient Background Utility - REMOVED */
+/* .animated-gradient-bg {
+  background: linear-gradient(-45deg, hsl(var(--gradient-color-1)), hsl(var(--gradient-color-2)), hsl(var(--gradient-color-3)), hsl(var(--gradient-color-4)));
+  background-size: 400% 400%;
+  animation: gradient-flow 15s ease infinite;
+  filter: blur(10px);
+  transform: scale(1.1);
+} */
+
+/* Fix for Panel Layout and Resizers */
+[data-panel-id="chat-panel"] {
+  transition: width 0.1s ease;
+}
+
+[data-panel-resize-handle-id="chat-resize-handle"] {
+  width: 6px !important;
+  background-color: rgba(128, 128, 128, 0.25);
+  transition: background-color 0.2s ease;
+  position: relative;
+  z-index: 20;
+}
+
+[data-panel-resize-handle-id="chat-resize-handle"]:hover,
+[data-panel-resize-handle-id="chat-resize-handle"]:active,
+[data-panel-resize-handle-id="chat-resize-handle"].dragging {
+  background-color: rgba(128, 128, 128, 0.5);
+  width: 6px !important;
+}
+
+[data-panel-resize-handle-id="chat-resize-handle"]::before {
+  content: '';
+  position: absolute;
+  left: -5px;
+  top: 0;
+  width: 15px;
+  height: 100%;
+  cursor: col-resize;
+}
+
+[data-panel-resize-handle-id="chat-resize-handle"]::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: calc(50% - 15px);
+  width: 6px;
+  height: 30px;
+  background-color: rgba(128, 128, 128, 0.4);
+  border-radius: 3px;
+}
 

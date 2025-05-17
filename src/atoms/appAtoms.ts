@@ -138,9 +138,6 @@ export const activeCaseAtom = atom(
 // Atom to control the visibility of the Upload Modal
 export const uploadModalOpenAtom = atom<boolean>(false);
 
-// Atom to trigger a reset/clear action in the ChatInterface
-export const resetChatTriggerAtom = atom(0); // Increment value to trigger 
-
 // --- NEW Atoms for Collapsible Nav and Editor Sidebar --- 
 
 export const isNavCollapsedAtom = atom(false);
@@ -154,7 +151,7 @@ export const activeEditorTypeAtom = atom<EditorType | null>(null);
 
 // --- NEW Atom for AI Draft Modal Context --- 
 export type AIDraftContextType = 'document' | 'general' | 'template' | null;
-export const aiDraftContextAtom = atom<AIDraftContextType>('general'); // Default to general? 
+export const aiDraftContextAtom = atom<AIDraftContextType>('general');
 
 // --- REMOVE Atoms for Template Editor Actions --- 
 /*
@@ -184,7 +181,10 @@ export const initialFilesForUploadAtom = atom<File[]>([]);
 export const commandPaletteOpenAtom = atom(false);
 
 // --- NEW: Atom for Template Import Modal ---
-export const templateImportModalOpenAtom = atom<boolean>(false);
+export const templateImportModalOpenAtom = atom(false);
+
+// Atom for managing the state of the deep research mode in chat
+export const deepResearchModeAtom = atom(false);
 
 // --- Background Task Management ---
 export type TaskStatus = 'pending' | 'running' | 'success' | 'error';
@@ -245,3 +245,15 @@ export const chatPreloadContextAtom = atom<ChatPreloadContext | null>(null);
 
 // *** NEW: Atom for multiple document IDs specifically selected for chat context ***
 export const chatDocumentContextIdsAtom = atom<string[]>([]);
+
+// --- Theme Atom ---
+// Updated ThemePreference to only include light and dark modes
+export type ThemePreference = 'light' | 'dark';
+
+export const themePreferenceAtom = atomWithStorage<ThemePreference>(
+  'themePreference',
+  'light' // Default theme set to 'light' as 'system' is removed
+);
+
+// Atom for controlling the visibility of the AI analysis result display
+export const aiAnalysisResultDisplayAtom = atom(false);

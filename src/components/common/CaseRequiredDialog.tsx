@@ -33,9 +33,9 @@ const CaseRequiredDialog: React.FC<CaseRequiredDialogProps> = ({
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Case Selection Required</DialogTitle>
+          <DialogTitle>Matter Selection Required</DialogTitle>
           <DialogDescription>
-            You need to select or create a case before you can {action}.
+            You need to select or create a matter before you can {action}.
           </DialogDescription>
         </DialogHeader>
         <div className="flex items-center justify-center py-4">
@@ -45,8 +45,8 @@ const CaseRequiredDialog: React.FC<CaseRequiredDialogProps> = ({
           <Button variant="outline" onClick={onClose} className="sm:order-1">
             Cancel
           </Button>
-          <Button onClick={handleGoToCases} className="sm:order-2">
-            Go to Case Manager
+          <Button variant="primary" onClick={handleGoToCases} className="sm:order-2">
+            Go to Matter Manager
           </Button>
         </DialogFooter>
       </DialogContent>

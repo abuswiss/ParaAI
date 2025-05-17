@@ -26,7 +26,7 @@ const AuthCard: React.FC<AuthCardProps> = ({
   // Removed canvas ref and useEffect for background animation
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background p-4">
+    <div className="min-h-screen flex items-center justify-center p-4 bg-background dark:bg-dark-background">
       {/* Removed canvas element */}
       
       <div className="w-full max-w-md relative z-10">
@@ -38,7 +38,7 @@ const AuthCard: React.FC<AuthCardProps> = ({
               <img 
                 src="/src/assets/gavel-icon.svg" 
                 alt="BenchWise Logo"
-                className="h-16 w-16 text-primary"
+                className="h-16 w-16 text-primary dark:text-dark-primary"
                 onError={(e) => {
                   const target = e.target as HTMLImageElement;
                   target.style.display = 'none';
@@ -53,18 +53,19 @@ const AuthCard: React.FC<AuthCardProps> = ({
               />
             </div>
           )}
-          <h1 className="text-2xl font-semibold text-foreground mb-1 tracking-tight">
-            BenchWise <span className="text-sm font-normal text-primary">(Alpha)</span>
+          <h1 className="text-2xl font-semibold text-foreground dark:text-dark-foreground mb-1 tracking-tight">
+            BenchWise <span className="text-sm font-normal text-primary dark:text-dark-primary">(Alpha)</span>
           </h1>
-          <p className="text-sm text-muted-foreground mb-6">
+          <p className="text-sm text-muted-foreground dark:text-dark-muted-foreground mb-6">
             {subtitle || "Your intelligent legal co-pilot."}
           </p>
         </div>
         
-        {/* Replaced custom div with shadcn/ui Card */}
+        {/* The Card component is already themed. We rely on its inherent styles. */}
         <Card className="w-full"> 
           <CardHeader className="text-center">
-            <CardTitle className="text-xl">{title}</CardTitle>
+            {/* CardTitle and CardDescription should inherit themed styles from Card component */}
+            <CardTitle>{title}</CardTitle>
             {subtitle && <CardDescription>{subtitle}</CardDescription>}
           </CardHeader>
           <CardContent>
@@ -77,7 +78,7 @@ const AuthCard: React.FC<AuthCardProps> = ({
         </Card>
         
         {/* Moved footer text outside card */}
-        <div className="mt-4 text-center text-xs text-muted-foreground">
+        <div className="mt-4 text-center text-xs text-muted-foreground dark:text-dark-muted-foreground">
           <span>Secure authentication powered by Paralegal AI</span>
         </div>
       </div>

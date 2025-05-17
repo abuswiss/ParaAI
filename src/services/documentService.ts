@@ -1,17 +1,7 @@
-import { supabase } from '../lib/supabaseClient';
+import { supabase } from '@/lib/supabaseClient';
 import { v4 as uuidv4 } from 'uuid';
 import { PostgrestError } from '@supabase/supabase-js';
-import { Document } from '@/types/document';
-
-// Define the comprehensive processing status type based on recommendations
-export type ProcessingStatus = 
-  | 'uploaded'
-  | 'text_extraction_pending'
-  | 'text_extracted'
-  | 'embedding_pending'
-  | 'completed'
-  | 'text_extraction_failed'
-  | 'embedding_failed';
+import { DocumentMetadata, ProcessingStatus } from '@/types/document';
 
 /**
  * Interface for document metadata reflecting schema recommendations
@@ -19,6 +9,7 @@ export type ProcessingStatus =
 export interface DocumentMetadata {
   id: string;
   filename: string;
+  title?: string | null;
   contentType: string;
   size: number; // Keep size, remove file_size
   uploadedAt: string;
@@ -34,6 +25,24 @@ export interface DocumentMetadata {
   ownerId: string; // Reflecting owner_id
   fileType?: string | null; // Existing field, allow null
   // is_fallback_content: boolean; // Add if confirmed needed by backend logic
+}
+
+// Helper function to convert HTML to plain text (client-side)
+function htmlToPlainText(html: string | null | undefined): string {
+  if (!html) return '';
+  if (typeof DOMParser === 'undefined') {
+    console.warn('DOMParser not available. Using regex for HTML to text conversion (basic).');
+    return html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+  }
+  try {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, 'text/html');
+    // Fallback to innerText if textContent is empty, then to empty string
+    return (doc.body.textContent || doc.body.innerText || "").replace(/\s+/g, ' ').trim();
+  } catch (e) {
+    console.error("Error parsing HTML for text extraction with DOMParser:", e);
+    return html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim(); // Fallback to regex
+  }
 }
 
 /**
@@ -177,23 +186,20 @@ export const getUserDocuments = async (
   caseId?: string
 ): Promise<{ data: DocumentMetadata[] | null; error: Error | null }> => {
   try {
-    // Get current user
     const { data: userData } = await supabase.auth.getUser();
-    const userId = userData?.user?.id;
+    const userIdAuth = userData?.user?.id;
     
-    if (!userId) {
+    if (!userIdAuth) {
       throw new Error('Not authenticated');
     }
     
-    // Create query filtering by owner_id
     let query = supabase
       .from('documents')
       .select('*')
-      .eq('owner_id', userId)
+      .eq('owner_id', userIdAuth)
       .eq('is_deleted', false)
       .order('uploaded_at', { ascending: false });
 
-    // Filter by case if provided
     if (caseId) {
       query = query.eq('case_id', caseId);
     }
@@ -204,33 +210,34 @@ export const getUserDocuments = async (
       throw error;
     }
 
-    // Transform database response to the DocumentMetadata interface
-    // Filter out documents with null storage_path or essential fields
-    const documents: DocumentMetadata[] = (data || []) // Ensure data is not null
-      .filter(doc => doc.storage_path !== null && doc.id && doc.filename && doc.owner_id) // Add checks for essential fields
-      .map((doc) => ({
-        id: doc.id,
-        filename: doc.filename,
-        contentType: doc.content_type || 'unknown', // Provide default
-        size: doc.size || 0, // Provide default
-        uploadedAt: doc.uploaded_at || new Date().toISOString(), // Provide default
-        caseId: doc.case_id,
-        storagePath: doc.storage_path as string, // Assert as string after filtering
-        processingStatus: doc.processing_status as ProcessingStatus || 'uploaded', // Assert type and provide default
-        extractedText: doc.extracted_text,
-        // Add missing fields from DocumentMetadata with defaults or actual values
-        editedContent: doc.edited_content, 
-        errorMessage: doc.error_message,
-        lastAccessedAt: doc.last_accessed_at,
-        version: doc.version,
-        isDeleted: doc.is_deleted ?? false, // Use ?? for nullish coalescing
-        ownerId: doc.owner_id, // Already checked in filter
-        fileType: doc.file_type,
+    const documents: DocumentMetadata[] = (data || [])
+      .filter(dbDoc => dbDoc.id && dbDoc.filename && dbDoc.owner_id) 
+      .map((dbDoc): DocumentMetadata => ({
+        id: dbDoc.id,
+        filename: dbDoc.filename,
+        title: dbDoc.title || undefined, // Assuming title might be a direct DB field
+        caseId: dbDoc.case_id || null,
+        userId: dbDoc.owner_id, // Map owner_id to userId
+        uploadDate: dbDoc.uploaded_at || new Date().toISOString(), // Map uploaded_at to uploadDate
+        fileType: dbDoc.file_type || null,
+        fileSize: dbDoc.file_size || dbDoc.size || 0, // Map file_size or size to fileSize
+        contentType: dbDoc.content_type || 'unknown',
+        processingStatus: dbDoc.processing_status as ProcessingStatus || 'uploaded',
+        extractedText: dbDoc.extracted_text || null,
+        editedContent: dbDoc.edited_content || null,
+        summary: dbDoc.summary || null, // Assuming summary might be a direct DB field
+        tags: dbDoc.tags || [], // Assuming tags might be a direct DB field
+        vectorId: dbDoc.vector_id || undefined, // Assuming vector_id might be a direct DB field
+        storagePath: dbDoc.storage_path || null,
+        errorMessage: dbDoc.error_message || null,
+        lastAccessedAt: dbDoc.last_accessed_at || null,
+        version: dbDoc.version || undefined,
+        isDeleted: dbDoc.is_deleted ?? false,
       }));
 
     return { data: documents, error: null };
   } catch (error) {
-    return handleError<DocumentMetadata[]>(error, 'getting user documents'); // Update return type in catch
+    return handleError<DocumentMetadata[]>(error, 'getting user documents');
   }
 };
 
@@ -241,42 +248,41 @@ export const getDocumentById = async (
   documentId: string
 ): Promise<{ data: DocumentMetadata | null; error: Error | null }> => {
   try {
-    // Assuming RLS is in place, we just need the ID
-    const { data, error } = await supabase
+    const { data: dbDoc, error } = await supabase
       .from('documents')
-      .select('*') // Fetch all columns
+      .select('*') 
       .eq('id', documentId)
-      .single(); // Expecting one result
+      .maybeSingle(); // Use maybeSingle to handle not found gracefully
 
-    if (error) {
-      if (error.code === 'PGRST116') { // Code for "Not found"
-        return { data: null, error: new Error('Document not found.') };
-      }
+    if (error && error.code !== 'PGRST116') { // PGRST116 is " dokładnie zero wierszy narusza ograniczenie" (zero rows) - ignore for maybeSingle if data is null
       throw error;
     }
 
-    if (!data) {
-        return { data: null, error: new Error('Document not found.') };
+    if (!dbDoc) {
+        return { data: null, error: null }; // Not found or other error already handled
     }
 
-    // Transform to DocumentMetadata interface
     const document: DocumentMetadata = {
-      id: data.id,
-      filename: data.filename,
-      contentType: data.content_type,
-      size: data.size,
-      uploadedAt: data.uploaded_at,
-      caseId: data.case_id,
-      storagePath: data.storage_path,
-      processingStatus: data.processing_status,
-      extractedText: data.extracted_text,
-      editedContent: data.edited_content,
-      errorMessage: data.error_message,
-      lastAccessedAt: data.last_accessed_at,
-      version: data.version,
-      isDeleted: data.is_deleted,
-      ownerId: data.owner_id,
-      fileType: data.file_type,
+      id: dbDoc.id,
+      filename: dbDoc.filename,
+      title: dbDoc.title || undefined,
+      caseId: dbDoc.case_id || null,
+      userId: dbDoc.owner_id,
+      uploadDate: dbDoc.uploaded_at || new Date().toISOString(),
+      fileType: dbDoc.file_type || null,
+      fileSize: dbDoc.file_size || dbDoc.size || 0,
+      contentType: dbDoc.content_type || 'unknown',
+      processingStatus: dbDoc.processing_status as ProcessingStatus || 'uploaded',
+      extractedText: dbDoc.extracted_text || null,
+      editedContent: dbDoc.edited_content || null,
+      summary: dbDoc.summary || null,
+      tags: dbDoc.tags || [],
+      vectorId: dbDoc.vector_id || undefined,
+      storagePath: dbDoc.storage_path || null,
+      errorMessage: dbDoc.error_message || null,
+      lastAccessedAt: dbDoc.last_accessed_at || null,
+      version: dbDoc.version || undefined,
+      isDeleted: dbDoc.is_deleted ?? false,
     };
 
     return { data: document, error: null };
@@ -292,15 +298,20 @@ export const getDocumentUrl = async (
   storagePath: string
 ): Promise<{ data: string | null; error: Error | null }> => {
   try {
-    const { data, error } = await supabase.storage
+    // If using signed URLs (more secure):
+    const { data: urlData, error: urlError } = await supabase.storage
       .from('documents')
-      .createSignedUrl(storagePath, 60); // 1 minute expiry
+      .createSignedUrl(storagePath, 60 * 60); // URL valid for 1 hour
 
-    if (error) {
-      throw error;
+    if (urlError) throw urlError;
+
+    const url = urlData?.signedUrl;
+    
+    if (!url) {
+        throw new Error("Could not retrieve document URL.");
     }
 
-    return { data: data.signedUrl, error: null };
+    return { data: url, error: null };
   } catch (error) {
     return handleError<string>(error, 'getting document URL');
   }
@@ -341,28 +352,26 @@ export const processAndAnalyzeDocument = async (
   // Define a more specific return type for analysis results if possible, using Record<string, unknown> as placeholder
 ): Promise<{ success: boolean; data?: Record<string, unknown>; error: Error | null }> => {
   try {
-    // First ensure the document has been processed
-    const { data: document } = await getDocumentById(documentId);
-    
-    if (!document) {
-      throw new Error('Document not found');
+    const { error: invokeError } = await supabase.functions.invoke('analyze-document', {
+      body: { documentId, analysisType },
+    });
+
+    if (invokeError) {
+      console.error(`Error invoking analyze-document for type ${analysisType}:`, invokeError);
+      return { success: false, error: new Error(invokeError.message) };
     }
-    
-    // Now we'd call our analysis service to perform the specific analysis
-    // This is a placeholder for now and would be implemented with the 
-    // documentAnalysisService in a real implementation
-    const analysisResult = {
-      documentId,
-      analysisType,
-      timestamp: new Date().toISOString(),
-      result: `Sample ${analysisType} analysis for document ${documentId}`
-    };
-    
-    return { success: true, data: analysisResult, error: null };
-  } catch (error) {
+
+    // The function call is successful, but the actual analysis result might be fetched
+    // by another mechanism or the function updates the document record directly.
+    // For this example, let's assume success means the function was invoked.
+    // You might need to adjust this based on how your backend function behaves.
+    // If the backend returns data directly, you'd capture and return it.
+    // For now, returning undefined data but success.
+    return { success: true, data: undefined, error: null };
+  } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Unknown error processing and analyzing document';
-    console.error('Error processing and analyzing document:', message);
-    return { success: false, data: undefined, error: error instanceof Error ? error : new Error(message) };
+    console.error('Error in processAndAnalyzeDocument:', message);
+    return { success: false, error: new Error(message) };
   }
 };
 
@@ -371,45 +380,66 @@ export const processAndAnalyzeDocument = async (
  */
 export const updateDocument = async (
   documentId: string,
-  updates: Partial<Pick<DocumentMetadata, 'extractedText' | 'editedContent' | 'filename' | 'processingStatus' | 'errorMessage' | 'lastAccessedAt' | 'version'>>
+  updates: Partial<Pick<DocumentMetadata, 'extractedText' | 'editedContent' | 'filename' | 'processingStatus' | 'errorMessage' | 'lastAccessedAt' | 'version' | 'caseId'>>
 ): Promise<{ success: boolean; error: Error | null }> => {
   try {
-    if (!updates || Object.keys(updates).length === 0) {
-      console.warn('updateDocument called with no updates for id:', documentId);
-      return { success: true, error: null };
+    const updatePayload: Record<string, any> = { ...updates };
+
+    // If editedContent is being updated, also update extractedText and processingStatus
+    if (updates.editedContent !== undefined) { // Check specifically for editedContent updates
+      const plainText = htmlToPlainText(updates.editedContent);
+      updatePayload.extracted_text = plainText;
+      // Only update status if it's not already in a final or failed state from backend processing
+      // and if there's no storage_path that implies backend processing is pending/active.
+      // This logic might need refinement based on how storagePath is used for non-uploaded docs.
+      // For now, if editedContent is updated, we assume it's the source of truth for text.
+      if (updates.processingStatus === undefined || 
+          !['text_extracted', 'completed', 'embedding_pending', 'text_extraction_failed', 'embedding_failed'].includes(updates.processingStatus)) {
+          // Further check: if we are certain this document type *never* goes to backend for extraction (e.g. no storage_path or specific type)
+          // we can more confidently set it to 'text_extracted'.
+          // Let's assume for now that if editedContent is updated, this is the primary text.
+          updatePayload.processing_status = 'text_extracted';
+      }
     }
-
-    // *** FIX: Define updateData type more strictly ***
-    const updateData: { [key: string]: string | number | boolean | null | ProcessingStatus } = {};
-
-    // Map known fields, potentially handling column name differences
-    if (updates.filename !== undefined) updateData.filename = updates.filename;
-    if (updates.extractedText !== undefined) updateData.extracted_text = updates.extractedText;
-    if (updates.editedContent !== undefined) updateData.edited_content = updates.editedContent; // Use correct snake_case if DB differs
-    if (updates.processingStatus !== undefined) updateData.processing_status = updates.processingStatus;
-    if (updates.errorMessage !== undefined) updateData.error_message = updates.errorMessage; // Use correct snake_case if DB differs
-    if (updates.lastAccessedAt !== undefined) updateData.last_accessed_at = updates.lastAccessedAt; // Use correct snake_case if DB differs
-    if (updates.version !== undefined) updateData.version = updates.version;
-
-    // Always update timestamp
-    updateData.updated_at = new Date().toISOString();
+    
+    // Convert our camelCase keys to snake_case for Supabase, if not already handled by a general mapper
+    // Example: lastAccessedAt -> last_accessed_at
+    if (updatePayload.lastAccessedAt) {
+        updatePayload.last_accessed_at = updatePayload.lastAccessedAt;
+        delete updatePayload.lastAccessedAt;
+    }
+    if (updatePayload.processingStatus) {
+        updatePayload.processing_status = updatePayload.processingStatus;
+        delete updatePayload.processingStatus;
+    }
+    if (updatePayload.editedContent !== undefined) {
+        updatePayload.edited_content = updatePayload.editedContent;
+        delete updatePayload.editedContent;
+    }
+     if (updatePayload.extractedText !== undefined) { // This might be set directly by this function
+        updatePayload.extracted_text = updatePayload.extractedText;
+        delete updatePayload.extractedText; // remove camelCase if it was set
+    }
+    if (updatePayload.errorMessage) {
+        updatePayload.error_message = updatePayload.errorMessage;
+        delete updatePayload.errorMessage;
+    }
+     if (updatePayload.caseId !== undefined) { // Handle caseId
+        updatePayload.case_id = updatePayload.caseId;
+        delete updatePayload.caseId;
+    }
 
     const { error } = await supabase
       .from('documents')
-      .update(updateData)
+      .update(updatePayload)
       .eq('id', documentId);
 
     if (error) {
-      console.error(`Error updating document ${documentId}:`, error);
       throw error;
     }
-
-    console.log(`Document ${documentId} updated successfully.`);
     return { success: true, error: null };
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Unknown error updating document';
-    console.error('Error updating document:', message);
-    return { success: false, error: error instanceof Error ? error : new Error(message) };
+    return handleError<never>(error, `updating document ${documentId}`);
   }
 };
 
@@ -452,53 +482,99 @@ export const uploadAndProcessDocument = async (
  * Creates a new document record in the database, typically for manually created documents.
  */
 export const createDocument = async (
-  userId: string,
-  caseId: string | null,
-  initialData: {
+  docData: {
+    userId: string;
+    caseId: string | null;
     filename?: string;
-    content?: string;
+    content?: string; // This is expected to be HTML for AI-generated content
+    templateId?: string;
+    storagePath?: string | null; // If provided, backend extraction is expected
+    contentType?: string; // e.g., 'text/html' for AI content, or from file upload
+    fileType?: string;
+    fileSize?: number;
+    initialProcessingStatus?: ProcessingStatus; // Allow overriding initial status
   }
-): Promise<{ data: { id: string } | null; error: PostgrestError | Error | null }> => {
+): Promise<{ data: { id: string; filename: string } | null; error: PostgrestError | Error | null }> => {
   try {
-    if (!userId) {
-      throw new Error('User ID is required to create a document.');
+    // Log received userId and current auth.uid() for comparison
+    console.log(`documentService: createDocument - Received userId for owner_id: ${docData.userId}`);
+    const { data: { user: authUser }, error: authError } = await supabase.auth.getUser();
+    if (authError) {
+      console.error("documentService: createDocument - Error fetching current auth user:", authError.message);
+    } else {
+      console.log(`documentService: createDocument - Current auth.uid() from supabase.auth.getUser(): ${authUser?.id}`);
+    }
+    if (docData.userId !== authUser?.id) {
+      console.error(`CRITICAL RLS DEBUG: Potential userId mismatch! 
+Passed to createDocument for owner_id: ${docData.userId} 
+Current auth.uid() from supabase.auth.getUser(): ${authUser?.id}`);
     }
 
-    const finalFilename = initialData.filename || 'Untitled Document';
+    const { 
+      userId, 
+      caseId, 
+      filename: inputFilename, 
+      content, // HTML content
+      templateId, 
+      storagePath, 
+      contentType,
+      fileType,
+      fileSize,
+      initialProcessingStatus
+    } = docData;
 
-    // Infer file_type from filename
-    const fileExtension = finalFilename.includes('.') ? finalFilename.split('.').pop()?.toLowerCase() : 'txt';
-    const inferredFileType = fileExtension || 'txt'; // Default to txt if extension is missing
+    const effectiveFilename = inputFilename || (content ? 'AI Generated Document' : 'New Document');
+    
+    const documentRecord: Partial<DocumentMetadata> = {
+      owner_id: userId,
+      case_id: caseId,
+      filename: effectiveFilename,
+      template_id: templateId,
+      // Default to an "empty" or placeholder storage path if not provided,
+      // to differentiate from actual uploaded files if needed.
+      storage_path: storagePath === undefined ? null : storagePath, 
+      content_type: contentType || (content ? 'text/html' : 'application/octet-stream'),
+      file_type: fileType || (inputFilename ? inputFilename.split('.').pop() : (content ? 'html' : undefined)),
+      file_size: fileSize || (content ? content.length : 0),
+      is_deleted: false,
+      uploaded_at: new Date().toISOString(),
+      // version: 1, // Initialize version if using this field
+      // last_accessed_at: new Date().toISOString(), // Initialize if using
+    };
 
-    // Insert record into documents table
-    const { data, error: insertError } = await supabase
+    // If HTML content is provided directly AND there's no storagePath that implies backend file processing,
+    // extract text and set processing status accordingly.
+    if (content && !storagePath) {
+      documentRecord.edited_content = content; // Store the HTML
+      documentRecord.extracted_text = htmlToPlainText(content);
+      documentRecord.processing_status = initialProcessingStatus || 'text_extracted';
+    } else if (storagePath) {
+      // If there's a storagePath, assume backend will handle extraction (e.g., via 'uploaded' status)
+      documentRecord.processing_status = initialProcessingStatus || 'uploaded'; 
+    } else {
+      // Default for new empty documents without content or storage path
+      documentRecord.processing_status = initialProcessingStatus || 'uploaded'; // Or perhaps a new status like 'draft'
+      documentRecord.edited_content = content || ''; // Ensure edited_content is at least an empty string
+      documentRecord.extracted_text = htmlToPlainText(content || '');
+    }
+
+
+    const { data, error } = await supabase
       .from('documents')
-      .insert({
-        owner_id: userId,
-        case_id: caseId || null,
-        filename: finalFilename,
-        content_type: 'text/plain', // Content is provided directly
-        file_type: inferredFileType, // ADDED: Infer file type from filename
-        file_size: initialData.content?.length || 0, // CORRECTED: Use file_size
-        extracted_text: initialData.content || '',
-        edited_content: initialData.content || '', // Start with same content
-        processing_status: 'completed' as ProcessingStatus,
-        is_deleted: false,
-        uploaded_at: new Date().toISOString(),
-        // No storage path needed initially for text-based creation
-        storage_path: 'ai-generated' // ADDED: Provide a placeholder for non-null constraint
-      })
-      .select('id')
+      .insert(documentRecord)
+      .select('id, filename')
       .single();
 
-    if (insertError) {
-      console.error('Error inserting new document record:', insertError);
-      throw insertError;
+    if (error) {
+      console.error('Error creating document record:', error);
+      throw error;
     }
 
-    return { data, error: null };
+    return { data: data ? { id: data.id, filename: data.filename } : null, error: null };
   } catch (error) {
-    return handleError(error, 'createDocument');
+     const typedError = error as PostgrestError | Error;
+    console.error('Exception in createDocument:', typedError);
+    return { data: null, error: typedError };
   }
 };
 
@@ -630,37 +706,46 @@ export const getDocumentsMetadataByIds = async (
   documentIds: string[]
 ): Promise<{ data: DocumentMetadata[] | null; error: Error | null }> => {
   if (!documentIds || documentIds.length === 0) {
-    return { data: [], error: null }; // Return empty array if no IDs provided
+    return { data: [], error: null };
   }
-
   try {
-    // Assuming RLS restricts access to documents the user owns or has access to via case
-    const { data, error } = await supabase
+    const { data: supabaseData, error } = await supabase
       .from('documents')
-      .select('id, filename, case_id') // Select only needed fields (id, filename, maybe case_id)
+      .select('*')
       .in('id', documentIds)
-      .eq('is_deleted', false); // Ensure we don't fetch deleted docs
+      .eq('is_deleted', false);
 
     if (error) {
-      console.error('Error fetching documents by IDs:', error);
       throw error;
     }
+    if (!supabaseData) {
+      return { data: [], error: null };
+    }
 
-    // Minimal transformation, primarily ensuring type safety
-    const documents: DocumentMetadata[] = (data || []).map((doc) => ({
-      id: doc.id,
-      filename: doc.filename || 'Untitled Document', // Provide default
-      // Include other essential fields if needed, but keep it minimal for this use case
-      // Defaulting other fields as they are not explicitly fetched or needed for display here
-      contentType: '',
-      size: 0,
-      uploadedAt: new Date().toISOString(),
-      caseId: doc.case_id,
-      storagePath: null,
-      processingStatus: 'completed',
-      isDeleted: false,
-      ownerId: '', // Not fetched, assumed RLS handles access
-    }));
+    const documents: DocumentMetadata[] = supabaseData
+      .filter(dbDoc => dbDoc.id && dbDoc.filename && dbDoc.owner_id)
+      .map((dbDoc): DocumentMetadata => ({
+        id: dbDoc.id,
+        filename: dbDoc.filename,
+        title: dbDoc.title || undefined,
+        caseId: dbDoc.case_id || null,
+        userId: dbDoc.owner_id,
+        uploadDate: dbDoc.uploaded_at || new Date().toISOString(),
+        fileType: dbDoc.file_type || null,
+        fileSize: dbDoc.file_size || dbDoc.size || 0,
+        contentType: dbDoc.content_type || 'unknown',
+        processingStatus: dbDoc.processing_status as ProcessingStatus || 'uploaded',
+        extractedText: dbDoc.extracted_text || null,
+        editedContent: dbDoc.edited_content || null,
+        summary: dbDoc.summary || null,
+        tags: dbDoc.tags || [],
+        vectorId: dbDoc.vector_id || undefined,
+        storagePath: dbDoc.storage_path || null,
+        errorMessage: dbDoc.error_message || null,
+        lastAccessedAt: dbDoc.last_accessed_at || null,
+        version: dbDoc.version || undefined,
+        isDeleted: dbDoc.is_deleted ?? false,
+      }));
 
     return { data: documents, error: null };
   } catch (error) {

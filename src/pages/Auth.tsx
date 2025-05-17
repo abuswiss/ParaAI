@@ -9,8 +9,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { Button } from "@/components/ui/Button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/Tooltip";
 import { Info } from 'lucide-react';
-import { Dialog, DialogTrigger, DialogContent } from "@/components/ui/Dialog";
-import AboutInfoModalContent from '../components/common/AboutInfoModalContent';
+import ParticleBackground from '../components/common/ParticleBackground';
 
 const Auth: React.FC = () => {
   const { user, loading } = useAuth();
@@ -18,12 +17,12 @@ const Auth: React.FC = () => {
 
   useEffect(() => {
     if (user && !loading) {
-      navigate('/dashboard');
+      navigate('/app/dashboard');
     }
   }, [user, loading, navigate]);
 
   const handleAuthSuccess = () => {
-    navigate('/dashboard');
+    navigate('/app/dashboard');
   };
 
   if (loading) {
@@ -35,32 +34,17 @@ const Auth: React.FC = () => {
   }
 
   return (
-    <div className="relative min-h-screen bg-background">
-      <div className="absolute top-4 right-4 z-40">
-        <Dialog>
-          <DialogTrigger asChild>
-            <TooltipProvider delayDuration={100}>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button 
-                    variant="ghost" 
-                    size="icon" 
-                  >
-                    <Info className="h-5 w-5" />
-                    <span className="sr-only">About Paralegal AI</span>
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>
-                  <p>About Paralegal AI & Quick Help</p>
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
-          </DialogTrigger>
-          <AboutInfoModalContent />
-        </Dialog>
+    <div className="relative min-h-screen overflow-hidden bg-transparent">
+      {/* Particle Background */}
+      <ParticleBackground />
+
+      {/* Alpha Release Banner */}
+      <div className="absolute top-0 left-0 bg-yellow-400 text-yellow-900 px-3 py-1 text-xs font-bold rounded-br-md z-50">
+        ALPHA RELEASE
       </div>
       <AuthCard 
         title="Sign in to your account" 
+        className="z-10 relative"
       >
         <div className="p-5">
           <LegalDisclaimer />

@@ -69,9 +69,12 @@ const SelectTemplateModal: React.FC<SelectTemplateModalProps> = ({
               <ul className="space-y-2">
                 {templates.map((template) => (
                   <li key={template.id}>
-                    <button 
-                      onClick={() => onSelect(template.id)}
-                      className="w-full text-left p-3 rounded-md border border-neutral-200 dark:border-gray-700 hover:bg-neutral-100 dark:hover:bg-gray-700/50 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-1 dark:focus:ring-offset-gray-800 transition-colors duration-150 flex items-start space-x-3"
+                    <button
+                      type="button"
+                      className="w-full text-left p-3 rounded-md border border-neutral-200 dark:border-gray-700 hover:bg-secondary dark:hover:bg-dark-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-1 dark:focus:ring-offset-gray-800 transition-colors duration-150 flex items-start space-x-3"
+                      onClick={() => {
+                        onSelect(template.id);
+                      }}
                     >
                       <FileText className="h-5 w-5 mt-0.5 text-primary flex-shrink-0" />
                       <div>

@@ -57,7 +57,7 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
             <p>An unexpected error occurred.</p>
             {/* Optionally display error message in dev mode */}
             {process.env.NODE_ENV === 'development' && this.state.error && (
-              <pre className="mt-2 text-xs whitespace-pre-wrap bg-background/50 p-2 rounded">
+              <pre className="mt-2 text-xs whitespace-pre-wrap bg-background/50 dark:bg-dark-background/50 p-2 rounded">
                 {this.state.error.message}
               </pre>
             )}

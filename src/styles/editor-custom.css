@@ -1,0 +1,484 @@
+/* Global Custom Editor Styles */
+
+:root {
+  --highlight-opacity: 0.6;
+  --highlight-opacity-hover: 0.9;
+  --highlight-transition: background-color 0.3s ease, border-color 0.3s ease, opacity 0.3s ease;
+
+  /* Base Colors for Analysis Highlights */
+  --highlight-entity-bg: rgba(173, 216, 230, var(--highlight-opacity)); /* Light blue */
+  --highlight-clause-bg: rgba(144, 238, 144, var(--highlight-opacity)); /* Light green */
+  --highlight-risk-bg: rgba(255, 192, 203, var(--highlight-opacity)); /* Light pink */
+  --highlight-timeline-bg: rgba(216, 191, 216, var(--highlight-opacity)); /* Thistle */
+  --highlight-privileged-bg: rgba(255, 100, 100, 0.3); /* Reddish for privileged terms */
+
+  /* Risk Severity Borders & Backgrounds */
+  --highlight-risk-low-border: 2px solid rgba(60, 179, 113, 0.7);
+  --highlight-risk-medium-border: 2px solid rgba(255, 165, 0, 0.8);
+  --highlight-risk-high-bg: rgba(255, 99, 71, 0.5);
+  --highlight-risk-high-border: 2px solid rgba(220, 20, 60, 0.8);
+  --highlight-risk-critical-bg: rgba(220, 20, 60, 0.6);
+  --highlight-risk-critical-border: 3px solid rgba(139, 0, 0, 0.9);
+  
+  /* Specific Entity Types (Examples - can be expanded or modified) */
+  /* These are used if analysis results provide more granular entity types */
+  --highlight-entity-person-bg: rgba(173, 216, 230, 0.7);
+  --highlight-entity-organization-bg: rgba(173, 216, 230, 0.7);
+  --highlight-entity-organization-border: 1px dotted steelblue;
+  --highlight-entity-date-border: 1px dashed gray;
+  --highlight-entity-location-bg: rgba(240, 230, 140, 0.6);
+  --highlight-entity-legal_term-bg: rgba(204, 182, 221, 0.5); /* Light purple */
+  --highlight-entity-legal_term-border: 1px dotted purple;
+}
+
+/* Base ProseMirror styling not covered by Tailwind Prose */
+.ProseMirror {
+  /* Tailwind's `prose` class handles most typography. */
+  /* Add specific overrides or essential base styles here if needed. */
+  line-height: 1.6; /* Example: if specific line-height is desired over prose default */
+}
+
+.ProseMirror:focus {
+  outline: none; /* Standard practice, Tailwind prose might also do this */
+}
+
+/* Tiptap Placeholder Style (ensure it uses themed color if possible) */
+.ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  color: hsl(var(--muted-foreground)); /* Using themed muted foreground color */
+  pointer-events: none;
+  height: 0;
+}
+
+/* Basic <mark> tag styling if not using specific analysis highlights */
+/* This can be for generic user-initiated highlights via a toolbar button */
+.ProseMirror mark {
+  background-color: #ffe066; /* A common yellow highlight */
+  padding: 0.1em 0;
+  border-radius: 0.2em;
+}
+
+/* Ensure Tailwind prose styles don't override our specific mark backgrounds */
+.prose :where(mark):not(:where([class~="not-prose"] *)) {
+    background-color: inherit; /* Let our mark/span styles take precedence */
+    color: inherit;
+    padding: inherit;
+    border-radius: inherit;
+}
+
+/* --------- DETAILED ANALYSIS HIGHLIGHT STYLES --------- */
+
+/* Base style for all analysis highlights (applied by Tiptap marks) */
+.analysis-highlight {
+  border-radius: 3px;
+  padding: 0.1em 0.2em;
+  margin: 0 -0.1em; /* Offset padding to keep text flow */
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+  transition: var(--highlight-transition);
+  opacity: var(--highlight-opacity);
+  border-bottom: 1px solid transparent; /* Base for type-specific colored border */
+}
+
+.analysis-highlight:hover {
+  opacity: var(--highlight-opacity-hover);
+  /* CSS tooltips removed in favor of JS-based tooltips for better UX/accessibility */
+}
+
+/* Type-specific styles (applied as additional classes on the mark) */
+.analysis-highlight.type-entities {
+  background-color: var(--highlight-entity-bg);
+  border-bottom-color: rgba(59, 130, 246, 0.6); /* Blue accent for entities */
+}
+
+.analysis-highlight.type-clauses {
+  background-color: var(--highlight-clause-bg);
+  border-bottom-color: rgba(234, 179, 8, 0.7); /* Yellow accent for clauses */
+}
+
+.analysis-highlight.type-risks {
+  background-color: var(--highlight-risk-bg);
+  border-bottom-color: rgba(239, 68, 68, 0.6); /* Red accent for risks */
+}
+
+.analysis-highlight.type-timeline {
+  background-color: var(--highlight-timeline-bg);
+  border-bottom-color: rgba(34, 197, 94, 0.6); /* Green accent for timeline */
+}
+
+.analysis-highlight.type-privilegedTerms {
+  background-color: var(--highlight-privileged-bg);
+  border-bottom-color: rgba(168, 85, 247, 0.6); /* Purple accent for privileged terms */
+  border-style: dashed;
+}
+
+/* Risk severity modifiers (applied as additional classes) */
+.analysis-highlight.risk-low {
+  border-bottom: var(--highlight-risk-low-border);
+}
+
+.analysis-highlight.risk-medium {
+  border-bottom: var(--highlight-risk-medium-border);
+}
+
+.analysis-highlight.risk-high {
+  background-color: var(--highlight-risk-high-bg);
+  border-bottom: var(--highlight-risk-high-border);
+  font-weight: 500; /* Slightly bolder for high risk */
+}
+
+.analysis-highlight.risk-critical {
+  background-color: var(--highlight-risk-critical-bg);
+  border-bottom: var(--highlight-risk-critical-border);
+  font-weight: 600; /* Bolder for critical risk */
+}
+
+/* Active highlight styling (e.g., when an analysis item is clicked in a side panel) */
+.analysis-highlight.active-highlight {
+  background-color: rgba(115, 180, 255, 0.3); 
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.5), 0 0 10px rgba(59, 130, 246, 0.5);
+  position: relative; /* Needed for z-index and potential pseudo-elements if added later */
+  animation: highlight-pulse 1.5s ease-in-out infinite;
+  z-index: 5; /* Ensure active highlight is visually prominent */
+}
+
+@keyframes highlight-pulse {
+  0%, 100% { box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.5), 0 0 5px rgba(59, 130, 246, 0.3); }
+  50% { box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.7), 0 0 10px rgba(59, 130, 246, 0.5); }
+}
+
+/* Style for template placeholders/variables if using these specific classes */
+.placeholder-highlight {
+  background-color: rgba(255, 224, 130, 0.5); 
+  border-bottom: 1px dashed #f0ad4e;
+  padding: 0px 2px;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.placeholder-highlight:hover {
+  background-color: rgba(255, 204, 100, 0.7);
+}
+
+.variable-highlight {
+  background-color: hsla(var(--primary) / 0.15);
+  padding: 0.1em 0.3em;
+  border-radius: 4px;
+  cursor: pointer; 
+  transition: background-color 0.2s ease-in-out;
+  border-bottom: 1px dashed hsla(var(--primary) / 0.5);
+}
+
+.variable-highlight:hover {
+  background-color: hsla(var(--primary) / 0.25);
+}
+
+.filled-variable {
+  color: #2563eb !important; /* Tailwind blue-600, ensure it overrides prose */
+  font-style: italic;
+  background: none !important; /* Remove any background from variable-highlight */
+  border: none !important; /* Remove any border from variable-highlight */
+}
+
+/* Style for AI inline suggestions (if using this class) */
+.ai-suggestion-highlight {
+  background-color: rgba(200, 255, 200, 0.5); /* Light green */
+  border-bottom: 1px dashed green;
+  padding: 1px 2px;
+  border-radius: 3px;
+}
+
+@keyframes fadeIn { /* Generic fadeIn, keep if ai-suggestion-highlight or others use it */
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* General highlight for Tiptap's native Highlight extension (activated by toolbar) */
+.highlight {
+  background-color: yellow; /* Default Tiptap highlight color */
+  /* Custom colors can be passed via mark attributes with multicolor: true */
+}
+
+/* Old .tiptap-editor-wrapper prefixed styles and very generic ProseMirror typography */
+/* have been removed in favor of Tailwind prose and more targeted styles above. */
+/* Old .tiptap-bubble-menu, .tiptap-floating-menu, .editor-toolbar, .editor-container, */
+/* .editor-scroll-area, and .tiptap-editor-content styles removed as new components */
+/* (e.g., NewTiptapEditor and its EditorToolbar) will use Tailwind or their own scoped styles. */
+/* Most verbose/redundant/commented-out highlight selectors also removed. */
+
+/* Add subtle pulse animation for placeholder navigation buttons */
+@keyframes subtlePulse {
+  0% { box-shadow: 0 0 0 0 rgba(var(--primary-rgb), 0.4); }
+  70% { box-shadow: 0 0 0 5px rgba(var(--primary-rgb), 0); }
+  100% { box-shadow: 0 0 0 0 rgba(var(--primary-rgb), 0); }
+}
+
+.tiptap-editor-wrapper .placeholder-nav-button:not(:disabled):hover,
+.tiptap-editor-wrapper .placeholder-nav-button:not(:disabled):focus-visible {
+   /* Add a subtle pulse on hover/focus for discoverability */
+  animation: subtlePulse 1.5s infinite cubic-bezier(0.66, 0, 0, 1);
+}
+
+/* Tooltip-like text on hover */
+/* Consider if this is still the desired UX or if a proper tooltip component is used */
+.analysis-highlight::after {
+  content: attr(data-tooltip-text); 
+  position: absolute;
+  left: 50%;
+  bottom: 100%;
+  transform: translateX(-50%);
+  margin-bottom: 5px; /* Space between text and tooltip */
+  padding: 5px 8px;
+  background-color: #333;
+  color: white;
+  font-size: 0.8em;
+  border-radius: 4px;
+  white-space: nowrap;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.2s ease, visibility 0.2s ease;
+  z-index: 1000; /* Ensure tooltip is on top */
+}
+
+.analysis-highlight:hover::after {
+  opacity: 1;
+  visibility: visible;
+}
+
+.ProseMirror p {
+  margin-bottom: 0.75em;
+}
+
+.ProseMirror h1,
+.ProseMirror h2,
+.ProseMirror h3,
+.ProseMirror h4,
+.ProseMirror h5,
+.ProseMirror h6 {
+  margin-top: 1.2em;
+  margin-bottom: 0.5em;
+  font-weight: 600;
+}
+
+.ProseMirror ul,
+.ProseMirror ol {
+  margin-bottom: 0.75em;
+  padding-left: 1.5em;
+}
+
+.ProseMirror blockquote {
+  border-left: 3px solid #ccc;
+  margin-left: 0;
+  padding-left: 1em;
+  font-style: italic;
+}
+
+.ProseMirror pre {
+  background: #f4f4f4;
+  border-radius: 4px;
+  padding: 0.75em 1em;
+  white-space: pre-wrap;
+  font-family: monospace;
+}
+
+.ProseMirror code {
+  background: rgba(0,0,0,0.05);
+  padding: 0.1em 0.3em;
+  border-radius: 2px;
+  font-family: monospace;
+}
+
+/* Styles for Bubble Menu & Floating Menu */
+/* Review if NewTiptapEditor's EditorToolbar or other new menu components use these classes */
+/* Or if they use Shadcn/ui components that have their own styling */
+.tiptap-bubble-menu {
+  display: flex;
+  background-color: #333; /* Dark background */
+  padding: 0.3rem;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  z-index: 20; /* Ensure it's above editor content */
+}
+
+.tiptap-bubble-menu button {
+  border: none;
+  background: none;
+  color: #fff; /* White icons/text */
+  font-size: 0.9rem;
+  font-weight: 500;
+  padding: 0.4rem 0.6rem;
+  margin: 0 0.1rem;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.tiptap-bubble-menu button:hover {
+  background-color: #555; /* Slightly lighter dark on hover */
+}
+.tiptap-bubble-menu button.is-active {
+  background-color: #007bff; /* Primary color for active state */
+  color: white;
+}
+
+.tiptap-floating-menu {
+  /* Similar styling as bubble menu, or could be different */
+  display: flex;
+  flex-direction: column; /* Usually a list of block type options */
+  background-color: white;
+  padding: 0.2rem;
+  border-radius: 6px;
+  border: 1px solid #ddd;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+  z-index: 20;
+}
+
+.tiptap-floating-menu button {
+  border: none;
+  background: none;
+  text-align: left;
+  font-size: 0.9rem;
+  padding: 0.5rem 0.8rem;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.tiptap-floating-menu button:hover {
+  background-color: #f0f0f0; /* Light gray on hover */
+}
+
+/* Styles for a generic editor toolbar if these classes are used by the new EditorToolbar */
+.editor-toolbar {
+  display: flex;
+  align-items: center;
+  padding: 0.5rem;
+  background-color: #f8f9fa; /* Light background for toolbar */
+  border-bottom: 1px solid #dee2e6; /* Separator line */
+  flex-wrap: wrap; /* Allow wrapping if many buttons */
+}
+
+.editor-toolbar-group {
+  display: flex;
+  align-items: center;
+  margin-right: 0.5rem; /* Spacing between button groups */
+  padding-right: 0.5rem;
+  border-right: 1px solid #ced4da; /* Separator for groups */
+}
+
+.editor-toolbar-group:last-child {
+  border-right: none;
+  margin-right: 0;
+}
+
+.editor-toolbar button,
+.editor-toolbar .DropdownMenuTrigger { /* Assuming Shadcn DropdownMenuTrigger */
+  background: none;
+  border: none;
+  padding: 0.4rem; /* Sufficient click area */
+  margin: 0 0.1rem;
+  border-radius: 4px;
+  cursor: pointer;
+  color: #495057; /* Icon/text color */
+  transition: background-color 0.2s ease, color 0.2s ease;
+  display: inline-flex; /* Align icon and potential text */
+  align-items: center;
+  justify-content: center;
+}
+
+.editor-toolbar button:hover,
+.editor-toolbar .DropdownMenuTrigger:hover {
+  background-color: #e9ecef; /* Light hover */
+  color: #212529;
+}
+.editor-toolbar button.is-active,
+.editor-toolbar .DropdownMenuTrigger[data-state="open"] { /* Active state for buttons and open state for dropdown */
+  background-color: #007bff; /* Primary color */
+  color: white;
+}
+
+.editor-toolbar svg {
+  width: 1.1em; /* Adjust icon size */
+  height: 1.1em;
+}
+
+/* Styling for Shadcn DropdownMenu within the toolbar */
+.editor-toolbar .DropdownMenuContent {
+  /* Standard Shadcn content styling will apply, can add overrides if needed */
+}
+.editor-toolbar .DropdownMenuItem {
+  /* Standard Shadcn item styling, can add overrides */
+  font-size: 0.9rem;
+}
+.editor-toolbar .DropdownMenuItem svg {
+  margin-right: 0.5rem;
+  width: 1em;
+  height: 1em;
+}
+
+
+/* General Editor Container - if used by new structure */
+.editor-container {
+  border: 1px solid #ccc;
+  border-radius: 5px;
+  overflow: hidden; /* To contain rounded corners with toolbar */
+  display: flex;
+  flex-direction: column;
+  height: 100%; /* Or a specific height */
+}
+
+.editor-scroll-area { /* If editor content itself needs to scroll within a fixed height container */
+  flex-grow: 1;
+  overflow-y: auto;
+  padding: 1rem; /* Moved padding here from .ProseMirror if toolbar is outside */
+}
+
+/* More specific selectors for analysis highlights within ProseMirror, if needed */
+/* These might be redundant if .analysis-highlight.type-* already targets spans correctly */
+.ProseMirror span[class^="analysis-highlight.type-"] {
+  /* This is a bit too generic and might catch unintended spans. */
+  /* Prefer direct class targeting like .analysis-highlight.type-entities */
+}
+
+/* Example of more specific ProseMirror targeting (usually not needed if classes are on the marks) */
+.ProseMirror .analysis-highlight.type-entities {
+  /* Styles here */
+}
+.ProseMirror .analysis-highlight.type-clauses {
+  /* Styles here */
+}
+.ProseMirror .analysis-highlight.type-risks {
+  /* Styles here */
+}
+.ProseMirror .analysis-highlight.type-timeline {
+  /* Styles here */
+}
+.ProseMirror .analysis-highlight.type-privilegedTerms {
+  /* Styles here */
+}
+
+/* Active highlight styling */
+.ProseMirror .analysis-highlight.active-highlight {
+  /* styles if different from the general .analysis-highlight.active-highlight */
+  /* Could be more specific if needed */
+  /* background-color: yellow; */
+}
+
+.ProseMirror .analysis-highlight.highlight-hover {
+    /* For ephemeral hover effects directly from JS if needed, not CSS :hover */
+    /* Example:
+    background-color: var(--highlight-entity-bg) !important; 
+    opacity: var(--highlight-opacity-hover) !important;
+    box-shadow: 0 0 5px var(--highlight-entity-bg); 
+    */
+}
+
+/* Wrapper for the Tiptap editor content specifically */
+.tiptap-editor-content {
+  /* If NewTiptapEditor uses a div with this class around EditorContent */
+  /* This might be where some padding/height constraints go */
+  flex-grow: 1;
+  overflow-y: auto; /* If this div is the scroller */
+} 

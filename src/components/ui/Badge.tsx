@@ -32,12 +32,12 @@ export const Badge: React.FC<BadgeProps> = ({
 
   // Variant-specific classes
   const variantClasses = {
-    primary: 'bg-primary/20 text-primary',
-    secondary: 'bg-gray-700/70 text-gray-300',
-    success: 'bg-green-900/30 text-green-400',
-    warning: 'bg-yellow-900/30 text-yellow-300',
-    danger: 'bg-red-900/30 text-red-400',
-    info: 'bg-blue-900/30 text-blue-400',
+    primary: 'bg-primary/20 text-primary dark:bg-dark-primary/20 dark:text-dark-primary',
+    secondary: 'bg-secondary text-secondary-foreground dark:bg-dark-secondary dark:text-dark-secondary-foreground',
+    success: 'bg-green-100 text-green-700 dark:bg-green-800/30 dark:text-green-200',
+    warning: 'bg-warning/20 text-amber-700 dark:bg-warning/30 dark:text-amber-200',
+    danger: 'bg-destructive/20 text-red-700 dark:bg-destructive/30 dark:text-red-200',
+    info: 'bg-blue-100 text-blue-700 dark:bg-blue-800/30 dark:text-blue-200',
   };
 
   // Icon size classes

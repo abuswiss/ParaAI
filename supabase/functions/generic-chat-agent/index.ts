@@ -43,6 +43,7 @@ interface ChatRequestBody {
   //   analysisItem: any;
   //   documentText: string;
   // } | null;
+  streamThoughts?: boolean; // Option to enable/disable thought streaming
 }
 
 // Helper to roughly estimate token count
@@ -120,6 +121,7 @@ serve(async (req: Request) => {
         caseId,
         conversationId: conversationIdFromRequest,
         documentContextIds, 
+        streamThoughts,
     }: ChatRequestBody = await req.json();
 
     console.log(`Request: user=${userId}, model=${modelId}, msgs=${messages.length}, case=${caseId}, conv=${conversationIdFromRequest}, ctxIds=${documentContextIds?.length}`);
@@ -297,8 +299,22 @@ serve(async (req: Request) => {
      }
 
     // --- Build Prompt --- 
-    const systemCorePrompt = `You are BenchWise AI... [Your system prompt here]`; // Truncated for brevity
-    const finalSystemPrompt = `${systemCorePrompt}${fetchedContextText}`;
+    let systemPromptContent = `You are a helpful AI paralegal assistant. Your primary goal is to provide accurate and concise answers.`;
+
+    if (req.headers.get("X-Experimental-Stream-Thoughts") === "true" || streamThoughts) {
+      systemPromptContent += `
+When responding, first outline your thought process step-by-step. Prefix each step of your thought process with "THOUGHT: ".
+Each thought should be on a new line.
+After you have laid out your thought process, provide the final answer to the user, prefixed with "FINAL_ANSWER: ".
+
+Example:
+THOUGHT: The user is asking about contract law.
+THOUGHT: I need to consider the jurisdiction mentioned.
+THOUGHT: I will look up relevant statutes for that jurisdiction.
+FINAL_ANSWER: Based on the statutes of [Jurisdiction], ...`;
+    }
+
+    const finalSystemPrompt = `${systemPromptContent}${fetchedContextText}`;
     
     // Prepare messages for OpenAI, including the system prompt
     // Exclude IDs when sending to OpenAI
@@ -341,23 +357,121 @@ serve(async (req: Request) => {
           async start(controller) {
             const encoder = new TextEncoder();
             console.log('DEBUG: Stream adapter started.');
+            let buffer = ""; 
+            let currentStreamType = "0";
+            // Use the streamThoughts destructured from req.json() which should be in scope here
+            // const enableStreamThoughts = req.headers.get("X-Experimental-Stream-Thoughts") === "true" || streamThoughts;
+            // Corrected: Ensure we are using the 'streamThoughts' variable from the outer scope (destructured from req.json())
+            // The 'streamThoughts' on the right side of || in the original code was correctly referring to this.
+            // Let's keep the original logic for `isStreamingThoughtsEnabled` for now as it seemed correct.
+            const isStreamingThoughtsEnabled = req.headers.get("X-Experimental-Stream-Thoughts") === "true" || streamThoughts; // This 'streamThoughts' is from req.json()
+
+            let chunkCounter = 0; // To count incoming chunks
+
             try {
+              console.log(`DEBUG: Starting stream processing loop. streamThoughts enabled: ${isStreamingThoughtsEnabled}`);
               for await (const chunk of responseIterator) {
-                let content = chunk.choices?.[0]?.delta?.content;
-                if (typeof content === 'string' && content.length > 0) {
-                   // Format according to Vercel AI SDK text chunk protocol: '0:"<json_stringified_content>"\n'
-                   // Note: The content needs to be JSON stringified, including the quotes.
-                   const formattedChunk = `0:"${JSON.stringify(content).slice(1, -1)}"\n`; 
-                   controller.enqueue(encoder.encode(formattedChunk)); 
+                chunkCounter++;
+                const deltaContent = chunk.choices?.[0]?.delta?.content || "";
+                const finishReason = chunk.choices?.[0]?.finish_reason;
+
+                console.log(`DEBUG: Chunk ${chunkCounter} received. Delta: "${deltaContent}", Finish Reason: ${finishReason}`);
+                
+                buffer += deltaContent;
+                // Temporarily log the full buffer for intense debugging if needed, then revert to substring
+                // console.log(`DEBUG: Chunk ${chunkCounter} - Buffer now (full): "${buffer}"`); 
+                console.log(`DEBUG: Chunk ${chunkCounter} - Buffer now: "${buffer.substring(0, 200)}${buffer.length > 200 ? '...' : ''}"`);
+
+
+                if (isStreamingThoughtsEnabled) {
+                  // Process thoughts
+                  let thoughtMatch;
+                  while ((thoughtMatch = buffer.match(/^THOUGHT: (.*?)(?:\n|$)/)) !== null) {
+                    const thoughtContent = thoughtMatch[1].trim();
+                    if (thoughtContent) { // Ensure we don't send empty thoughts
+                        const formattedThought = `4:"${JSON.stringify(thoughtContent).slice(1, -1)}"\n`;
+                        controller.enqueue(encoder.encode(formattedThought));
+                        console.log(`DEBUG: Sent thought chunk: ${thoughtContent}`);
+                    }
+                    const processedPart = thoughtMatch[0];
+                    buffer = buffer.substring(processedPart.length); // Consume the THOUGHT line from buffer
+                    buffer = buffer.trimStart(); 
+                    currentStreamType = "0"; // Reset type, though content might not be sent immediately
+                    console.log(`DEBUG: Processed thought. Buffer remaining: "${buffer.substring(0, 100)}${buffer.length > 100 ? '...' : ''}"`);
+                  }
+
+                  // Check for final answer marker
+                  if (buffer.startsWith("FINAL_ANSWER:")) {
+                    const marker = "FINAL_ANSWER:";
+                    buffer = buffer.substring(marker.length).trimStart(); // Consume the FINAL_ANSWER: marker from buffer
+                    currentStreamType = "0"; // Ensure final answer is streamed as content type '0'
+                    console.log(`DEBUG: FINAL_ANSWER marker processed. Buffer remaining: "${buffer.substring(0, 100)}${buffer.length > 100 ? '...' : ''}"`);
+                  }
+                }
+                
+                // Stream content if any is available in the buffer
+                let contentToStream = "";
+                if (isStreamingThoughtsEnabled) {
+                    // If streaming thoughts, only send if not starting with a new THOUGHT: marker
+                    // (FINAL_ANSWER: marker is already stripped if it was present)
+                    let splitPoint = buffer.length;
+                    const nextThoughtMarker = buffer.indexOf("THOUGHT:");
+                    // No need to check for FINAL_ANSWER: here again, it's a prefix for the whole answer block.
+                    if (nextThoughtMarker !== -1) {
+                        splitPoint = Math.min(splitPoint, nextThoughtMarker);
+                    }
+                    contentToStream = buffer.substring(0, splitPoint);
+                } else {
+                    // If not streaming thoughts, send everything in buffer
+                    contentToStream = buffer;
+                }
+                
+                if (contentToStream.length > 0) {
+                    const formattedContent = `${currentStreamType}:"${JSON.stringify(contentToStream).slice(1, -1)}"\n`;
+                    controller.enqueue(encoder.encode(formattedContent));
+                    const bufferBeforeContentSent = buffer; // For logging
+                    buffer = buffer.substring(contentToStream.length);
+                    // console.log(`DEBUG: Sent content (type ${currentStreamType}): "${contentToStream.substring(0,100)}${contentToStream.length > 100 ? '...' : ''}". Original Buffer: "${bufferBeforeContentSent.substring(0,100)}...". New Buffer remaining: "${buffer.substring(0, 100)}${buffer.length > 100 ? '...' : ''}"`);
+                    console.log(`DEBUG: Sent content (type ${currentStreamType}): "${contentToStream}". New Buffer remaining: "${buffer}"`);
+
+                }
+
+                if (finishReason) {
+                  console.log(`DEBUG: OpenAI stream finished with reason: ${finishReason}.`);
+                  break; // Exit loop if OpenAI signals completion
                 }
               }
-              console.log('DEBUG: Stream adapter finished successfully.');
+              console.log(`DEBUG: Stream processing loop finished. Total chunks: ${chunkCounter}.`);
+
+              // Clean up any remaining THOUGHT: or FINAL_ANSWER: lines in the buffer before final flush (defensive)
+              if (isStreamingThoughtsEnabled && buffer.length > 0) {
+                const originalBuffer = buffer;
+                buffer = buffer
+                  .split('\n')
+                  .filter(line => !line.trim().startsWith('THOUGHT:') && !line.trim().startsWith('FINAL_ANSWER:'))
+                  .join('\n')
+                  .trim();
+                if (buffer !== originalBuffer) {
+                  console.log(`DEBUG: Cleaned buffer before final flush.\nOriginal:\n${originalBuffer}\nCleaned:\n${buffer}`);
+                }
+              }
+
+              if (buffer.length > 0) {
+                if (isStreamingThoughtsEnabled && (buffer.startsWith("THOUGHT:") || buffer.startsWith("FINAL_ANSWER:"))) {
+                    console.warn(`DEBUG: Buffer has remaining marker at end of stream loop: "${buffer.substring(0, 200)}${buffer.length > 200 ? '...' : ''}"`);
+                }
+                const finalFormattedContent = `0:"${JSON.stringify(buffer).slice(1, -1)}"\n`;
+                controller.enqueue(encoder.encode(finalFormattedContent));
+                console.log(`DEBUG: Flushed remaining buffer content: "${buffer.substring(0, 200)}${buffer.length > 200 ? '...' : ''}"`);
+                buffer = ""; // Clear buffer after flushing
+              }
+              console.log('DEBUG: Stream adapter logic completed successfully.');
             } catch (streamErr) {
-              console.error('DEBUG: Error during stream processing:', streamErr);
+              console.error('DEBUG: ERROR INSIDE stream processing logic:', streamErr);
               controller.error(streamErr); 
             } finally {
               controller.close();
-              console.log('DEBUG: Stream adapter closed.');
+              console.log('DEBUG: Stream adapter controller closed (finally block).');
             }
           },
           cancel(reason) {

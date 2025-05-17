@@ -1,10 +1,15 @@
+// REMOVE SHIMS - No longer needed for pdf-parse
+
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.39.8';
 // --- CHANGE: Remove unpdf ---
 // import { getDocumentProxy, extractText as extractPdfText } from 'npm:unpdf@^0.12';
 
-// --- CHANGE: Import pdfjs-dist (legacy build to avoid worker issues in Deno) ---
-import * as pdfjsLib from 'npm:pdfjs-dist@3.4.120/legacy/build/pdf.mjs'; // Use legacy build
+// Import Buffer for pdf-parse
+import { Buffer } from "node:buffer"; 
+
+// Import pdf-parse using default import
+import pdfParse from 'npm:pdf-parse@1.1.1';
 
 // --- CHANGE: Import mammoth for DOCX ---
 import { extractRawText as extractDocxText } from 'npm:mammoth@1.6.0';
@@ -27,7 +32,7 @@ function createSupabaseAdminClient(): SupabaseClient {
 }
 
 // --- Helper: Update Document Status and Text ---
-async function updateDocument(supabaseAdmin: SupabaseClient, documentId: string, updates: Record<string, any>) {
+async function updateDocument(supabaseAdmin: SupabaseClient, documentId: string, updates: Record<string, unknown>) {
   console.log(`Updating document ${documentId} with status: ${updates.processing_status}`);
   const { error: updateError } = await supabaseAdmin.from('documents').update(updates).eq('id', documentId);
   if (updateError) {
@@ -36,29 +41,20 @@ async function updateDocument(supabaseAdmin: SupabaseClient, documentId: string,
   }
 }
 
-// --- PDF Extraction Logic using pdfjs-dist ---
+// --- PDF Extraction Logic using pdf-parse ---
 async function extractTextFromPdf(data: Uint8Array): Promise<string> {
   try {
-    console.log('Loading PDF document with pdfjs-dist...');
-    const loadingTask = pdfjsLib.getDocument({ data });
-    const pdfDocument = await loadingTask.promise;
-    console.log(`PDF loaded. Extracting text from ${pdfDocument.numPages} pages...`);
-
-    let fullText = '';
-    for (let i = 1; i <= pdfDocument.numPages; i++) {
-      const page = await pdfDocument.getPage(i);
-      const textContent = await page.getTextContent();
-      // FIX: Added explicit type for item
-      interface TextItem { str: string; }
-      const pageText = textContent.items.map((item: TextItem) => item.str).join(' ');
-      fullText += pageText + '\n';
-    }
-    console.log(`Extracted ${fullText.length} characters from PDF.`);
-    // FIX: Escaped backslash in null byte regex
-    fullText = fullText.replace(/[\\u0000]/g, ''); // Remove null bytes
-    return fullText;
+    console.log('Loading PDF document with pdf-parse...');
+    
+    const buffer = Buffer.from(data);
+    // Use the default import name
+    const pdfData = await pdfParse(buffer);
+    
+    console.log(`Extracted ${pdfData.text.length} characters from PDF.`);
+    // Replace null bytes using a more common regex for null character
+    return pdfData.text.replace(/\0/g, ''); 
   } catch (error) {
-    console.error('Error extracting text from PDF with pdfjs-dist:', error);
+    console.error('Error extracting text from PDF with pdf-parse:', error);
     throw new Error(`Failed to parse PDF: ${error.message}`);
   }
 }
@@ -151,8 +147,8 @@ serve(async (req: Request) => {
       extractedText = await extractTextFromDocx(fileData);
     } else if (contentType.startsWith('text/html') || filename.endsWith('.html') || filename.endsWith('.htm')) {
       extractedText = await extractTextFromHtml(fileData);
-    } else if (contentType.startsWith('text/') || filename.endsWith('.md')) { 
-      console.log(`Processing plain text or markdown file: ${filename}`);
+    } else if (contentType.startsWith('text/') || filename.endsWith('.md') || filename.endsWith('.txt')) { 
+      console.log(`Processing plain text, markdown or txt file: ${filename}`);
       extractedText = new TextDecoder().decode(fileData);
     } else if (contentType === 'application/msword' || filename.endsWith('.doc')) {
       console.warn(`Legacy .doc file detected: ${filename}. Text extraction is currently not supported for this format.`);

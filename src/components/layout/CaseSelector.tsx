@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useAtom } from 'jotai';
 import { activeCaseIdAtom } from '@/atoms/appAtoms';
 import * as caseService from '@/services/caseService';
@@ -19,6 +19,30 @@ const CaseSelector: React.FC = () => {
   const [cases, setCases] = useState<Case[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  
+  // Define all hooks at the top level before any conditional logic
+  // Prevent event propagation to keep sidebar open when interacting with dropdown
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+  }, []);
+
+  const handleClick = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    // Mark the dropdown as active to prevent sidebar collapse
+    const parentElement = document.querySelector('[data-open-state="open"]');
+    if (parentElement) {
+      parentElement.setAttribute('data-dropdown-active', 'true');
+      // Remove this attribute when clicked outside
+      const removeAttribute = () => {
+        parentElement.removeAttribute('data-dropdown-active');
+        document.removeEventListener('click', removeAttribute);
+      };
+      // Add with slight delay to avoid immediate removal
+      setTimeout(() => {
+        document.addEventListener('click', removeAttribute);
+      }, 100);
+    }
+  }, []);
 
   useEffect(() => {
     const fetchCases = async () => {
@@ -28,34 +52,27 @@ const CaseSelector: React.FC = () => {
         const { data, error: fetchError } = await caseService.getUserCases();
         if (fetchError) throw fetchError;
         setCases(data || []);
-        // If no case is active, and there are cases, maybe select the first one?
-        // Or leave it as null/undefined if you want explicit selection
-        // if (!activeCaseId && data && data.length > 0) {
-        //   setActiveCaseId(data[0].id);
-        // }
       } catch (err) {
-        console.error("Error fetching cases for selector:", err);
-        setError("Failed to load cases.");
+        console.error("Error fetching matters for selector:", err);
+        setError("Failed to load matters.");
       } finally {
         setIsLoading(false);
       }
     };
     fetchCases();
-  }, [setActiveCaseId]); // Dependency ensures setActiveCaseId is stable
+  }, []);  // Removed setActiveCaseId from dependency array as it's not used in the effect
 
   const handleValueChange = (value: string) => {
-    // Check if the value is for clearing selection or a valid case ID
     if (value === "__none__") {
-        setActiveCaseId(null); // Or handle as needed
+        setActiveCaseId(null);
     } else {
         setActiveCaseId(value);
     }
   };
 
-  // Memoize the selected case name to avoid recalculating on every render
   const selectedCaseName = useMemo(() => {
-    if (!activeCaseId) return "Select a case...";
-    return cases.find(c => c.id === activeCaseId)?.name || "Select a case...";
+    if (!activeCaseId) return "Select a matter...";
+    return cases.find(c => c.id === activeCaseId)?.name || "Select a matter...";
   }, [activeCaseId, cases]);
 
   if (isLoading) {
@@ -66,22 +83,26 @@ const CaseSelector: React.FC = () => {
     return <div className="text-xs text-destructive p-2 text-center">{error}</div>;
   }
 
+  // Event handlers were moved to the top of the component to maintain hooks order
+
   return (
     <Select 
-        value={activeCaseId || "__none__"} // Use a placeholder value if null/undefined
+        value={activeCaseId || "__none__"} 
         onValueChange={handleValueChange}
     >
-      <SelectTrigger className="w-full h-9 text-sm truncate">
-        <SelectValue placeholder="Select a case...">
+      <SelectTrigger 
+        className="w-full h-9 text-sm truncate"
+        onMouseDown={handleMouseDown}
+        onClick={handleClick}
+      >
+        <SelectValue placeholder="Select a matter...">
             {selectedCaseName} 
         </SelectValue>
       </SelectTrigger>
       <SelectContent>
-        {/* Optional: Add an item to represent "No Case Selected" if needed */}
-        {/* <SelectItem value="__none__">-- No Case Selected --</SelectItem> */} 
         {cases.length === 0 ? (
           <div className="p-2 text-sm text-muted-foreground text-center italic">
-            No cases found.
+            No matters found.
           </div>
         ) : (
           cases.map((caseItem) => (

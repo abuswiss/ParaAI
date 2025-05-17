@@ -1,8 +1,8 @@
 "use client"; // If using Next.js App Router or similar client-side features
 
-import React, { useState, useCallback, ChangeEvent, useEffect } from 'react';
+import React, { useState, useCallback, ChangeEvent, useEffect, useRef } from 'react';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
-import { activeCaseIdAtom, addTaskAtom, updateTaskAtom, removeTaskAtom, initialFilesForUploadAtom, activeEditorItemAtom } from '@/atoms/appAtoms';
+import { activeCaseIdAtom, addTaskAtom, updateTaskAtom, removeTaskAtom, initialFilesForUploadAtom, activeEditorItemAtom, chatDocumentContextIdsAtom } from '@/atoms/appAtoms';
 import { v4 as uuidv4 } from 'uuid';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
@@ -49,6 +49,8 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose }) => {
   const [isUploading, setIsUploading] = useState(false);
   const [overallError, setOverallError] = useState<string | null>(null);
   const [dragActive, setDragActive] = useState(false);
+  const [modalPhase, setModalPhase] = useState<'idle' | 'uploading' | 'success'>('idle');
+  const activeChannelsRef = useRef<any[]>([]);
   
   const activeCaseId = useAtomValue(activeCaseIdAtom);
   const [initialFiles, setInitialFiles] = useAtom(initialFilesForUploadAtom);
@@ -56,33 +58,25 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose }) => {
   const updateTask = useSetAtom(updateTaskAtom);
   const removeTask = useSetAtom(removeTaskAtom);
   const setActiveEditorItem = useSetAtom(activeEditorItemAtom);
+  const setChatDocumentContextIds = useSetAtom(chatDocumentContextIdsAtom);
   const { toast } = useToast();
 
   // Reset state and handle initial files when modal is opened
   useEffect(() => {
     if (isOpen) {
-        // Reset local state first
         setFilesToUpload([]);
         setOverallError(null);
         setIsUploading(false);
         setDragActive(false);
-
-        // Check for initial files from drag-and-drop
+        setModalPhase('idle');
         if (initialFiles.length > 0) {
-            console.log('Processing initial files from atom:', initialFiles);
-            const newFileStatuses = initialFiles.map(file => ({
-                file,
-                status: 'pending'
-            } as UploadFileStatus));
+            const newFileStatuses = initialFiles.map(file => ({ file, status: 'pending' } as UploadFileStatus));
             setFilesToUpload(newFileStatuses);
-            // Clear the atom immediately after processing
             setInitialFiles([]); 
         }
     } else {
-        // Optionally clear local state when closing if not handled elsewhere
         setFilesToUpload([]);
         setOverallError(null);
-        // Clear the atom on close as well, just in case
         if (initialFiles.length > 0) {
              setInitialFiles([]);
         }
@@ -127,6 +121,7 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose }) => {
   };
 
   const handleUpload = async () => {
+    setModalPhase('uploading');
     const pendingFiles = filesToUpload.filter(f => f.status === 'pending');
     if (pendingFiles.length === 0) {
       setOverallError("No pending files selected for upload.");
@@ -185,6 +180,9 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose }) => {
                 setActiveEditorItem({ type: 'document', id: uploadResult.id });
                 console.log(`UploadModal: Set active editor item to first uploaded doc: ${uploadResult.id}`);
             }
+
+            // Add uploaded document to chat context (if not already present)
+            setChatDocumentContextIds(prev => prev.includes(uploadResult.id) ? prev : [...prev, uploadResult.id]);
 
             // Update task status upon successful initiation (backend handles rest)
             updateTask({ 
@@ -264,6 +262,41 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose }) => {
 
   const pendingFileCount = filesToUpload.filter(f => f.status === 'pending' && !isUploading).length;
 
+  useEffect(() => {
+    if (!isOpen || !isUploading) return;
+    const activelyProcessingFiles = filesToUpload.filter(f => f.status === 'uploading' || f.status === 'processing_started').length;
+    if (activelyProcessingFiles === 0) {
+        setIsUploading(false);
+        const attemptedFiles = filesToUpload.filter(f => f.documentId || f.status === 'error');
+        const erroredInAttempt = attemptedFiles.some(f => f.status === 'error');
+        const allAttemptedSuccessfullyCompleted = attemptedFiles.length > 0 && attemptedFiles.every(f => f.status === 'complete');
+        if (allAttemptedSuccessfullyCompleted) {
+            setModalPhase('success');
+        } else if (erroredInAttempt) {
+            if (!overallError) {
+                 const errorCount = attemptedFiles.filter(f => f.status === 'error').length;
+                 if (errorCount === attemptedFiles.length && attemptedFiles.length > 0) {
+                    setOverallError("All documents failed during processing or upload.");
+                 } else {
+                    setOverallError("Some documents encountered errors during processing.");
+                 }
+            }
+        } else if (attemptedFiles.length > 0 && !allAttemptedSuccessfullyCompleted && !erroredInAttempt) {
+             if (!overallError) setOverallError("Processing finished with an undetermined state for some files.");
+        } else if (filesToUpload.length === 0) {
+             onClose(false);
+        }
+    }
+  }, [filesToUpload, isUploading, isOpen, onClose, overallError, setOverallError]);
+
+  // Success UI handler
+  const handleUploadMore = () => {
+    setFilesToUpload([]);
+    setOverallError(null);
+    setIsUploading(false);
+    setModalPhase('idle');
+  };
+
   return (
     <Dialog open={isOpen} onOpenChange={handleOpenChange} modal={true}> 
       <DialogContent 
@@ -272,18 +305,8 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose }) => {
         onDragLeave={(e: React.DragEvent<HTMLDivElement>) => handleDrag(e, 'leave')} 
         onDragOver={(e: React.DragEvent<HTMLDivElement>) => handleDrag(e, 'over')} 
         onDrop={(e: React.DragEvent<HTMLDivElement>) => handleDrag(e, 'drop')}
-        // Prevent default close on escape key when uploading
-        onEscapeKeyDown={(e) => {
-          if (isUploading) {
-            e.preventDefault();
-          }
-        }}
-        // Prevent default close on pointer down outside when uploading
-        onPointerDownOutside={(e) => {
-             if (isUploading) {
-               e.preventDefault();
-             }
-         }}
+        onEscapeKeyDown={(e) => { if (isUploading) e.preventDefault(); }}
+        onPointerDownOutside={(e) => { if (isUploading) e.preventDefault(); }}
       >
         <DialogHeader>
           <DialogTitle>Upload Documents</DialogTitle>
@@ -292,6 +315,21 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose }) => {
           </DialogDescription>
         </DialogHeader>
 
+        {/* Success State */}
+        {modalPhase === 'success' && (
+          <div className="flex flex-col items-center justify-center py-8">
+            <CheckCircle className="h-12 w-12 text-green-500 mb-4" />
+            <div className="text-lg font-semibold mb-2">Upload Successful!</div>
+            <div className="text-muted-foreground mb-6">Your document(s) have been uploaded and processed.</div>
+            <div className="flex gap-4">
+              <Button onClick={() => onClose(true)} variant="default">Close</Button>
+              <Button onClick={handleUploadMore} variant="outline">Upload More</Button>
+            </div>
+          </div>
+        )}
+
+        {/* Main Upload UI (idle or uploading) */}
+        {modalPhase !== 'success' && <>
         {/* Drop Zone and File Input */}
         <div 
             className={`mt-4 p-6 border-2 border-dashed rounded-lg text-center transition-colors ${dragActive ? 'border-primary bg-primary/5' : 'border-border hover:border-muted-foreground/50'}`}
@@ -389,6 +427,7 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose }) => {
             Upload {pendingFileCount > 0 ? `(${pendingFileCount})` : ''}
           </Button>
         </DialogFooter>
+        </>}
       </DialogContent>
     </Dialog>
   );

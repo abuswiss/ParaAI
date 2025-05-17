@@ -18,11 +18,16 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { toast } from 'sonner';
-import { useNavigate } from 'react-router-dom'; // Import useNavigate
+import { useNavigate, useLocation } from 'react-router-dom'; // Import useNavigate and useLocation
+import { SubscriptionManagement } from '@/components/subscription/SubscriptionManagement'; // Import SubscriptionManagement
 
 const SettingsPage: React.FC = () => {
-  const { user, signOut } = useAuth(); // Get user and signOut
+  const { user, signOut, userProfile } = useAuth(); // Get user, signOut, and userProfile
   const navigate = useNavigate(); // For redirect after delete
+  const location = useLocation(); // To check for specific messages or states
+
+  // Extract potential message from navigation state (e.g., from ProtectedRoute)
+  const RRDMessage = location.state?.message as string | undefined;
 
   const [currentPassword, setCurrentPassword] = React.useState('');
   const [newPassword, setNewPassword] = React.useState('');
@@ -104,9 +109,37 @@ const SettingsPage: React.FC = () => {
   };
 
   return (
-    <div className="space-y-6 p-4 md:p-6">
-      <h1 className="text-2xl md:text-3xl font-semibold text-foreground">Account Settings</h1>
+    <div className="space-y-6 p-4 md:p-6 max-w-4xl mx-auto">
+      <h1 className="text-2xl md:text-3xl font-semibold text-foreground">Settings</h1>
+
+      {/* Display message from ProtectedRoute if any */}
+      {RRDMessage && (
+        <Card className="mb-6 bg-blue-50 border-blue-300 dark:bg-blue-900 dark:border-blue-700">
+          <CardHeader>
+            <CardTitle className="text-blue-700 dark:text-blue-300">Notification</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-blue-700 dark:text-blue-300">{RRDMessage}</p>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Subscription Management Section */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Manage Subscription</CardTitle>
+          <CardDescription>
+            View your current subscription status, upgrade your plan, or manage billing details.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <SubscriptionManagement />
+        </CardContent>
+      </Card>
       
+      <Separator className="my-8" />
+
+      <h2 className="text-xl md:text-2xl font-semibold text-foreground pt-4">Account Details</h2>
       {/* Update Email Section */}
       <Card>
         <CardHeader>

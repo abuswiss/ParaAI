@@ -23,13 +23,13 @@ const StatusIndicator: React.FC = () => {
         switch (status) {
             case 'running':
             case 'pending':
-                return <Spinner size="xs" className="text-blue-500" />;
+                return <Spinner size="xs" className="text-info dark:text-dark-info" />;
             case 'success':
-                return <CheckCircle className="h-4 w-4 text-green-500" />;
+                return <CheckCircle className="h-4 w-4 text-success dark:text-dark-success" />;
             case 'error':
-                return <XCircle className="h-4 w-4 text-red-500" />;
+                return <XCircle className="h-4 w-4 text-destructive dark:text-dark-destructive" />;
             default:
-                return <Info className="h-4 w-4 text-gray-500" />;
+                return <Info className="h-4 w-4 text-muted-foreground dark:text-dark-muted-foreground" />;
         }
     };
 
@@ -73,9 +73,11 @@ const StatusIndicator: React.FC = () => {
                         exit="exit"
                         className={cn(
                             "flex items-center gap-2 p-2.5 rounded-lg shadow-md text-xs w-64",
-                            task.status === 'error' ? "bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-200 border border-red-200 dark:border-red-800/50" :
-                            task.status === 'success' ? "bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-200 border border-green-200 dark:border-green-800/50" :
-                            "bg-background/90 dark:bg-neutral-800/90 backdrop-blur-sm border border-border"
+                            task.status === 'error' ? 
+                                "bg-destructive/10 dark:bg-dark-destructive/20 text-destructive dark:text-dark-destructive border border-destructive/30 dark:border-dark-destructive/50" :
+                            task.status === 'success' ? 
+                                "bg-success/10 dark:bg-dark-success/20 text-success dark:text-dark-success border border-success/30 dark:border-dark-success/50" :
+                                "bg-popover/90 dark:bg-dark-popover/90 backdrop-blur-sm border border-popover-border dark:border-dark-popover-border text-popover-foreground dark:text-dark-popover-foreground"
                         )}
                     >
                         <div className="flex-shrink-0">
@@ -87,10 +89,10 @@ const StatusIndicator: React.FC = () => {
                                 <Progress value={task.progress} className="h-1 mt-1" />
                             )}
                              {task.status === 'error' && (
-                                <p className="text-red-600 dark:text-red-400 text-xs mt-0.5">Failed</p>
+                                <p className="text-destructive dark:text-dark-destructive text-xs mt-0.5">Failed</p>
                             )}
                              {task.status === 'success' && (
-                                <p className="text-green-600 dark:text-green-400 text-xs mt-0.5">Completed</p>
+                                <p className="text-success dark:text-dark-success text-xs mt-0.5">Completed</p>
                             )}
                         </div>
                     </motion.div>

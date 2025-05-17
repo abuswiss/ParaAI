@@ -44,3 +44,44 @@ export const formatFileSize = (bytes: number): string => {
   
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 };
+
+// Define the comprehensive processing status type
+export type ProcessingStatus = 
+  | 'uploaded'
+  | 'text_extraction_pending'
+  | 'text_extracted'
+  | 'embedding_pending'
+  | 'completed' // This corresponds to 'processed' in the selector
+  | 'text_extraction_failed'
+  | 'embedding_failed'
+  | 'draft';
+
+export interface DocumentMetadata {
+  id: string;
+  filename: string;
+  title?: string;
+  caseId: string | null; // Allow null, as per service
+  userId: string; // Standardized from ownerId
+  uploadDate: string; // Renamed from uploadedAt in service, kept from original type
+  fileType: string | null; // Allow null, as per service and original type
+  fileSize: number; // Standardized from size
+  contentType: string; // Added from service
+  processingStatus: ProcessingStatus;
+  extractedText?: string | null;
+  editedContent?: string | null; // HTML content from editor
+  summary?: string | null;
+  tags?: string[];
+  vectorId?: string; // If using vector embeddings
+  storagePath: string | null; // Added from service
+  errorMessage?: string | null; // Added from service
+  lastAccessedAt?: string | null; // Added from service
+  version?: number; // Added from service
+  isDeleted: boolean; // Added from service
+  // [key: string]: any; // Consider removing if all known props are defined
+}
+
+export interface CaseDocument extends DocumentMetadata {
+  // Case-specific document properties, if any, can extend DocumentMetadata
+}
+
+// You might have other document-related types here

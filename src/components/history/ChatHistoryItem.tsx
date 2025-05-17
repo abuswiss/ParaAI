@@ -87,9 +87,10 @@ const ChatHistoryItem: React.FC<ChatHistoryItemProps> = ({ conversation, onDelet
     <div
       onClick={handleClick}
       className={cn(
-        'group relative w-full justify-start h-auto px-2 py-1.5 text-left flex flex-col items-start cursor-pointer rounded-md transition-colors',
-        'hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
-        isActive && 'bg-accent text-accent-foreground'
+        'group relative w-full justify-start h-auto px-2 py-1.5 text-left flex flex-col items-start cursor-pointer rounded-md transition-colors text-popover-foreground dark:text-dark-popover-foreground',
+        'hover:bg-accent dark:hover:bg-dark-accent hover:text-accent-foreground dark:hover:text-dark-accent-foreground',
+        'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring dark:focus-visible:ring-dark-ring',
+        isActive && 'bg-accent dark:bg-dark-accent text-accent-foreground dark:text-dark-accent-foreground'
       )}
       role="button"
       tabIndex={0}
@@ -100,7 +101,7 @@ const ChatHistoryItem: React.FC<ChatHistoryItemProps> = ({ conversation, onDelet
       }}
     >
       <span className="text-sm font-medium truncate block w-full pointer-events-none">{conversation.title || 'Untitled Chat'}</span>
-      <span className="text-xs text-muted-foreground mt-0.5 pointer-events-none">
+      <span className="text-xs text-muted-foreground dark:text-dark-muted-foreground mt-0.5 pointer-events-none">
         {formatUpdateTime(conversation.updated_at)}
       </span>
 
@@ -109,8 +110,8 @@ const ChatHistoryItem: React.FC<ChatHistoryItemProps> = ({ conversation, onDelet
         disabled={isDeleting}
         className={cn(
           buttonVariants({ variant: "ghost", size: "icon" }),
-          'absolute right-1 top-1/2 -translate-y-1/2 h-6 w-6 p-1 text-muted-foreground opacity-0 group-hover:opacity-100 group-focus-within:opacity-100',
-          'focus:opacity-100 focus:ring-1 focus:ring-ring rounded-full',
+          'absolute right-1 top-1/2 -translate-y-1/2 h-6 w-6 p-1 text-muted-foreground dark:text-dark-muted-foreground hover:text-destructive dark:hover:text-destructive opacity-0 group-hover:opacity-100 group-focus-within:opacity-100',
+          'focus:opacity-100 focus:ring-1 focus:ring-ring dark:focus:ring-dark-ring rounded-full',
           isDeleting && 'opacity-50 cursor-not-allowed'
         )}
         aria-label="Delete conversation"

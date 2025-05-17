@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, DragEvent, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, DragEvent, useMemo, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAtom, useSetAtom } from 'jotai';
 import { 
@@ -72,6 +72,7 @@ interface ActionState {
     itemId: string | null;
     itemType: ItemType | null;
     currentName?: string; // Only for rename
+    isBulk?: boolean; // To indicate if it's a bulk delete
 }
 
 // Disable lint rule for empty interface placeholder
@@ -94,7 +95,9 @@ const ListItem: React.FC<ListItemProps> = ({ id, label, icon, isSelected, onClic
             onClick={() => onClick(id, type)}
             className={cn(
                 "flex items-center gap-2 px-3 py-1.5 text-sm w-full text-left rounded-md transition-colors",
-                isSelected ? "bg-muted text-foreground" : "text-muted-foreground hover:bg-muted/80 hover:text-foreground"
+                isSelected 
+                    ? "bg-muted dark:bg-dark-muted text-foreground dark:text-dark-foreground" 
+                    : "text-muted-foreground dark:text-dark-muted-foreground hover:bg-muted/80 dark:hover:bg-dark-muted/80 hover:text-foreground dark:hover:text-dark-foreground"
             )}
         >
             {icon}
@@ -117,13 +120,23 @@ interface GridItemProps {
 }
 
 const GridItem: React.FC<GridItemProps> = ({ id, label, icon, typeLabel, date, onClick, onAction, type, itemSubActions }) => {
+    // Use theme colors: primary for documents, secondary for templates
+    const cardTypeClass = type === 'template'
+        ? 'border-2 border-secondary bg-secondary/10 dark:bg-secondary/20 dark:border-secondary'
+        : 'border-2 border-primary bg-primary/10 dark:bg-primary/20 dark:border-primary';
+    const iconColorClass = type === 'template'
+        ? 'text-secondary dark:text-secondary'
+        : 'text-primary dark:text-primary';
     return (
         <Card 
-            className="cursor-pointer hover:shadow-md transition-shadow flex flex-col h-40"
+            className={cn(
+                "cursor-pointer hover:shadow-lg transition-shadow flex flex-col h-40 text-card-foreground dark:text-dark-card-foreground",
+                cardTypeClass
+            )}
             onClick={() => onClick(id, type)}>
             <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-2">
                 <div className="flex items-center gap-2 overflow-hidden mr-2">
-                    <div className="flex-shrink-0">{icon}</div>
+                    <div className={cn("flex-shrink-0", iconColorClass)}>{icon}</div>
                     <CardTitle className="text-sm font-medium truncate flex-shrink min-w-0">{label}</CardTitle>
                 </div>
                 <DropdownMenu>
@@ -142,15 +155,14 @@ const GridItem: React.FC<GridItemProps> = ({ id, label, icon, typeLabel, date, o
                         ))}
                         <DropdownMenuItem onClick={(e: React.MouseEvent) => { e.stopPropagation(); onAction('rename', id, type); }}>Rename</DropdownMenuItem>
                         {type === 'document' && <DropdownMenuItem onClick={(e: React.MouseEvent) => { e.stopPropagation(); onAction('download', id, type); }}>Download</DropdownMenuItem>}
-                        <DropdownMenuItem className="text-red-600" onClick={(e: React.MouseEvent) => { e.stopPropagation(); onAction('delete', id, type); }}>Delete</DropdownMenuItem>
+                        <DropdownMenuItem className="text-destructive dark:text-dark-destructive focus:text-destructive dark:focus:text-dark-destructive focus:bg-destructive/10 dark:focus:bg-dark-destructive/10" onClick={(e: React.MouseEvent) => { e.stopPropagation(); onAction('delete', id, type); }}>Delete</DropdownMenuItem>
                     </DropdownMenuContent>
                 </DropdownMenu>
             </CardHeader>
             <CardContent className="pb-3 flex-grow">
-                <div className="text-xs text-muted-foreground mb-1">{typeLabel}</div>
-                 {date && <div className="text-xs text-muted-foreground">{date}</div>}
+                <div className="text-xs text-muted-foreground dark:text-dark-muted-foreground mb-1">{typeLabel}</div>
+                 {date && <div className="text-xs text-muted-foreground dark:text-dark-muted-foreground">{date}</div>}
             </CardContent>
-            {/* Optional: Footer for more info? */}
         </Card>
     );
 };
@@ -158,6 +170,7 @@ const GridItem: React.FC<GridItemProps> = ({ id, label, icon, typeLabel, date, o
 const FileManager: React.FC<FileManagerProps> = () => {
     const navigate = useNavigate();
     const location = useLocation();
+    const searchInputRef = useRef<HTMLInputElement>(null); // Ref for the search input
     const [activeCaseId, setActiveCaseId] = useAtom(activeCaseIdAtom);
     const [activeCase, setActiveCase] = useState<Case | null>(null); // State for active case details
     const [isUploadModalOpen, setIsUploadModalOpen] = useAtom(uploadModalOpenAtom); // Read and write atom state
@@ -187,8 +200,9 @@ const FileManager: React.FC<FileManagerProps> = () => {
     // State for UI controls
     const [selectedItemId, setSelectedItemId] = useState<string | null>(activeCaseId);
     const [selectedItemType, setSelectedItemType] = useState<ItemType | null>(activeCaseId ? 'case' : null);
-    const [viewMode, setViewMode] = useState<ViewMode>('grid');
+    const [viewMode, setViewMode] = useState<ViewMode>('list');
     const [searchTerm, setSearchTerm] = useState('');
+    const [selectedItems, setSelectedItems] = useState<string[]>([]); // For multi-selection
 
     // State for managing actions (rename/delete modals)
     const [actionState, setActionState] = useState<ActionState>({ actionType: null, itemId: null, itemType: null });
@@ -202,7 +216,32 @@ const FileManager: React.FC<FileManagerProps> = () => {
     const [isCaseRequiredDialogOpen, setIsCaseRequiredDialogOpen] = useState(false);
     const [pendingTemplateId, setPendingTemplateId] = useState<string | null>(null);
 
-    // Read caseId from URL query parameters when component mounts
+    // Effect to focus search input based on navigation state
+    useEffect(() => {
+        if (location.state?.focusSearch) {
+            console.log('Focus search triggered by navigation state:', location.state.focusSearch);
+            searchInputRef.current?.focus();
+            setSearchTerm(''); // Clear any previous search term
+
+            // Determine which view to show based on focusSearch value
+            if (location.state.focusSearch === 'matters' || location.state.focusSearch === 'cases') {
+                // If we want to show all matters initially or a general view for searching matters:
+                // This might mean clearing selectedItemType or setting it to a general 'files' view if that existed.
+                // For now, focusing search will apply to whatever view (matters/templates) is active or becomes active.
+                // If a specific matter was selected, this won't change it, search applies within.
+                // To show a top-level search for matters, we might need to handle selectedItemType here:
+                // setSelectedItemId(null);
+                // setSelectedItemType(null); // This shows the general "Select a matter or template..." view.
+            } else if (location.state.focusSearch === 'templates') {
+                setSelectedItemId('templates'); // Special ID for template category
+                setSelectedItemType('template');
+                setActiveCaseId(null);
+            }
+            // Clear the state to prevent re-triggering (optional, router might handle this)
+            // navigate(location.pathname, { replace: true, state: {} });
+        }
+    }, [location.state, navigate, setActiveCaseId]); // Added setActiveCaseId
+
     useEffect(() => {
         const queryParams = new URLSearchParams(location.search);
         const caseIdFromURL = queryParams.get('caseId');
@@ -393,22 +432,17 @@ const FileManager: React.FC<FileManagerProps> = () => {
     // Handle item click (use template or view document)
     const handleItemClick = async (itemId: string, itemType: ItemType) => {
         if (itemType === 'document') {
-            // Add document to context automatically
             console.log(`Adding document ${itemId} to chat context.`);
-            setChatDocumentContextIds(prev => [...new Set([...prev, itemId])]); // Add ID, ensure uniqueness
-            navigate(`/view/document/${itemId}`);
+            setChatDocumentContextIds(prev => [...new Set([...prev, itemId])]);
+            navigate(`/review/document/${itemId}`);
         } else if (itemType === 'template') {
-            // Store the template ID in case we need to use it after case selection
             setPendingTemplateId(itemId);
-            
             if (!activeCaseId) {
                 setIsCaseRequiredDialogOpen(true);
                 return;
             }
-            
-            useTemplate(navigate, itemId, activeCaseId);
+            navigate(`/ai/templates/${itemId}/fill`);
         }
-        // Add case navigation if needed
     };
     
     // Handle case required dialog close
@@ -420,8 +454,7 @@ const FileManager: React.FC<FileManagerProps> = () => {
     // Handle case selection from dialog
     const handleCaseSelected = (selectedCaseId: string) => {
         if (pendingTemplateId && selectedCaseId) {
-            // Navigate to template with newly selected case
-            useTemplate(navigate, pendingTemplateId, selectedCaseId);
+            navigate(`/ai/templates/${pendingTemplateId}/fill`);
             setPendingTemplateId(null);
         }
         setIsCaseRequiredDialogOpen(false);
@@ -430,21 +463,24 @@ const FileManager: React.FC<FileManagerProps> = () => {
     // Action handler (rename, delete, download, edit)
     const handleItemAction = async (action: 'rename' | 'delete' | 'download' | 'view' | 'edit', itemId: string, itemType: ItemType) => {
         console.log('Action:', action, 'Item:', itemId, 'Type:', itemType);
+        // Clear selection when a single item action is taken, unless it's delete which might be part of bulk
+        if (action !== 'delete') {
+            setSelectedItems([]);
+        }
 
         switch (action) {
-            case 'view': // Only for documents now
+            case 'view':
                 if (itemType === 'document') {
-                    handleItemClick(itemId, itemType); // Navigate to view page (will also add to context)
+                    navigate(`/review/document/${itemId}`);
                 }
                 break;
             case 'edit': 
                 if (itemType === 'template') {
-                    navigate(`/edit/template/${itemId}`);
+                    navigate(`/ai/templates/${itemId}/fill`);
                 } else if (itemType === 'document') {
-                     // Add document to context automatically when editing
                     console.log(`Adding document ${itemId} to chat context before editing.`);
-                    setChatDocumentContextIds(prev => [...new Set([...prev, itemId])]); // Add ID, ensure uniqueness
-                    navigate(`/edit/document/${itemId}`); // Added navigation for document
+                    setChatDocumentContextIds(prev => [...new Set([...prev, itemId])]);
+                    navigate(`/review/document/${itemId}`);
                 }
                 break;
             case 'rename':
@@ -541,32 +577,54 @@ const FileManager: React.FC<FileManagerProps> = () => {
 
     // Handle the actual delete operation
     const handleDeleteConfirm = async () => {
-        if (actionState.actionType !== 'delete' || !actionState.itemId || !actionState.itemType) return;
-        const { itemId, itemType } = actionState;
+        if (actionState.actionType !== 'delete' || (!actionState.itemId && !actionState.isBulk)) return;
+
+        const itemsToDelete = actionState.isBulk ? selectedItems : (actionState.itemId ? [actionState.itemId] : []);
+        const itemTypeToDelete = actionState.itemType; // Assuming bulk delete is for the same item type currently visible
+
+        if (itemsToDelete.length === 0) {
+            setActionState({ actionType: null, itemId: null, itemType: null });
+            return;
+        }
+        const currentSelectedCaseIdBeforeDelete = activeCaseId;
+
 
         try {
             setSearchTerm(''); // Clear search on delete
-            let result;
-            if (itemType === 'document') {
-                result = await documentService.deleteDocument(itemId); // Assumes soft delete or handles deletion
-            } else { // template
-                result = await templateService.deleteTemplate(itemId);
+            let allSucceeded = true;
+            for (const itemIdToDelete of itemsToDelete) {
+                let result;
+                if (itemTypeToDelete === 'document') {
+                    result = await documentService.deleteDocument(itemIdToDelete);
+                } else { // template
+                    result = await templateService.deleteTemplate(itemIdToDelete);
+                }
+                if (result.error) {
+                    allSucceeded = false;
+                    toast.error(`Failed to delete ${itemTypeToDelete} ${itemIdToDelete}: ${result.error.message}`);
+                    // Continue trying to delete others
+                }
             }
-            if (result.error) throw result.error;
 
-            // If deleting the currently selected item, clear selection
-            if (itemId === selectedItemId && itemType === selectedItemType) {
+            if (allSucceeded) {
+                toast.success(`${itemsToDelete.length} ${itemTypeToDelete}(s) deleted successfully.`);
+            } else {
+                toast.warning(`Some ${itemTypeToDelete}s could not be deleted. Please check notifications.`);
+            }
+            
+            // If deleting the currently selected item (single delete scenario), clear selection
+            if (!actionState.isBulk && actionState.itemId === selectedItemId && itemTypeToDelete === selectedItemType) {
                 setSelectedItemId(null);
                 setSelectedItemType(null);
                 setActiveCaseId(null); // Clear global active case ID too
             }
+            
+            setSelectedItems([]); // Clear multi-selection
+            await refreshData(itemTypeToDelete as ItemType, currentSelectedCaseIdBeforeDelete); // Refresh the list
 
-            await refreshData(itemType, selectedItemId); // Refresh the list
-            toast.success(`${itemType.charAt(0).toUpperCase() + itemType.slice(1)} deleted successfully.`);
         } catch (err: unknown) {
-            console.error(`Error deleting ${itemType}:`, err);
-            // Type checking for error message
-            toast.error(`Failed to delete ${itemType}: ${err instanceof Error ? err.message : String(err)}`);
+            console.error(`Error deleting ${itemTypeToDelete}(s):`, err);
+            toast.error(`Failed to delete ${itemTypeToDelete}(s): ${err instanceof Error ? err.message : String(err)}`);
         } finally {
             setActionState({ actionType: null, itemId: null, itemType: null }); // Close dialog
         }
@@ -590,18 +648,37 @@ const FileManager: React.FC<FileManagerProps> = () => {
 
     // Render functions for table rows (kept for list view)
     const renderDocumentRow = (doc: Document) => (
-        <tr key={doc.id} className="cursor-pointer hover:bg-muted/50 border-b" onClick={() => handleItemClick(doc.id, 'document')}>
-            <td className="p-2 font-medium flex items-center gap-2">
-                <FileText className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-                <span className="truncate">{doc.filename}</span>
+        <tr 
+            key={doc.id} 
+            className={cn("hover:bg-muted/50 dark:hover:bg-dark-muted/50 transition-colors cursor-pointer", isSelectedItems.includes(doc.id) && "bg-muted/60 dark:bg-dark-muted/60")}
+            onClick={() => handleItemClick(doc.id, 'document')}
+        >
+            <td className="px-3 py-2.5 whitespace-nowrap">
+                <input 
+                    type="checkbox" 
+                    className="h-4 w-4 accent-primary"
+                    checked={selectedItems.includes(doc.id)}
+                    onChange={(e) => handleToggleSelectItem(doc.id)}
+                    onClick={(e) => e.stopPropagation()} 
+                />
             </td>
-            <td className="p-2 text-sm text-muted-foreground">{doc.uploadedAt ? new Date(doc.uploadedAt).toLocaleDateString() : 'N/A'}</td>
-            <td className="p-2 text-sm text-muted-foreground">{doc.contentType || 'N/A'}</td>
-            <td className="p-2 text-right">
+            <td className="px-3 py-2.5 whitespace-nowrap text-sm font-medium text-foreground dark:text-dark-foreground">
+                <div className="flex items-center gap-2">
+                    <FileText className="h-4 w-4 text-muted-foreground dark:text-dark-muted-foreground flex-shrink-0" />
+                    <span className="truncate">{doc.filename}</span>
+                </div>
+            </td>
+            <td className="px-3 py-2.5 whitespace-nowrap text-sm text-muted-foreground dark:text-dark-muted-foreground hidden sm:table-cell">
+                {doc.uploadedAt ? new Date(doc.uploadedAt).toLocaleDateString() : 'N/A'}
+            </td>
+            <td className="px-3 py-2.5 whitespace-nowrap text-sm text-muted-foreground dark:text-dark-muted-foreground hidden md:table-cell">
+                {formatContentType(doc.contentType)}
+            </td>
+            <td className="px-3 py-2.5 whitespace-nowrap text-sm text-right">
                 <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={(e: React.MouseEvent) => e.stopPropagation()}> 
-                           <MoreHorizontal className="h-4 w-4" />
+                        <Button variant="ghost" size="icon" className="h-7 w-7 data-[state=open]:bg-muted" onClick={(e: React.MouseEvent) => e.stopPropagation()}> 
+                            <MoreHorizontal className="h-4 w-4" />
                         </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
@@ -609,7 +686,7 @@ const FileManager: React.FC<FileManagerProps> = () => {
                         <DropdownMenuItem onClick={(e: React.MouseEvent) => { e.stopPropagation(); handleItemAction('edit', doc.id, 'document'); }}>Edit</DropdownMenuItem>
                         <DropdownMenuItem onClick={(e: React.MouseEvent) => { e.stopPropagation(); handleItemAction('rename', doc.id, 'document'); }}>Rename</DropdownMenuItem>
                         <DropdownMenuItem onClick={(e: React.MouseEvent) => { e.stopPropagation(); handleItemAction('download', doc.id, 'document'); }}>Download</DropdownMenuItem>
-                        <DropdownMenuItem className="text-red-600" onClick={(e: React.MouseEvent) => { e.stopPropagation(); handleItemAction('delete', doc.id, 'document'); }}>Delete</DropdownMenuItem>
+                        <DropdownMenuItem className="text-destructive dark:text-dark-destructive focus:text-destructive dark:focus:text-dark-destructive focus:bg-destructive/10 dark:focus:bg-dark-destructive/10" onClick={(e: React.MouseEvent) => { e.stopPropagation(); handleItemAction('delete', doc.id, 'document'); }}>Delete</DropdownMenuItem>
                     </DropdownMenuContent>
                 </DropdownMenu>
             </td>
@@ -617,18 +694,37 @@ const FileManager: React.FC<FileManagerProps> = () => {
     );
 
     const renderTemplateRow = (template: DocumentTemplate) => (
-        <tr key={template.id} className="cursor-pointer hover:bg-muted/50 border-b" onClick={() => handleItemClick(template.id, 'template')}>
-            <td className="p-2 font-medium flex items-center gap-2">
-                 <FileText className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-                <span className="truncate">{template.name}</span>
+        <tr 
+            key={template.id} 
+            className={cn("hover:bg-muted/50 dark:hover:bg-dark-muted/50 transition-colors cursor-pointer", isSelectedItems.includes(template.id) && "bg-muted/60 dark:bg-dark-muted/60")}
+            onClick={() => handleItemClick(template.id, 'template')}
+        >
+            <td className="px-3 py-2.5 whitespace-nowrap">
+                <input 
+                    type="checkbox" 
+                    className="h-4 w-4 accent-primary"
+                    checked={selectedItems.includes(template.id)}
+                    onChange={(e) => handleToggleSelectItem(template.id)} 
+                    onClick={(e) => e.stopPropagation()}
+                />
             </td>
-            <td className="p-2 text-sm text-muted-foreground">{template.category || 'N/A'}</td>
-            <td className="p-2 text-sm text-muted-foreground">{template.createdAt ? new Date(template.createdAt).toLocaleDateString() : 'N/A'}</td>
-            <td className="p-2 text-right">
-                 <DropdownMenu>
+            <td className="px-3 py-2.5 whitespace-nowrap text-sm font-medium text-foreground dark:text-dark-foreground">
+                <div className="flex items-center gap-2">
+                    <FileText className="h-4 w-4 text-muted-foreground dark:text-dark-muted-foreground flex-shrink-0" />
+                    <span className="truncate">{template.name}</span>
+                </div>
+            </td>
+            <td className="px-3 py-2.5 whitespace-nowrap text-sm text-muted-foreground dark:text-dark-muted-foreground hidden sm:table-cell">
+                {template.createdAt ? new Date(template.createdAt).toLocaleDateString() : 'N/A'}
+            </td>
+            <td className="px-3 py-2.5 whitespace-nowrap text-sm text-muted-foreground dark:text-dark-muted-foreground hidden md:table-cell">
+                {template.category || 'N/A'}
+            </td>
+            <td className="px-3 py-2.5 whitespace-nowrap text-sm text-right">
+                <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={(e: React.MouseEvent) => e.stopPropagation()}> 
-                           <MoreHorizontal className="h-4 w-4" />
+                        <Button variant="ghost" size="icon" className="h-7 w-7 data-[state=open]:bg-muted" onClick={(e: React.MouseEvent) => e.stopPropagation()}> 
+                            <MoreHorizontal className="h-4 w-4" />
                         </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
@@ -637,7 +733,7 @@ const FileManager: React.FC<FileManagerProps> = () => {
                         </DropdownMenuItem>
                         <DropdownMenuItem onSelect={() => handleItemAction('edit', template.id, 'template')}><Edit className="mr-2 h-4 w-4"/>Edit Details</DropdownMenuItem>
                         <DropdownMenuItem onSelect={() => handleItemAction('rename', template.id, 'template')}>Rename</DropdownMenuItem>
-                        <DropdownMenuItem className="text-destructive" onSelect={() => handleItemAction('delete', template.id, 'template')}>Delete</DropdownMenuItem>
+                        <DropdownMenuItem className="text-destructive dark:text-dark-destructive focus:text-destructive dark:focus:text-dark-destructive focus:bg-destructive/10 dark:focus:bg-dark-destructive/10" onSelect={() => handleItemAction('delete', template.id, 'template')}>Delete</DropdownMenuItem>
                     </DropdownMenuContent>
                 </DropdownMenu>
             </td>
@@ -653,10 +749,10 @@ const FileManager: React.FC<FileManagerProps> = () => {
                 breadcrumbItems = [{ label: 'Templates' }];
                 break;
             case 'case': { // Keep curly braces for scope
-                const caseName = activeCase?.name || `Case (${selectedItemId?.substring(0, 6)}...)`; 
+                const matterName = activeCase?.name || `Matter (${selectedItemId?.substring(0, 6)}...)`; 
                 breadcrumbItems = [
-                    { label: 'Cases', href: '/files' }, 
-                    { label: caseName },
+                    { label: 'Matters', href: '/files' }, 
+                    { label: matterName },
                 ];
                 // break; // Explicit break shouldn't be needed due to braces, but try adding if error persists
                 break;
@@ -689,11 +785,36 @@ const FileManager: React.FC<FileManagerProps> = () => {
     // Placeholder handler for AI Document Generation
     const handleGenerateAIDocument = () => {
         if (!selectedItemId || selectedItemType !== 'case') {
-            toast.error("Please select a case first to generate a document.");
+            // Check if there's an active case, otherwise prompt to select one.
+            // This logic might need to be adjusted based on UX for AI doc generation without a pre-selected case.
+            toast.error("Please select a matter first to generate a document for it.");
             return;
         }
         // Open the new AI Document Draft modal
         setIsNewAIDocumentDraftModalOpen(true);
+    };
+    
+    const handleToggleSelectItem = (itemId: string) => {
+        setSelectedItems(prevSelected =>
+            prevSelected.includes(itemId)
+                ? prevSelected.filter(id => id !== itemId)
+                : [...prevSelected, itemId]
+        );
+    };
+
+    const handleBulkDelete = () => {
+        if (selectedItems.length === 0) {
+            toast.info("No items selected for deletion.");
+            return;
+        }
+        // Determine item type from the current view context (e.g., if viewing documents, type is 'document')
+        // This assumes all selected items are of the same type as the current view.
+        const currentViewItemType = selectedItemType === 'case' ? 'document' : 'template';
+        if (!currentViewItemType) {
+            toast.error("Cannot determine item type for bulk deletion.");
+            return;
+        }
+        setActionState({ actionType: 'delete', itemId: null, itemType: currentViewItemType, isBulk: true });
     };
 
     // --- Render Logic ---
@@ -714,13 +835,13 @@ const FileManager: React.FC<FileManagerProps> = () => {
                     { 
                         label: 'Use Template', 
                         icon: <Play className="h-4 w-4" />, 
-                        action: () => handleItemClick(template.id, 'template'), 
+                        action: () => navigate(`/ai/templates/${template.id}/fill`),
                         disabled: !activeCaseId 
                     },
                     { 
                         label: 'Edit Details', 
                         icon: <Edit className="h-4 w-4" />, 
-                        action: () => handleItemAction('edit', template.id, 'template') 
+                        action: () => navigate(`/ai/templates/${template.id}/fill`)
                     },
                 ]}
             />
@@ -732,7 +853,7 @@ const FileManager: React.FC<FileManagerProps> = () => {
                 key={`document-${doc.id}`}
                 id={doc.id}
                 label={doc.filename || `Document ${doc.id}`}
-                icon={<FileText className="h-4 w-4 text-blue-500 flex-shrink-0" />}
+                icon={<FileText className="h-4 w-4 text-primary flex-shrink-0" />}
                 typeLabel={doc.contentType || 'Document'}
                 date={`Created: ${doc.uploadedAt ? new Date(doc.uploadedAt).toLocaleDateString() : 'N/A'}`}
                 onClick={handleItemClick}
@@ -755,18 +876,196 @@ const FileManager: React.FC<FileManagerProps> = () => {
         }
 
         return (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                {allItems}
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                {allItems.map(item => (
+                    <div key={item.props.id} className="relative">
+                        <input
+                            type="checkbox"
+                            className="absolute top-2 left-2 h-4 w-4 z-10 accent-primary"
+                            checked={selectedItems.includes(item.props.id)}
+                            onChange={() => handleToggleSelectItem(item.props.id)}
+                            onClick={(e) => e.stopPropagation()} // Prevent card click when toggling checkbox
+                        />
+                        {item}
+                    </div>
+                ))}
             </div>
         );
     };
 
+    const renderListContent = () => {
+        const items: (Document | DocumentTemplate)[] = selectedItemType === 'case' ? filteredDocuments : filteredTemplates;
+        const itemType: ItemType = selectedItemType === 'case' ? 'document' : 'template';
+
+        if ((selectedItemType === 'case' && isDocumentsLoading) || (selectedItemType === 'template' && isTemplatesLoading)) {
+            return <div className="flex justify-center items-center h-64"><Spinner /></div>;
+        }
+        if ((selectedItemType === 'case' && documentsError) || (selectedItemType === 'template' && templatesError)) {
+            return <Alert variant="destructive"><AlertDescription>{documentsError || templatesError}</AlertDescription></Alert>;
+        }
+        if (items.length === 0) {
+            return <p className="text-center text-muted-foreground py-8">No {itemType}s found{searchTerm ? ' matching search' : ''}.</p>;
+        }
+
+        return (
+            <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-border dark:divide-dark-border">
+                    <thead className="bg-muted/50 dark:bg-dark-muted/50">
+                        <tr>
+                            <th scope="col" className="px-3 py-2.5 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground dark:text-dark-muted-foreground w-10">
+                                <input 
+                                    type="checkbox" 
+                                    className="h-4 w-4 accent-primary"
+                                    checked={selectedItems.length > 0 && selectedItems.length === items.length}
+                                    onChange={() => {
+                                        if (selectedItems.length === items.length) {
+                                            setSelectedItems([]);
+                                        } else {
+                                            setSelectedItems(items.map(i => i.id));
+                                        }
+                                    }}
+                                />
+                            </th>
+                            <th scope="col" className="px-3 py-2.5 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground dark:text-dark-muted-foreground">Name</th>
+                            <th scope="col" className="px-3 py-2.5 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground dark:text-dark-muted-foreground hidden sm:table-cell">
+                                {itemType === 'document' ? 'Uploaded' : 'Created'}
+                            </th>
+                            <th scope="col" className="px-3 py-2.5 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground dark:text-dark-muted-foreground hidden md:table-cell">
+                                {itemType === 'document' ? 'Type' : 'Category'}
+                            </th>
+                            <th scope="col" className="relative px-3 py-2.5 text-right text-xs font-medium uppercase tracking-wider text-muted-foreground dark:text-dark-muted-foreground">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border dark:divide-dark-border bg-background dark:bg-dark-background">
+                        {items.map((item) => {
+                            const isSelected = selectedItems.includes(item.id);
+                            const commonProps = {
+                                onRename: () => handleItemAction('rename', item.id, itemType),
+                                onDelete: () => handleItemAction('delete', item.id, itemType),
+                            };
+                            if (itemType === 'document') {
+                                const doc = item as Document;
+                                return (
+                                    <tr 
+                                        key={doc.id} 
+                                        className={cn("hover:bg-muted/50 dark:hover:bg-dark-muted/50 transition-colors cursor-pointer", isSelected && "bg-muted/60 dark:bg-dark-muted/60")}
+                                        onClick={() => handleItemClick(doc.id, 'document')}
+                                    >
+                                        <td className="px-3 py-2.5 whitespace-nowrap">
+                                            <input 
+                                                type="checkbox" 
+                                                className="h-4 w-4 accent-primary"
+                                                checked={isSelected} 
+                                                onChange={() => handleToggleSelectItem(doc.id)}
+                                                onClick={(e) => e.stopPropagation()} 
+                                            />
+                                        </td>
+                                        <td className="px-3 py-2.5 whitespace-nowrap text-sm font-medium text-foreground dark:text-dark-foreground">
+                                            <div className="flex items-center gap-2">
+                                                <FileText className="h-4 w-4 text-muted-foreground dark:text-dark-muted-foreground flex-shrink-0" />
+                                                <span className="truncate">{doc.filename}</span>
+                                            </div>
+                                        </td>
+                                        <td className="px-3 py-2.5 whitespace-nowrap text-sm text-muted-foreground dark:text-dark-muted-foreground hidden sm:table-cell">
+                                            {doc.uploadedAt ? new Date(doc.uploadedAt).toLocaleDateString() : 'N/A'}
+                                        </td>
+                                        <td className="px-3 py-2.5 whitespace-nowrap text-sm text-muted-foreground dark:text-dark-muted-foreground hidden md:table-cell">
+                                            {formatContentType(doc.contentType)}
+                                        </td>
+                                        <td className="px-3 py-2.5 whitespace-nowrap text-sm text-right">
+                                            <DropdownMenu>
+                                                <DropdownMenuTrigger asChild>
+                                                    <Button variant="ghost" size="icon" className="h-7 w-7 data-[state=open]:bg-muted" onClick={(e: React.MouseEvent) => e.stopPropagation()}> 
+                                                        <MoreHorizontal className="h-4 w-4" />
+                                                    </Button>
+                                                </DropdownMenuTrigger>
+                                                <DropdownMenuContent align="end">
+                                                    <DropdownMenuItem onClick={(e: React.MouseEvent) => { e.stopPropagation(); handleItemAction('view', doc.id, 'document'); }}>View</DropdownMenuItem>
+                                                    <DropdownMenuItem onClick={(e: React.MouseEvent) => { e.stopPropagation(); handleItemAction('edit', doc.id, 'document'); }}>Edit</DropdownMenuItem>
+                                                    <DropdownMenuItem onClick={(e: React.MouseEvent) => { e.stopPropagation(); commonProps.onRename(); }}>Rename</DropdownMenuItem>
+                                                    <DropdownMenuItem onClick={(e: React.MouseEvent) => { e.stopPropagation(); handleItemAction('download', doc.id, 'document'); }}>Download</DropdownMenuItem>
+                                                    <DropdownMenuItem className="text-destructive dark:text-dark-destructive focus:text-destructive dark:focus:text-dark-destructive focus:bg-destructive/10 dark:focus:bg-dark-destructive/10" onClick={(e: React.MouseEvent) => { e.stopPropagation(); commonProps.onDelete(); }}>Delete</DropdownMenuItem>
+                                                </DropdownMenuContent>
+                                            </DropdownMenu>
+                                        </td>
+                                    </tr>
+                                );
+                            } else {
+                                const template = item as DocumentTemplate;
+                                return (
+                                    <tr 
+                                        key={template.id} 
+                                        className={cn("hover:bg-muted/50 dark:hover:bg-dark-muted/50 transition-colors cursor-pointer", isSelected && "bg-muted/60 dark:bg-dark-muted/60")}
+                                        onClick={() => handleItemClick(template.id, 'template')}
+                                    >
+                                         <td className="px-3 py-2.5 whitespace-nowrap">
+                                            <input 
+                                                type="checkbox" 
+                                                className="h-4 w-4 accent-primary"
+                                                checked={isSelected} 
+                                                onChange={() => handleToggleSelectItem(template.id)} 
+                                                onClick={(e) => e.stopPropagation()}
+                                            />
+                                        </td>
+                                        <td className="px-3 py-2.5 whitespace-nowrap text-sm font-medium text-foreground dark:text-dark-foreground">
+                                            <div className="flex items-center gap-2">
+                                                <FileText className="h-4 w-4 text-muted-foreground dark:text-dark-muted-foreground flex-shrink-0" />
+                                                <span className="truncate">{template.name}</span>
+                                            </div>
+                                        </td>
+                                        <td className="px-3 py-2.5 whitespace-nowrap text-sm text-muted-foreground dark:text-dark-muted-foreground hidden sm:table-cell">
+                                            {template.createdAt ? new Date(template.createdAt).toLocaleDateString() : 'N/A'}
+                                        </td>
+                                        <td className="px-3 py-2.5 whitespace-nowrap text-sm text-muted-foreground dark:text-dark-muted-foreground hidden md:table-cell">
+                                            {template.category || 'N/A'}
+                                        </td>
+                                        <td className="px-3 py-2.5 whitespace-nowrap text-sm text-right">
+                                            <DropdownMenu>
+                                                <DropdownMenuTrigger asChild>
+                                                    <Button variant="ghost" size="icon" className="h-7 w-7 data-[state=open]:bg-muted" onClick={(e: React.MouseEvent) => e.stopPropagation()}> 
+                                                       <MoreHorizontal className="h-4 w-4" />
+                                                    </Button>
+                                                </DropdownMenuTrigger>
+                                                <DropdownMenuContent align="end">
+                                                    <DropdownMenuItem onSelect={() => handleItemClick(template.id, 'template')} disabled={!activeCaseId}>
+                                                        <Play className="mr-2 h-4 w-4"/>Use Template
+                                                    </DropdownMenuItem>
+                                                    <DropdownMenuItem onSelect={() => handleItemAction('edit', template.id, 'template')}><Edit className="mr-2 h-4 w-4"/>Edit Details</DropdownMenuItem>
+                                                    <DropdownMenuItem onSelect={() => commonProps.onRename()}>Rename</DropdownMenuItem>
+                                                    <DropdownMenuItem className="text-destructive dark:text-dark-destructive focus:text-destructive dark:focus:text-dark-destructive focus:bg-destructive/10 dark:focus:bg-dark-destructive/10" onSelect={() => commonProps.onDelete()}>Delete</DropdownMenuItem>
+                                                </DropdownMenuContent>
+                                            </DropdownMenu>
+                                        </td>
+                                    </tr>
+                                );
+                            }
+                        })}
+                    </tbody>
+                </table>
+            </div>
+        );
+    };
+
+    // Helper function to format content type
+    const formatContentType = (contentType: string | null | undefined): string => {
+        if (!contentType) return 'N/A';
+        if (contentType.includes('pdf')) return 'PDF Document';
+        if (contentType.includes('wordprocessingml')) return 'Word Document';
+        if (contentType.includes('msword')) return 'Word Document (Legacy)';
+        if (contentType.includes('plain')) return 'Text File';
+        if (contentType.includes('csv')) return 'CSV File';
+        if (contentType.includes('excel') || contentType.includes('spreadsheetml')) return 'Excel Spreadsheet';
+        if (contentType.includes('image')) return 'Image';
+        // Add more mappings as needed
+        return contentType; // Fallback to original if not mapped
+    };
+
     return (
-        <div className="flex h-full bg-background text-foreground overflow-hidden">
-            {/* Sidebar Section (unchanged) */}
-            <ScrollArea className="w-64 border-r border-border p-2 shrink-0">
+        <div className="flex h-full bg-background text-foreground dark:text-dark-foreground overflow-hidden">
+            {/* Sidebar Section */}
+            <ScrollArea className="w-64 border-r border-border dark:border-dark-border p-2 shrink-0">
                  {/* Cases Folder */} 
-                 <h3 className="text-xs font-semibold uppercase text-muted-foreground px-2 mt-2">Cases</h3>
+                 <h3 className="text-xs font-semibold uppercase text-muted-foreground dark:text-dark-muted-foreground px-2 mt-2">Matters</h3>
                  <div className="pl-1 space-y-1 mb-4">
                      {isCasesLoading && <Spinner size="sm" className="mx-auto" />}
                      {casesError && <Alert variant="destructive" className="text-xs p-1"><AlertDescription>{casesError}</AlertDescription></Alert>}
@@ -782,20 +1081,20 @@ const FileManager: React.FC<FileManagerProps> = () => {
                          />
                      ))}
                      {!isCasesLoading && !casesError && filteredCases.length === 0 && (
-                        <p className="text-xs text-muted-foreground italic px-2 py-2">No cases found.</p>
+                        <p className="text-xs text-foreground/70 dark:text-muted-foreground italic px-2 py-2">No matters found.</p>
                      )}
                      <Button 
                         variant="ghost" 
                         size="sm" 
-                        className="w-full justify-start text-muted-foreground hover:text-foreground mt-1" 
+                        className="w-full justify-start text-muted-foreground dark:text-dark-muted-foreground hover:text-foreground dark:hover:text-dark-foreground mt-1" 
                         onClick={() => setIsManageCasesModalOpen(true)}
                      >
-                         <FolderPlus className="h-4 w-4 mr-2"/> Manage Cases...
+                         <FolderPlus className="h-4 w-4 mr-2"/> Manage Matters...
                      </Button>
                  </div>
 
                 {/* Templates Folder */} 
-                <h3 className="text-xs font-semibold uppercase text-muted-foreground px-2 mt-3">Templates</h3>
+                <h3 className="text-xs font-semibold uppercase text-muted-foreground dark:text-dark-muted-foreground px-2 mt-3">Templates</h3>
                 <div className="pl-1 space-y-1 mb-4">
                     {isTemplatesLoading && <Spinner size="sm" className="mx-auto"/>}
                     {templatesError && <Alert variant="destructive" className="text-xs p-1"><AlertDescription>{templatesError}</AlertDescription></Alert>}
@@ -805,21 +1104,24 @@ const FileManager: React.FC<FileManagerProps> = () => {
                              label="All Templates"
                              icon={<FileText className="h-4 w-4 flex-shrink-0" />}
                              isSelected={selectedItemType === 'template'}
-                             onClick={handleSelectItem}
+                             onClick={(id, type) => { // Modified onClick to directly set template view
+                                 handleSelectItem(id, type);
+                                 setActiveCaseId(null); // Ensure no case is active when viewing all templates
+                             }}
                              type='template'
                          />
                      )}
-                     <Button variant="ghost" size="sm" className="w-full justify-start text-muted-foreground hover:text-foreground mt-1" onClick={() => navigate('/templates')}>
+                     <Button variant="ghost" size="sm" className="w-full justify-start text-muted-foreground dark:text-dark-muted-foreground hover:text-foreground dark:hover:text-dark-foreground mt-1" onClick={() => setIsNewAITemplateModalOpen(true)}>
                          <Plus className="h-4 w-4 mr-2"/> Manage Templates...
                      </Button>
                  </div>
              </ScrollArea>
 
-            {/* Main Content Area - ADD DRAG HANDLERS and CONDITIONAL STYLING */}
+            {/* Main Content Area */}
             <div
                 className={cn(
                     "flex-1 flex flex-col overflow-hidden transition-colors",
-                    isDraggingOver && "bg-blue-100 dark:bg-blue-900/30 border-2 border-dashed border-blue-500" // Example visual feedback
+                    isDraggingOver && "bg-primary/10 dark:bg-dark-primary/10 border-2 border-dashed border-primary dark:border-dark-primary" // Themed drag over
                 )}
                 onDragEnter={handleDragEnter}
                 onDragLeave={handleDragLeave}
@@ -827,7 +1129,7 @@ const FileManager: React.FC<FileManagerProps> = () => {
                 onDrop={handleDrop}
             >
                 {/* Toolbar */}
-                 <div className="p-2 border-b border-border flex items-center justify-between shrink-0">
+                 <div className="p-2 border-b border-border dark:border-dark-border flex items-center justify-between shrink-0">
                     {/* Left side (Breadcrumbs) */}
                     <div>
                         <Breadcrumb items={breadcrumbItems} />
@@ -835,9 +1137,20 @@ const FileManager: React.FC<FileManagerProps> = () => {
 
                     {/* Right side */}
                     <div className="flex items-center gap-2">
+                        {selectedItems.length > 0 && (
+                            <Button 
+                                variant="destructive" 
+                                size="sm" 
+                                className="h-8"
+                                onClick={handleBulkDelete}
+                            >
+                                Delete ({selectedItems.length})
+                            </Button>
+                        )}
                         <Input 
-                            placeholder="Search..." 
-                            className="h-8 w-48"
+                            ref={searchInputRef} // Assign the ref here
+                            placeholder="Search current view..." // Updated placeholder
+                            className="h-8 w-48 placeholder:text-muted-foreground dark:placeholder:text-dark-muted-foreground"
                             value={searchTerm}
                             onChange={(e) => setSearchTerm(e.target.value)}
                         />
@@ -888,7 +1201,7 @@ const FileManager: React.FC<FileManagerProps> = () => {
                                 variant="outline"
                                 size="sm"
                                 className="h-8"
-                                onClick={() => navigate(`/edit/document/new?caseId=${selectedItemId}`)}
+                                onClick={() => navigate(`/review/document/new?caseId=${selectedItemId}`)}
                              >
                                 <FilePlus className="h-4 w-4 mr-2" />
                                 New Document
@@ -899,7 +1212,7 @@ const FileManager: React.FC<FileManagerProps> = () => {
                                 variant="outline"
                                 size="sm"
                                 className="h-8"
-                                onClick={() => navigate(`/edit/template/new`)}
+                                onClick={() => setIsNewAITemplateModalOpen(true)}
                             >
                                 <FilePlus className="h-4 w-4 mr-2" />
                                 New Template
@@ -938,7 +1251,9 @@ const FileManager: React.FC<FileManagerProps> = () => {
                          <> 
                              {isDocumentsLoading && <div className="flex justify-center items-center pt-10"><Spinner size="lg" /></div>}
                              {documentsError && <Alert variant="destructive" className="m-4"><AlertDescription>{documentsError}</AlertDescription></Alert>}
-                             {!isDocumentsLoading && !documentsError && renderGridContent()}
+                             {!isDocumentsLoading && !documentsError && (
+                                viewMode === 'grid' ? renderGridContent() : renderListContent()
+                             )}
                          </>
                      )}
 
@@ -947,7 +1262,9 @@ const FileManager: React.FC<FileManagerProps> = () => {
                          <>
                              {isTemplatesLoading && <div className="flex justify-center items-center pt-10"><Spinner size="lg" /></div>}
                              {templatesError && <Alert variant="destructive" className="m-4"><AlertDescription>{templatesError}</AlertDescription></Alert>}
-                             {!isTemplatesLoading && !templatesError && renderGridContent()}
+                             {!isTemplatesLoading && !templatesError && (
+                                viewMode === 'grid' ? renderGridContent() : renderListContent()
+                             )}
                          </>
                      )}
 
@@ -955,7 +1272,7 @@ const FileManager: React.FC<FileManagerProps> = () => {
                      {selectedItemType === null && (
                          <div className="flex flex-col items-center justify-center h-full pt-20">
                              <Folder className="h-16 w-16 text-muted-foreground/50 mb-4" /> 
-                             <p className="text-muted-foreground">Select a case or template category to view files.</p>
+                             <p className="text-muted-foreground">Select a matter or template category to view files.</p>
                          </div>
                      )}
                  </ScrollArea>
@@ -986,9 +1303,9 @@ const FileManager: React.FC<FileManagerProps> = () => {
                     </div>
                     <DialogFooter>
                         <DialogClose asChild>
-                            <Button type="button" variant="secondary">Cancel</Button>
+                            <Button type="button" variant="outline">Cancel</Button> {/* Changed from secondary to outline */}
                         </DialogClose>
-                        <Button type="button" onClick={handleRenameConfirm}>Save changes</Button>
+                        <Button type="button" variant="primary" onClick={handleRenameConfirm}>Save changes</Button>
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
@@ -999,7 +1316,7 @@ const FileManager: React.FC<FileManagerProps> = () => {
                     <AlertDialogHeader>
                         <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
                         <AlertDialogDescription>
-                            This action cannot be undone. This will permanently delete the {actionState.itemType} &apos;{actionState.itemId}&apos;.
+                            This action cannot be undone. This will permanently delete {actionState.isBulk ? `${selectedItems.length} item(s)` : `the ${actionState.itemType} '${actionState.itemId}'`}.
                             {/* TODO: Fetch name for delete confirmation? */}
                         </AlertDialogDescription>
                     </AlertDialogHeader>
@@ -1028,11 +1345,10 @@ const FileManager: React.FC<FileManagerProps> = () => {
             />
             <NewAIDocumentDraftModal 
                 isOpen={isNewAIDocumentDraftModalOpen}
-                onClose={handleAIDraftModalClose} // Use the new, correct handler
-                activeCaseId={activeCaseId} // Pass the active case ID
-                onSuccess={(newDocId) => { // Added onSuccess handler
-                    // Navigate or refresh based on new doc
-                    navigate(`/edit/document/${newDocId}`);
+                onClose={handleAIDraftModalClose}
+                activeCaseId={activeCaseId}
+                onSuccess={(newDocId) => {
+                    navigate(`/review/document/${newDocId}`);
                 }}
             />
             <CaseRequiredDialog

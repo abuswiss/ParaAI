@@ -18,7 +18,7 @@ import {
   DialogDescription, 
   DialogFooter, 
   DialogClose 
-} from '@/components/ui/Dialog';
+} from '@/components/ui/dialog';
 import { 
   Select, 
   SelectContent, 
@@ -119,15 +119,20 @@ const NewAIDocumentDraftModal: React.FC<NewAIDocumentDraftModalProps> = ({ isOpe
 
       // 2. Save the generated content as a new document
       const filename = `${documentType} Draft - ${new Date().toLocaleDateString()}`;
-      const { data: newDoc, error: createError } = await documentService.createDocument(
-          user.id, // User ID should be validated by now
-          activeCaseId, // Case ID validated
-          {
-              content: agentResult.draftContent, // Use the content from the agent
-              filename: filename,
-              // Add template_id if applicable, maybe based on documentType?
-          }
-      );
+
+      // Log the user ID being sent
+      console.log(`NewAIDocumentDraftModal: handleSubmit - User ID being passed to createDocument: ${user.id}`);
+      console.log(`NewAIDocumentDraftModal: handleSubmit - Active Case ID: ${activeCaseId}`);
+
+      const { data: newDoc, error: createError } = await documentService.createDocument({
+          userId: user.id, 
+          caseId: activeCaseId, 
+          content: agentResult.draftContent, 
+          filename: filename,
+          // Add template_id if applicable, maybe based on documentType?
+          // contentType: 'text/html', // Explicitly set if createDocument doesn't default it correctly for this case
+          // initialProcessingStatus: 'text_extracted' // Can also be set here if needed
+      });
 
       if (createError) throw createError;
       if (!newDoc?.id) throw new Error('Document saved, but ID was not returned.');
@@ -168,10 +173,10 @@ const NewAIDocumentDraftModal: React.FC<NewAIDocumentDraftModalProps> = ({ isOpe
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && handleClose()}> 
-      <DialogContent className="sm:max-w-xl bg-card text-card-foreground border dark:bg-card dark:text-card-foreground"> 
+      <DialogContent className="sm:max-w-xl bg-card dark:bg-dark-card text-card-foreground dark:text-dark-card-foreground backdrop-blur-md border border-card-border dark:border-dark-card-border">
         <DialogHeader>
           <DialogTitle>Generate AI Document Draft</DialogTitle>
-          <DialogDescription className="text-muted-foreground">
+          <DialogDescription>
             Provide instructions and context for the document you need. The AI will generate a draft within the selected case.
           </DialogDescription>
         </DialogHeader>
@@ -181,15 +186,15 @@ const NewAIDocumentDraftModal: React.FC<NewAIDocumentDraftModalProps> = ({ isOpe
             <div className="flex items-center justify-center min-h-[250px] py-4">
               <div className="text-center">
                 <Spinner size="lg" className="mx-auto mb-4" />
-                <p className="text-muted-foreground">Generating AI document draft...</p>
-                <p className="text-xs text-muted-foreground mt-2">(This may take a moment)</p>
+                <p className="text-muted-foreground dark:text-dark-muted-foreground">Generating AI document draft...</p>
+                <p className="text-xs text-muted-foreground dark:text-dark-muted-foreground mt-2">(This may take a moment)</p>
               </div>
             </div>
           ) : (
             // Form Content when not loading
             <div className="grid gap-4 py-4">
               <div className="grid grid-cols-4 items-center gap-4">
-                <Label htmlFor="docType" className="text-right text-card-foreground">
+                <Label htmlFor="docType" className="text-right text-card-foreground dark:text-dark-card-foreground">
                   Document Type
                 </Label>
                 <Select 
@@ -197,10 +202,10 @@ const NewAIDocumentDraftModal: React.FC<NewAIDocumentDraftModalProps> = ({ isOpe
                   onValueChange={setDocumentType} 
                   disabled={isLoading}
                 >
-                  <SelectTrigger id="docType" className="col-span-3 bg-background text-foreground border-border">
+                  <SelectTrigger id="docType" className="col-span-3 bg-input dark:bg-dark-input text-foreground dark:text-dark-foreground border-input dark:border-dark-input focus:ring-ring dark:focus:ring-dark-ring">
                     <SelectValue placeholder="Select type" />
                   </SelectTrigger>
-                  <SelectContent className="bg-popover text-popover-foreground border-border">
+                  <SelectContent className="bg-popover dark:bg-dark-popover text-popover-foreground dark:text-dark-popover-foreground border-popover-border dark:border-dark-popover-border">
                     {DOCUMENT_TYPES.map((type) => (
                       <SelectItem key={type} value={type}>{type}</SelectItem>
                     ))}
@@ -209,7 +214,7 @@ const NewAIDocumentDraftModal: React.FC<NewAIDocumentDraftModalProps> = ({ isOpe
               </div>
 
               <div className="grid grid-cols-4 items-start gap-4">
-                <Label htmlFor="instructions-doc" className="text-right pt-2 text-card-foreground">
+                <Label htmlFor="instructions-doc" className="text-right pt-2 text-card-foreground dark:text-dark-card-foreground">
                   Instructions*
                 </Label>
                 <Textarea
@@ -219,13 +224,13 @@ const NewAIDocumentDraftModal: React.FC<NewAIDocumentDraftModalProps> = ({ isOpe
                   placeholder="e.g., Draft a motion to compel discovery, requesting specific documents related to..."
                   required
                   rows={5}
-                  className="col-span-3 bg-background text-foreground border-border focus-visible:ring-primary"
+                  className="col-span-3 bg-input dark:bg-dark-input text-foreground dark:text-dark-foreground border-input dark:border-dark-input focus-visible:ring-ring dark:focus-visible:ring-dark-ring placeholder:text-muted-foreground dark:placeholder:text-dark-muted-foreground"
                   disabled={isLoading}
                 />
               </div>
               
               <div className="grid grid-cols-4 items-start gap-4">
-                <Label htmlFor="context-doc" className="text-right pt-2 text-card-foreground">
+                <Label htmlFor="context-doc" className="text-right pt-2 text-card-foreground dark:text-dark-card-foreground">
                   Additional Context
                 </Label>
                 <Textarea
@@ -234,7 +239,7 @@ const NewAIDocumentDraftModal: React.FC<NewAIDocumentDraftModalProps> = ({ isOpe
                   onChange={(e) => setAdditionalContext(e.target.value)}
                   placeholder="(Optional) Provide key facts, dates, party names, relevant case law citations, or specific clauses to include..."
                   rows={4}
-                  className="col-span-3 bg-background text-foreground border-border focus-visible:ring-primary"
+                  className="col-span-3 bg-input dark:bg-dark-input text-foreground dark:text-dark-foreground border-input dark:border-dark-input focus-visible:ring-ring dark:focus-visible:ring-dark-ring placeholder:text-muted-foreground dark:placeholder:text-dark-muted-foreground"
                   disabled={isLoading}
                 />
               </div>
@@ -253,8 +258,8 @@ const NewAIDocumentDraftModal: React.FC<NewAIDocumentDraftModalProps> = ({ isOpe
                      Cancel
                  </Button>
             </DialogClose>
-            <Button type="submit" disabled={isLoading || !activeCaseId}>
-              {isLoading ? <Spinner size="sm" className="mr-2" /> : <Icons.Sparkles className="mr-2 h-4 w-4" />}
+            <Button variant="primary" type="submit" disabled={isLoading || !activeCaseId}>
+              {isLoading ? <Spinner size="sm" className="mr-2" /> : <Icons.Sparkles className="mr-2 h-4 w-4 text-primary-foreground" />}
               {isLoading ? 'Generating...' : 'Generate Document'}
             </Button>
           </DialogFooter>

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { generateDraftWithAI, createTemplate, createDraftFromTemplate, createAIDraft } from '../../services/templateService';
 import { saveAs } from 'file-saver';
+import { X } from 'lucide-react';
 
 const US_STATES = [
   'Alabama', 'Alaska', 'Arizona', 'Arkansas', 'California', 'Colorado', 'Connecticut', 'Delaware', 'Florida', 'Georgia',
@@ -194,30 +195,29 @@ const AIDraftModal: React.FC<AIDraftModalProps> = ({ isOpen, onClose, context, o
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-70">
-      <div className="bg-gray-900 rounded-lg shadow-lg w-full max-w-4xl mx-4 p-8 relative">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 dark:bg-black/70 backdrop-blur-sm">
+      <div className="bg-card dark:bg-dark-card backdrop-blur-md shadow-xl border border-card-border dark:border-dark-card-border rounded-lg w-full max-w-4xl mx-4 p-8 relative">
         {/* Close button */}
         <button
-          className="absolute top-4 right-4 text-gray-400 hover:text-white"
+          className="absolute top-4 right-4 text-muted-foreground dark:text-dark-muted-foreground hover:text-foreground dark:hover:text-dark-foreground p-1 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:focus-visible:ring-dark-ring"
           onClick={onClose}
+          aria-label="Close"
         >
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-          </svg>
+          <X className="h-5 w-5" />
         </button>
-        <h2 className="text-2xl font-semibold text-text-primary mb-6 text-center">
+        <h2 className="text-2xl font-semibold text-foreground dark:text-dark-foreground mb-6 text-center">
           AI Draft {context === 'template' ? 'Template' : 'Document'}
         </h2>
         {notification && (
-          <div className="mb-6 p-3 bg-green-800 text-green-200 rounded text-center">{notification}</div>
+          <div className="mb-6 p-3 bg-success/20 dark:bg-dark-success/20 text-success dark:text-dark-success border border-success/30 dark:border-dark-success/30 rounded text-center">{notification}</div>
         )}
         {step === 'input' && (
           <>
             <div className="mb-6 grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
-                <label className="block text-text-secondary mb-2">Type of Document</label>
+                <label className="block text-sm font-medium text-foreground dark:text-dark-foreground mb-2">Type of Document</label>
                 <select
-                  className="w-full bg-gray-800 border border-gray-700 rounded px-4 py-3 text-text-primary"
+                  className="w-full bg-input dark:bg-dark-input border border-input-border dark:border-dark-input-border rounded px-4 py-3 text-foreground dark:text-dark-foreground focus:outline-none focus:ring-2 focus:ring-ring dark:focus:ring-dark-ring focus:border-ring dark:focus:border-dark-ring"
                   value={docType}
                   onChange={e => setDocType(e.target.value as DocumentType)}
                 >
@@ -230,9 +230,9 @@ const AIDraftModal: React.FC<AIDraftModalProps> = ({ isOpen, onClose, context, o
                 </select>
               </div>
               <div>
-                <label className="block text-text-secondary mb-2">Jurisdiction</label>
+                <label className="block text-sm font-medium text-foreground dark:text-dark-foreground mb-2">Jurisdiction</label>
                 <select
-                  className="w-full bg-gray-800 border border-gray-700 rounded px-4 py-3 text-text-primary"
+                  className="w-full bg-input dark:bg-dark-input border border-input-border dark:border-dark-input-border rounded px-4 py-3 text-foreground dark:text-dark-foreground focus:outline-none focus:ring-2 focus:ring-ring dark:focus:ring-dark-ring focus:border-ring dark:focus:border-dark-ring"
                   value={jurisdiction}
                   onChange={e => setJurisdiction(e.target.value)}
                 >
@@ -246,39 +246,39 @@ const AIDraftModal: React.FC<AIDraftModalProps> = ({ isOpen, onClose, context, o
             </div>
             <div className="mb-6 grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
-                <label className="block text-text-secondary mb-2">Intended Audience <span className="text-xs text-gray-500">(optional)</span></label>
+                <label className="block text-sm font-medium text-foreground dark:text-dark-foreground mb-2">Intended Audience <span className="text-xs text-muted-foreground dark:text-dark-muted-foreground">(optional)</span></label>
                 <textarea
-                  className="w-full bg-gray-800 border border-gray-700 rounded px-4 py-3 text-text-primary min-h-[80px]"
+                  className="w-full bg-input dark:bg-dark-input border border-input-border dark:border-dark-input-border rounded px-4 py-3 text-foreground dark:text-dark-foreground min-h-[80px] placeholder:text-muted-foreground dark:placeholder:text-dark-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring dark:focus:ring-dark-ring focus:border-ring dark:focus:border-dark-ring"
                   value={audience}
                   onChange={e => setAudience(e.target.value)}
                   placeholder="E.g. Client, Court, Opposing Counsel"
                 />
               </div>
               <div>
-                <label className="block text-text-secondary mb-2">Special Instructions <span className="text-xs text-gray-500">(optional)</span></label>
+                <label className="block text-sm font-medium text-foreground dark:text-dark-foreground mb-2">Special Instructions <span className="text-xs text-muted-foreground dark:text-dark-muted-foreground">(optional)</span></label>
                 <textarea
-                  className="w-full bg-gray-800 border border-gray-700 rounded px-4 py-3 text-text-primary min-h-[80px]"
+                  className="w-full bg-input dark:bg-dark-input border border-input-border dark:border-dark-input-border rounded px-4 py-3 text-foreground dark:text-dark-foreground min-h-[80px] placeholder:text-muted-foreground dark:placeholder:text-dark-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring dark:focus:ring-dark-ring focus:border-ring dark:focus:border-dark-ring"
                   value={specialInstructions}
                   onChange={e => setSpecialInstructions(e.target.value)}
                   placeholder="E.g. Use plain English, include indemnification clause"
                 />
               </div>
             </div>
-            <label className="block text-text-secondary mb-2">Describe what you want the AI to draft:</label>
+            <label className="block text-sm font-medium text-foreground dark:text-dark-foreground mb-2">Describe what you want the AI to draft:</label>
             <textarea
-              className="w-full bg-gray-800 border border-gray-700 rounded px-4 py-3 text-text-primary mb-6 min-h-[150px]"
+              className="w-full bg-input dark:bg-dark-input border border-input-border dark:border-dark-input-border rounded px-4 py-3 text-foreground dark:text-dark-foreground mb-6 min-h-[150px] placeholder:text-muted-foreground dark:placeholder:text-dark-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring dark:focus:ring-dark-ring focus:border-ring dark:focus:border-dark-ring"
               value={requirements}
               onChange={e => setRequirements(e.target.value)}
               placeholder="E.g. Draft a contract for..."
             />
             <button
-              className="w-full py-3 bg-gradient-to-r from-purple-600 to-blue-500 text-white rounded-lg hover:from-purple-700 hover:to-blue-600 disabled:opacity-50 transition-all duration-200 shadow-lg"
+              className="w-full py-3 bg-primary text-primary-foreground rounded-lg hover:bg-primary-hover disabled:opacity-50 transition-colors duration-150 shadow-md"
               onClick={handleGenerateDraft}
               disabled={!requirements.trim() || isLoading}
             >
               {isLoading ? 'Generating...' : 'Generate Draft'}
             </button>
-            {error && <div className="text-red-400 mt-4">{error}</div>}
+            {error && <div className="text-destructive dark:text-dark-destructive mt-4">{error}</div>}
           </>
         )}
         {step === 'draft' && (
@@ -286,16 +286,16 @@ const AIDraftModal: React.FC<AIDraftModalProps> = ({ isOpen, onClose, context, o
             <div className="mt-6">
               {saveMode === 'none' && (
                 <div className="flex flex-col items-center space-y-4">
-                  <div className="text-text-secondary mb-2">How would you like to save this draft?</div>
+                  <div className="text-muted-foreground dark:text-dark-muted-foreground mb-2">How would you like to save this draft?</div>
                   <div className="flex gap-4">
                     <button
-                      className="px-4 py-2 bg-primary text-white rounded hover:bg-primary-hover"
+                      className="px-4 py-2 bg-primary text-primary-foreground rounded hover:bg-primary-hover"
                       onClick={() => setSaveMode('document')}
                     >
                       Save as Document
                     </button>
                     <button
-                      className="px-4 py-2 bg-gray-800 text-text-primary rounded hover:bg-gray-700"
+                      className="px-4 py-2 bg-secondary text-secondary-foreground rounded hover:bg-secondary-hover"
                       onClick={() => setSaveMode('template')}
                     >
                       Save as Template
@@ -312,12 +312,12 @@ const AIDraftModal: React.FC<AIDraftModalProps> = ({ isOpen, onClose, context, o
                   className="mt-4 flex flex-col gap-4"
                 >
                   <div>
-                    <label className="block text-sm text-text-secondary mb-1">{saveMode === 'template' ? 'Template Name' : 'Document Name'}</label>
+                    <label className="block text-sm font-medium text-foreground dark:text-dark-foreground mb-1">{saveMode === 'template' ? 'Template Name' : 'Document Name'}</label>
                     <input
                       type="text"
                       value={draftName}
                       onChange={e => setDraftName(e.target.value)}
-                      className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-text-primary focus:outline-none focus:border-primary"
+                      className="w-full bg-input dark:bg-dark-input border border-input-border dark:border-dark-input-border rounded px-3 py-2 text-foreground dark:text-dark-foreground placeholder:text-muted-foreground dark:placeholder:text-dark-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring dark:focus:ring-dark-ring focus:border-ring dark:focus:border-dark-ring"
                       placeholder={saveMode === 'template' ? 'Enter template name...' : 'Enter document name...'}
                       required
                     />
@@ -325,21 +325,21 @@ const AIDraftModal: React.FC<AIDraftModalProps> = ({ isOpen, onClose, context, o
                   {saveMode === 'template' && (
                     <>
                       <div>
-                        <label className="block text-sm text-text-secondary mb-1">Description</label>
+                        <label className="block text-sm font-medium text-foreground dark:text-dark-foreground mb-1">Description</label>
                         <input
                           type="text"
                           value={requirements}
                           onChange={e => setRequirements(e.target.value)}
-                          className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-text-primary focus:outline-none focus:border-primary"
+                          className="w-full bg-input dark:bg-dark-input border border-input-border dark:border-dark-input-border rounded px-3 py-2 text-foreground dark:text-dark-foreground placeholder:text-muted-foreground dark:placeholder:text-dark-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring dark:focus:ring-dark-ring focus:border-ring dark:focus:border-dark-ring"
                           placeholder="Describe this template (optional)"
                         />
                       </div>
                       <div>
-                        <label className="block text-sm text-text-secondary mb-1">Category</label>
+                        <label className="block text-sm font-medium text-foreground dark:text-dark-foreground mb-1">Category</label>
                         <select
                           value={docType}
                           onChange={e => setDocType(e.target.value as DocumentType)}
-                          className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-text-primary focus:outline-none focus:border-primary"
+                          className="w-full bg-input dark:bg-dark-input border border-input-border dark:border-dark-input-border rounded px-3 py-2 text-foreground dark:text-dark-foreground focus:outline-none focus:ring-2 focus:ring-ring dark:focus:ring-dark-ring focus:border-ring dark:focus:border-dark-ring"
                         >
                           <option value="contract">Contract</option>
                           <option value="letter">Legal Letter</option>
@@ -354,39 +354,39 @@ const AIDraftModal: React.FC<AIDraftModalProps> = ({ isOpen, onClose, context, o
                   <div className="flex gap-4 mt-2">
                     <button
                       type="submit"
-                      className="px-4 py-2 bg-primary text-white rounded hover:bg-primary-hover disabled:opacity-60"
+                      className="px-4 py-2 bg-primary text-primary-foreground rounded hover:bg-primary-hover disabled:opacity-60"
                       disabled={isLoading}
                     >
                       Save
                     </button>
                     <button
                       type="button"
-                      className="px-4 py-2 bg-gray-800 text-text-primary rounded hover:bg-gray-700"
+                      className="px-4 py-2 bg-secondary text-secondary-foreground rounded hover:bg-secondary-hover"
                       onClick={() => setSaveMode('none')}
                       disabled={isLoading}
                     >
                       Back
                     </button>
                   </div>
-                  {error && <div className="text-red-400 text-sm mt-2">{error}</div>}
+                  {error && <div className="text-destructive dark:text-dark-destructive text-sm mt-2">{error}</div>}
                 </form>
               )}
             </div>
-            <label className="block text-text-secondary mb-2">AI Draft</label>
+            <label className="block text-sm font-medium text-foreground dark:text-dark-foreground mb-2 mt-6">AI Draft</label>
             <textarea
-              className="w-full bg-gray-800 border border-gray-700 rounded px-4 py-3 text-text-primary mb-6 min-h-[300px]"
+              className="w-full bg-input dark:bg-dark-input border border-input-border dark:border-dark-input-border rounded px-4 py-3 text-foreground dark:text-dark-foreground mb-6 min-h-[300px] focus:outline-none focus:ring-2 focus:ring-ring dark:focus:ring-dark-ring focus:border-ring dark:focus:border-dark-ring"
               value={draftContent}
               onChange={e => setDraftContent(e.target.value)}
             />
             <div className="flex gap-4 mb-6">
               <input
-                className="flex-1 bg-gray-800 border border-gray-700 rounded px-4 py-3 text-text-primary"
+                className="flex-1 bg-input dark:bg-dark-input border border-input-border dark:border-dark-input-border rounded px-4 py-3 text-foreground dark:text-dark-foreground placeholder:text-muted-foreground dark:placeholder:text-dark-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring dark:focus:ring-dark-ring focus:border-ring dark:focus:border-dark-ring"
                 value={refinePrompt}
                 onChange={e => setRefinePrompt(e.target.value)}
                 placeholder="Refine or add instructions (optional)"
               />
               <button
-                className="px-6 py-3 bg-gradient-to-r from-purple-600 to-blue-500 text-white rounded-lg hover:from-purple-700 hover:to-blue-600 disabled:opacity-50 transition-all duration-200 shadow-lg"
+                className="px-6 py-3 bg-primary text-primary-foreground rounded-lg hover:bg-primary-hover disabled:opacity-50 transition-colors duration-150 shadow-md"
                 onClick={handleRefineDraft}
                 disabled={!refinePrompt.trim() || isLoading}
               >
@@ -395,14 +395,14 @@ const AIDraftModal: React.FC<AIDraftModalProps> = ({ isOpen, onClose, context, o
             </div>
             <div className="flex gap-4 justify-end">
               <button
-                className="px-6 py-3 bg-gradient-to-r from-purple-600 to-blue-500 text-white rounded-lg hover:from-purple-700 hover:to-blue-600 disabled:opacity-50 transition-all duration-200 shadow-lg"
+                className="px-6 py-3 bg-primary text-primary-foreground rounded-lg hover:bg-primary-hover disabled:opacity-50 transition-colors duration-150 shadow-md"
                 onClick={handleExport}
                 disabled={!draftContent.trim()}
               >
                 Export
               </button>
             </div>
-            {error && <div className="text-red-400 mt-4">{error}</div>}
+            {error && <div className="text-destructive dark:text-dark-destructive mt-4">{error}</div>}
           </>
         )}
       </div>

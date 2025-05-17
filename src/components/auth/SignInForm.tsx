@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useAuth } from '@/hooks/useAuth';
+import * as authService from '@/services/authService';
 import { Label } from "@/components/ui/Label";
 import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
@@ -15,30 +16,37 @@ const SignInForm: React.FC<SignInFormProps> = ({ onSuccess }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const { signIn, loading, error } = useAuth();
+  const { loading: authLoading } = useAuth();
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const { error } = await signIn({ email, password });
-    if (!error) {
+    setIsSubmitting(true);
+    setFormError(null);
+    const { error: signInError } = await authService.signIn({ email, password });
+    if (!signInError) {
       onSuccess?.();
+    } else {
+      setFormError(signInError.message || "An unexpected error occurred.");
     }
+    setIsSubmitting(false);
   };
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      {error && (
+      {formError && (
         <Alert variant="destructive">
           <Icons.AlertTriangle className="h-4 w-4" />
           <AlertTitle>Sign In Failed</AlertTitle>
-          <AlertDescription>{error} Please try again.</AlertDescription>
+          <AlertDescription>{formError} Please try again.</AlertDescription>
         </Alert>
       )}
       
       <div className="space-y-1.5">
         <Label htmlFor="email">Email Address</Label>
         <div className="relative">
-            <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground dark:text-purple-gray" />
             <Input
                 id="email"
                 type="email"
@@ -47,7 +55,7 @@ const SignInForm: React.FC<SignInFormProps> = ({ onSuccess }) => {
                 placeholder="you@example.com"
                 required
                 className="pl-10"
-                disabled={loading}
+                disabled={isSubmitting || authLoading}
             />
         </div>
       </div>
@@ -55,12 +63,12 @@ const SignInForm: React.FC<SignInFormProps> = ({ onSuccess }) => {
       <div className="space-y-1.5">
         <div className="flex items-center justify-between">
           <Label htmlFor="password">Password</Label>
-          <a href="#" className="text-xs text-primary hover:underline">
+          <a href="#" className="text-xs text-primary hover:underline dark:text-legal-purple dark:hover:text-royal-purple">
             Forgot password?
           </a>
         </div>
         <div className="relative">
-            <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground dark:text-purple-gray" />
             <Input
                 id="password"
                 type={showPassword ? "text" : "password"}
@@ -69,16 +77,16 @@ const SignInForm: React.FC<SignInFormProps> = ({ onSuccess }) => {
                 placeholder="••••••••"
                 required
                 className="pl-10 pr-10"
-                disabled={loading}
+                disabled={isSubmitting || authLoading}
             />
             <Button
                 type="button"
                 variant="ghost"
                 size="icon"
-                className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2 text-muted-foreground hover:bg-transparent hover:text-foreground"
+                className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2 text-muted-foreground hover:bg-transparent hover:text-foreground dark:hover:text-off-white"
                 onClick={() => setShowPassword(!showPassword)}
                 aria-label={showPassword ? "Hide password" : "Show password"}
-                disabled={loading}
+                disabled={isSubmitting || authLoading}
             >
                 {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
             </Button>
@@ -88,9 +96,9 @@ const SignInForm: React.FC<SignInFormProps> = ({ onSuccess }) => {
       <Button
         type="submit"
         className="w-full"
-        disabled={loading}
+        disabled={isSubmitting || authLoading}
       >
-        {loading ? (
+        {isSubmitting ? (
           <Icons.Loader className="mr-2 h-4 w-4 animate-spin" />
         ) : (
           "Secure Sign In"

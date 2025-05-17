@@ -1,0 +1,121 @@
+/* Add these styles for AI suggestions */
+.suggestion-highlight {
+  background-color: rgba(0, 128, 0, 0.15); /* Subtle green background */
+  border-bottom: 2px dotted rgba(0, 128, 0, 0.4);
+  /* box-shadow: 0 0 0 1px rgba(0, 128, 0, 0.3); */ /* Optional outline */
+  transition: background-color 0.3s ease, border-bottom 0.3s ease;
+}
+
+.suggestion-button {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 2px 6px;
+  font-size: 0.75rem; /* 12px */
+  line-height: 1rem; /* 16px */
+  border-radius: 0.25rem; /* 4px */
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+  vertical-align: super; /* Align slightly above baseline */
+}
+
+.suggestion-button.accept {
+  background-color: #22c55e; /* green-500 */
+  color: white;
+  border-color: #16a34a; /* green-600 */
+}
+
+.suggestion-button.accept:hover {
+  background-color: #16a34a; /* green-600 */
+}
+
+.suggestion-button.decline {
+  background-color: #ef4444; /* red-500 */
+  color: white;
+  border-color: #dc2626; /* red-600 */
+}
+
+.suggestion-button.decline:hover {
+  background-color: #dc2626; /* red-600 */
+}
+
+/* Ensure widgets don't interfere with text selection if needed */
+.ProseMirror > .ProseMirror-widget {
+    pointer-events: all; /* Allow clicks on buttons */
+}
+
+/* Styles for Tiptap Variable Handling */
+.variable-highlight {
+  background-color: theme('colors.yellow.100');
+  /* border-bottom: 2px solid theme('colors.yellow.400'); */
+  padding: 1px 2px;
+  border-radius: 3px;
+  cursor: pointer; /* Indicate it's clickable */
+  transition: background-color 0.2s ease-in-out;
+}
+
+.variable-highlight:hover {
+  background-color: theme('colors.yellow.200');
+}
+
+/* Add style for filled variables */
+.filled-variable {
+  font-style: italic;
+  color: theme('colors.blue.600'); /* Using a primary-like blue */
+  /* Optional: Add subtle background or border if needed */
+  /* background-color: theme('colors.blue.50'); */
+  /* border-bottom: 1px dotted theme('colors.blue.400'); */
+}
+
+/* Tailwind directives and base styles below */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Add backdrop filter utilities */
+@layer utilities {
+  .backdrop-blur-none {
+    backdrop-filter: blur(0);
+  }
+  .backdrop-blur-sm {
+    backdrop-filter: blur(4px);
+  }
+  .backdrop-blur-md {
+    backdrop-filter: blur(12px);
+  }
+  .backdrop-blur-lg {
+    backdrop-filter: blur(16px);
+  }
+  .backdrop-blur-xl {
+    backdrop-filter: blur(24px);
+  }
+  .backdrop-blur-2xl {
+    backdrop-filter: blur(40px);
+  }
+  .backdrop-blur-3xl {
+    backdrop-filter: blur(64px);
+  }
+}
+
+/* Subtle text shadow for AI assistant responses */
+.text-shadow-assistant {
+  text-shadow: 0 1px 8px rgba(0,0,0,0.10);
+}
+.dark .text-shadow-assistant {
+  text-shadow: 0 1px 8px rgba(0,0,0,0.45);
+}
+
+/* Styles for Deep Research Mode active state */
+.deep-research-active {
+  /* Apply a subtle background tint for light mode */
+  background-color: rgba(255, 165, 0, 0.05); /* Light orange tint */
+  transition: background-color 0.3s ease-in-out;
+}
+
+.dark .deep-research-active {
+  /* Apply a subtle background tint for dark mode */
+  background-color: rgba(255, 165, 0, 0.1); /* Slightly stronger orange tint for dark backgrounds */
+}
+
+/* Ensure html and body have height: 100% if not already set, for full-page layouts */
+/* ... rest of your globals.css ... */ 

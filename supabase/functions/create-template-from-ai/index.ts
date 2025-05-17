@@ -30,14 +30,59 @@ const supabaseAdmin: SupabaseClient = createClient(supabaseUrl!, supabaseService
 // --- Helper Function: Sanitize Name ---
 function sanitizeName(name: string): string {
   // Remove problematic characters for filenames or display
-  return name.replace(/[^a-zA-Z0-9\s-_()]/g, '').trim().substring(0, 100);
+  return name.replace(/[^a-zA-Z0-9\s_\-\(\)]/g, '').trim().substring(0, 100);
+}
+
+// --- Helper Function: Ensure Variable Span Format ---
+function ensureSpanFormat(content: string): string {
+  // Convert {{Placeholder Name}} to <span...> format
+  content = content.replace(/\{\{\s*([^}]+?)\s*\}\}/g, (_match, varNameMatch) => {
+    const varName = varNameMatch.trim();
+    const description = `Value for ${varName}`; // Default description
+    console.log(`Post-processing: Converted {{${varName}}} to span format.`);
+    return `<span data-variable-name="${varName}" data-variable-description="${description}" class="variable-highlight">${varName}</span>`;
+  });
+
+  // Ensure existing spans have necessary attributes and class
+  // Use a simple regex for this example, more robust parsing might be needed for complex HTML
+  const spanRegex = /<span\s+data-variable-name="([^"]+)"([^>]*)>([^<]+)<\/span>/g;
+  content = content.replace(spanRegex, (match, name, attrs, innerText) => {
+    const existingDescriptionMatch = attrs.match(/data-variable-description="([^"]+)"/);
+    let description = existingDescriptionMatch ? existingDescriptionMatch[1] : `Value for ${name}`;
+    if (!description) description = `Value for ${name}`; // Ensure description exists
+    
+    // Reconstruct the span tag cleanly, ensuring class="variable-highlight"
+    return `<span data-variable-name="${name}" data-variable-description="${description}" class="variable-highlight">${innerText.trim()}</span>`; 
+  });
+
+  return content;
+}
+
+// --- NEW Helper Function: Extract Variable Names from HTML ---
+function extractVariableNamesFromHtml(htmlContent: string): string[] {
+  const variableNames = new Set<string>();
+  // Regex to find <span data-variable-name="NAME" ...>
+  // It captures the value of data-variable-name
+  const regex = /<span[^>]*data-variable-name="([^"]+)"[^>]*>/g;
+  let match;
+  while ((match = regex.exec(htmlContent)) !== null) {
+    if (match[1]) { // match[1] is the captured group (the variable name)
+      variableNames.add(match[1].trim());
+    }
+  }
+  console.log('Extracted variable names:', Array.from(variableNames));
+  return Array.from(variableNames);
 }
 
 // --- Main Handler ---
 serve(async (req: Request) => {
+  // Log every request method and headers for debugging
+  console.log('Incoming request:', req.method, 'Headers:', Object.fromEntries(req.headers.entries()));
+
   // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders });
+    // Return 200 OK for preflight, with CORS headers
+    return new Response(null, { headers: corsHeaders, status: 200 }); 
   }
 
   try {
@@ -64,27 +109,30 @@ serve(async (req: Request) => {
     }
     const openai = new OpenAI({ apiKey: openaiApiKey });
 
-    // 4. Construct Prompt for AI
-    //    - Explicitly request template name generation.
-    //    - **Crucially, demand the {{Placeholder Name}} format.**
+    // 4. Construct Prompt for AI (Updated)
     const systemPrompt = `You are an AI assistant specialized in drafting legal document templates. Your goal is to generate a high-quality, reusable template based on user instructions.
 
 IMPORTANT INSTRUCTIONS:
-1.  Analyze the user's request and the specified category (${category}).
+1.  Analyze the user\'s request and the specified category (${category}).
 2.  Generate a suitable, concise name for this template.
-3.  Generate the template content.
-4.  **CRITICAL: Identify all placeholders or variable fields (e.g., names, dates, specific amounts, addresses) and format them strictly as {{Placeholder Name}}. Do NOT use brackets [], <>, or any other format.** Examples:
-    - Correct: {{Client Name}}, {{Effective Date}}, {{Case Number}}, {{Plaintiff Full Name}}
-    - Incorrect: [Client Name], <Date>, {Amount}, **Variable**
-5.  Structure the output as a JSON object with two keys: "templateName" (string) and "templateContent" (string containing the full template with placeholders).
-6.  Ensure the content is professional, legally sound (for common scenarios, disclaimer: you are an AI), and relevant to the '${category}' category.
+3.  Generate the template content as valid HTML suitable for a rich text editor.
+4.  **CRITICAL: Identify all placeholders or variable fields (e.g., names, dates, specific amounts, addresses). For each placeholder:**
+    *   **Determine a clear, descriptive name (e.g., "Client Full Name", "Effective Date", "Agreement Amount").**
+    *   **Write a brief description for the placeholder (e.g., "The full legal name of the client.", "The date the agreement becomes effective.", "The primary monetary amount of the agreement.").**
+    *   **Format the placeholder STRICTLY as: <span data-variable-name="Placeholder Name" data-variable-description="Placeholder Description" class="variable-highlight">Placeholder Name</span>.**
+    *   **The class attribute "variable-highlight" MUST be included.**
+    *   **Do NOT use brackets [], curly braces {{}}, or any other format.**
+    *   Example Correct: <span data-variable-name="Client Full Name" data-variable-description="The full legal name of the client." class="variable-highlight">Client Full Name</span>
+    *   Example Correct: <span data-variable-name="Effective Date" data-variable-description="The date the agreement becomes effective." class="variable-highlight">Effective Date</span>
+5.  Structure the output as a JSON object with two keys: "templateName" (string) and "templateContent" (string containing the full HTML template with <span...> placeholders).
+6.  Ensure the HTML content is well-formed and ready to be inserted into an editor. Use standard HTML tags like <p>, <h1>, <ul>, etc. appropriately.
 7.  Do not include explanations or introductions outside the JSON structure.`;
 
-    const userPrompt = `User Instructions: ${instructions}`; // Keep user prompt simple
+    const userPrompt = `User Instructions: ${instructions}`;
 
     console.log('Sending request to OpenAI model:', AI_MODEL);
 
-    // 5. Call OpenAI API (Non-Streaming)
+    // 5. Call OpenAI API
     const response = await openai.chat.completions.create({
       model: AI_MODEL,
       messages: [
@@ -103,51 +151,53 @@ IMPORTANT INSTRUCTIONS:
       throw new Error('AI model did not return valid content.');
     }
 
-    // 6. Parse AI Response (expecting JSON)
-    let generatedName: string;
-    let generatedContent: string;
+    // 6. Parse AI Response
+    let generatedName;
+    let generatedContent;
+    let extractedVariables;
     try {
-      const parsedResult: { templateName?: string; templateContent?: string } = JSON.parse(aiResultContent);
+      const parsedResult = JSON.parse(aiResultContent);
       if (typeof parsedResult.templateName !== 'string' || typeof parsedResult.templateContent !== 'string') {
         throw new Error('AI response JSON did not contain valid templateName or templateContent strings.');
       }
       generatedName = sanitizeName(parsedResult.templateName);
-      generatedContent = parsedResult.templateContent;
-      if (!generatedName) generatedName = `${category} Template (Generated)`; // Fallback name
+      generatedContent = parsedResult.templateContent; // Get raw content first
+
+      // 7. Post-process AI content to ensure correct format
+      generatedContent = ensureSpanFormat(generatedContent); 
+      // --- End Post-processing ---
+
+      // --- Extract variables AFTER ensuring format ---
+      extractedVariables = extractVariableNamesFromHtml(generatedContent);
+      // --- End variable extraction ---
+
+      if (!generatedName) generatedName = `${category} Template (Generated)`; 
       if (!generatedContent) throw new Error('AI generated empty template content.');
 
       console.log(`AI generated template: Name="${generatedName}"`);
     } catch (parseError) {
       console.error('Failed to parse JSON response from AI:', parseError);
       console.error('Raw AI content:', aiResultContent); // Log raw content for debugging
-      // Attempt to use raw content as fallback if parsing fails?
-      // generatedName = `${category} Template (Generated)`;
-      // generatedContent = aiResultContent; // Risky - might not be valid template
       throw new Error(`AI did not return valid JSON: ${parseError.message}`);
     }
+    if (!extractedVariables) extractedVariables = [];
 
-    // 7. (Optional but Recommended) Post-process/Validate Placeholders
-    // Example: Find {{...}} and potentially warn/log if other formats like [...] exist
-    const placeholders = Array.from(generatedContent.matchAll(/\{\{([^}]+?)\}\}/g)).map(m => m[1].trim());
-    console.log(`Extracted placeholders: ${placeholders.length > 0 ? placeholders.join(', ') : 'None'}`);
-    // Add more sophisticated validation here if needed.
-
-    // 8. Save to Database
-    console.log(`Attempting to save template "${generatedName}" to database...`);
+    // 8. Save to Database (Updated: ADDED 'variables' field)
+    console.log(`Attempting to save template \"${generatedName}\" to database with variables:`, extractedVariables);
     const { data: dbData, error: dbError } = await supabaseAdmin
       .from('document_templates')
       .insert({
         name: generatedName,
-        description: `AI-generated based on instructions: "${instructions.substring(0, 100)}..."`, // Auto-generate description
-        category: category.toLowerCase(), // Ensure lowercase category
-        content: generatedContent,
-        variables: placeholders, // Save extracted placeholders
-        tags: ['ai-generated'], // Add a tag
+        description: `AI-generated based on instructions: "${instructions.substring(0, 100)}..."`, 
+        category: category.toLowerCase(),
+        content: generatedContent, // Save the processed HTML content
+        variables: extractedVariables, // ADDED: Save the extracted variable names
+        tags: ['ai-generated'], 
         user_id: userId,
-        is_public: false, // Default to private
+        is_public: false, 
       })
-      .select('id') // Select the ID of the newly inserted row
-      .single(); // Expect only one row back
+      .select('id') 
+      .single(); 
 
     if (dbError) {
       console.error('Database error saving template:', dbError);

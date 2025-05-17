@@ -34,3 +34,4 @@ dist-ssr
 # Coverage and test reports
 coverage
 .nyc_output
+.npmrc

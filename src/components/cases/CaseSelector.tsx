@@ -3,7 +3,8 @@ import { useAtom, useAtomValue, useSetAtom } from 'jotai'; // Use correct Jotai 
 import { activeCaseIdAtom, activeCaseAtom, activeDocumentContextIdAtom } from '@/atoms/appAtoms'; // Import atoms
 // import { useAppStore } from '@/store/appStore'; // Remove Zustand import
 import * as caseService from '@/services/caseService';
-import { useAuth } from '@/context/AuthContext';
+// import { useAuth } from '@/context/AuthContext';
+import { useAuth } from '@/hooks/useAuth';
 
 interface CaseSelectorProps {
   showCreateOption?: boolean;
@@ -44,8 +45,8 @@ const CaseSelector: React.FC<CaseSelectorProps> = ({ showCreateOption = true }) 
         // We don't need to manually set activeCaseData here,
         // as the activeCaseAtom should derive it from activeCaseIdAtom.
       } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : 'Failed to load cases';
-        console.error('Error fetching cases:', message);
+        const message = err instanceof Error ? err.message : 'Failed to load matters';
+        console.error('Error fetching matters:', message);
         setError(message);
         setActiveCaseId(null); // Clear active case ID on error
       } finally {
@@ -80,24 +81,24 @@ const CaseSelector: React.FC<CaseSelectorProps> = ({ showCreateOption = true }) 
 
   return (
     <div className="case-selector mb-4">
-      <label htmlFor="case-select" className="block text-sm font-medium text-neutral-700 dark:text-text-secondary mb-1">
-        Active Case
+      <label htmlFor="case-select" className="block text-sm font-medium text-muted-foreground dark:text-dark-muted-foreground mb-1">
+        Active Matter
       </label>
       <select
         id="case-select"
         value={activeCaseId || ''} // Use activeCaseId from atom
         onChange={handleSelectChange}
-        className="w-full px-3 py-2 border border-neutral-300 dark:border-surface-lighter rounded-md shadow-sm focus:outline-none focus:ring-primary focus:border-primary bg-white dark:bg-surface text-neutral-900 dark:text-text-primary text-sm disabled:opacity-75"
+        className="w-full px-3 py-2 border border-input dark:border-dark-input rounded-md shadow-sm focus:outline-none focus:ring-ring dark:focus:ring-dark-ring focus:border-primary dark:focus:border-dark-primary bg-input dark:bg-dark-input text-foreground dark:text-dark-foreground text-sm disabled:opacity-75"
         disabled={isLoading}
       >
-        <option value="">{isLoading ? 'Loading cases...' : '-- Select a Case --'}</option>
+        <option value="">{isLoading ? 'Loading matters...' : '-- Select a Matter --'}</option>
         {cases.map((c) => (
           <option key={c.id} value={c.id}>
-            {c.case_number || c.name || 'Untitled Case'} {c.client_name ? `- ${c.client_name}` : ''}
+            {c.case_number || c.name || 'Untitled Matter'} {c.client_name ? `- ${c.client_name}` : ''}
           </option>
         ))}
       </select>
-      {error && <p className="text-xs text-error mt-1">{error}</p>}
+      {error && <p className="text-xs text-destructive dark:text-dark-destructive mt-1">{error}</p>}
     </div>
   );
 };

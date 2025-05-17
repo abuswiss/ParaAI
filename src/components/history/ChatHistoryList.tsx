@@ -20,6 +20,7 @@ import {
     AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { cn } from '@/lib/utils';
+import { useStartNewChat } from '@/hooks/useStartNewChat';
 
 const ChatHistoryList: React.FC = () => {
   const activeCaseId = useAtomValue(activeCaseIdAtom);
@@ -28,6 +29,7 @@ const ChatHistoryList: React.FC = () => {
   const [isDeletingAll, setIsDeletingAll] = useState(false);
   const { toast } = useToast();
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const startNewChat = useStartNewChat();
 
   const { data: conversations, isLoading, error: fetchError, refetch } = useQuery<ConversationListItem[], Error>({
     queryKey: ['conversationsList', activeCaseId],
@@ -86,21 +88,21 @@ const ChatHistoryList: React.FC = () => {
   };
 
   return (
-    <div className="flex flex-col h-full bg-background text-foreground">
-      <div className="p-2 flex justify-between items-center border-b">
-        <h3 className="text-xs font-semibold uppercase text-muted-foreground tracking-wider">Chat History</h3>
-        <Button variant="ghost" size="sm" onClick={handleNewChat} title="New Chat">
+    <div className="flex flex-col h-full">
+      <div className="p-2 flex justify-between items-center border-b border-border dark:border-dark-border">
+        <h3 className="text-xs font-semibold uppercase text-muted-foreground dark:text-dark-muted-foreground tracking-wider">Chat History</h3>
+        <Button variant="ghost" size="sm" onClick={startNewChat} title="New Chat" className="text-muted-foreground dark:text-dark-muted-foreground hover:text-primary dark:hover:text-primary">
           <PlusCircle className="h-4 w-4" />
         </Button>
       </div>
 
-      <div className="flex-grow overflow-y-auto scrollbar-thin scrollbar-thumb-muted scrollbar-track-transparent">
+      <div className="flex-grow overflow-y-auto scrollbar-thin scrollbar-thumb-border dark:scrollbar-thumb-dark-border scrollbar-track-transparent">
         <div className="flex flex-col gap-1 px-2 py-1">
-          {isLoading && <p className="px-2 py-1 text-sm text-muted-foreground">Loading...</p>}
-          {fetchError && <p className="px-2 py-1 text-sm text-destructive">Error loading history: {fetchError.message}</p>}
-          {deleteError && <p className="px-2 py-1 text-sm text-destructive">Deletion Error: {deleteError}</p>}
+          {isLoading && <p className="px-2 py-1 text-sm text-muted-foreground dark:text-dark-muted-foreground">Loading...</p>}
+          {fetchError && <p className="px-2 py-1 text-sm text-destructive dark:text-dark-destructive">Error loading history: {fetchError.message}</p>}
+          {deleteError && <p className="px-2 py-1 text-sm text-destructive dark:text-dark-destructive">Deletion Error: {deleteError}</p>}
           {!isLoading && !fetchError && conversations?.length === 0 && (
-            <p className="px-2 py-1 text-sm text-muted-foreground">No chat history yet.</p>
+            <p className="px-2 py-1 text-sm text-muted-foreground dark:text-dark-muted-foreground">No chat history yet.</p>
           )}
           {conversations &&
             conversations
@@ -116,11 +118,12 @@ const ChatHistoryList: React.FC = () => {
       </div>
 
       {!isLoading && conversations && conversations.length > 0 && (
-        <div className="p-2 border-t mt-auto">
+        <div className="p-2 border-t border-border dark:border-dark-border mt-auto">
             <AlertDialog>
                 <AlertDialogTrigger asChild>
                     <Button 
-                        variant="destructive" 
+                        variant="destructive"
+                        size="sm"
                         className="w-full text-xs h-8"
                         disabled={isDeletingAll}
                     >
@@ -131,7 +134,7 @@ const ChatHistoryList: React.FC = () => {
                 <AlertDialogContent>
                     <AlertDialogHeader>
                     <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
-                    <AlertDialogDescription>
+                    <AlertDialogDescription className="text-muted-foreground dark:text-dark-muted-foreground">
                         This action cannot be undone. This will permanently delete all your conversation history.
                     </AlertDialogDescription>
                     </AlertDialogHeader>
@@ -139,7 +142,6 @@ const ChatHistoryList: React.FC = () => {
                     <AlertDialogCancel>Cancel</AlertDialogCancel>
                     <AlertDialogAction 
                         onClick={handleClearAllConfirm}
-                        className={cn(buttonVariants({ variant: "destructive" }))}
                         disabled={isDeletingAll}
                     >
                         {isDeletingAll ? <Spinner size="xs" /> : "Yes, delete all"}

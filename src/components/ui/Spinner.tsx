@@ -21,9 +21,9 @@ export const Spinner: React.FC<SpinnerProps> = ({
   
   // Color-specific classes
   const colorClasses = {
-    primary: 'border-primary/20 border-t-primary',
-    white: 'border-white/20 border-t-white',
-    gray: 'border-gray-600/20 border-t-gray-600',
+    primary: 'border-primary/20 border-t-primary dark:border-dark-primary/20 dark:border-t-dark-primary',
+    white: 'border-white/20 border-t-white dark:border-dark-foreground/20 dark:border-t-dark-foreground',
+    gray: 'border-muted-foreground/20 border-t-muted-foreground dark:border-dark-muted-foreground/20 dark:border-t-dark-muted-foreground',
   };
   
   return (

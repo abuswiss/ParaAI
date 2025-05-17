@@ -42,10 +42,10 @@ export const Avatar: React.FC<AvatarProps> = ({
 
   // Status color classes
   const statusColorClasses = {
-    online: 'bg-green-500',
-    away: 'bg-yellow-500',
-    busy: 'bg-red-500',
-    offline: 'bg-gray-500',
+    online: 'bg-green-500 dark:bg-green-400',
+    away: 'bg-yellow-500 dark:bg-yellow-400',
+    busy: 'bg-red-500 dark:bg-red-400',
+    offline: 'bg-neutral-500 dark:bg-neutral-600',
   };
 
   // Status size classes
@@ -58,22 +58,20 @@ export const Avatar: React.FC<AvatarProps> = ({
   };
 
   // Background color classes for initial avatars
-  // We'll use different background colors based on the first letter of the name
+  // Using themed colors ensuring text contrast.
   const bgColors = [
-    'bg-primary/80',
-    'bg-blue-500/80',
-    'bg-green-500/80',
-    'bg-yellow-500/80',
-    'bg-purple-500/80',
-    'bg-pink-500/80',
+    'bg-primary/80 text-primary-foreground dark:bg-dark-primary/80 dark:text-dark-primary-foreground',
+    'bg-secondary text-secondary-foreground dark:bg-dark-secondary dark:text-dark-secondary-foreground', // Using full secondary, not /80 for variety
+    'bg-muted text-foreground dark:bg-dark-muted dark:text-dark-foreground', // Muted bg with standard foreground text
+    // Add more variants if needed, e.g., using accent or other grays
+    'bg-neutral-200 text-neutral-800 dark:bg-neutral-700 dark:text-neutral-200' // Example neutral variant
   ];
   
-  const charCode = name.charCodeAt(0) || 65;
-  const bgColorIndex = charCode % bgColors.length;
-  const bgColorClass = src ? '' : bgColors[bgColorIndex];
+  const charCode = name.charCodeAt(0) || 65; // Default to 'A' if name is empty
+  const bgColorClass = src ? '' : bgColors[charCode % bgColors.length];
 
   // Border classes
-  const borderClasses = border ? 'border-2 border-gray-700' : '';
+  const borderClasses = border ? 'border-2 border-border dark:border-dark-border' : '';
 
   // Combine classes
   const avatarClasses = `
@@ -107,13 +105,13 @@ export const Avatar: React.FC<AvatarProps> = ({
             }}
           />
         ) : (
-          <span className="font-medium text-white">{initials}</span>
+          <span className="font-medium">{initials}</span>
         )}
       </motion.div>
       
       {status && (
         <span
-          className={`absolute bottom-0 right-0 block rounded-full ring-2 ring-gray-800 ${statusColorClasses[status]} ${statusSizeClasses[size]}`}
+          className={`absolute bottom-0 right-0 block rounded-full ring-2 ring-background dark:ring-dark-background ${statusColorClasses[status]} ${statusSizeClasses[size]}`}
         />
       )}
     </div>

@@ -64,7 +64,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
   };
 
   return (
-    <div className="border-b border-border p-2 flex items-center justify-between flex-wrap gap-1 sticky top-0 z-10 bg-background">
+    <div className="border-b border-border dark:border-dark-border p-2 flex items-center justify-between flex-wrap gap-1 sticky top-0 z-10 bg-background dark:bg-dark-background">
       {/* Left Group: Formatting & Actions */}
       <div className="flex items-center gap-1 flex-wrap">
         {/* Basic Formatting Toggles */}
@@ -210,12 +210,12 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
       {/* Right Group: Save Status & Button */}
       <div className="flex items-center gap-2">
           {/* Save Status Indicator */}
-           <span className={`text-xs ${saveStatus === 'Error' ? 'text-destructive' : isDirty ? 'text-yellow-500' : 'text-muted-foreground'}`}> 
+           <span className={`text-xs ${saveStatus === 'Error' ? 'text-destructive dark:text-dark-destructive' : isDirty ? 'text-amber-500 dark:text-amber-400' : 'text-muted-foreground dark:text-dark-muted-foreground'}`}> 
              {isSaving ? 'Saving...' : (saveStatus === 'Saved' && !isDirty) ? 'Saved' : isDirty ? 'Unsaved' : 'Saved'}
              {saveStatus === 'Error' && '(Error)'}
            </span>
-           <Button onClick={onSave} size="sm" disabled={!isDirty || isSaving} variant="default"> {/* Changed to default variant */} 
-              {isSaving ? <Spinner size="xs" className="mr-1.5" /> : <Save className="mr-1.5 h-4 w-4" />} 
+           <Button onClick={onSave} size="sm" disabled={!isDirty || isSaving} variant="primary">
+              {isSaving ? <Spinner size="xs" className="mr-1.5 text-primary-foreground dark:text-dark-primary-foreground" /> : <Save className="mr-1.5 h-4 w-4 text-primary-foreground dark:text-dark-primary-foreground" />} 
               Save
            </Button>
       </div>

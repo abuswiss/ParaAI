@@ -1,0 +1,7 @@
+{
+  "imports": {
+    "std/http/server": "https://deno.land/std@0.224.0/http/server.ts",
+    "openai": "npm:openai@^4.0.0",
+    "../_shared/cors.ts": "../_shared/cors.ts"
+  }
+} 

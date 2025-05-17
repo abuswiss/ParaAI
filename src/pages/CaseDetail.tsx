@@ -74,10 +74,10 @@ const CaseDetail: React.FC = () => {
   if (!activeCase?.details) {
     return (
       <div className="container mx-auto p-4 text-center">
-        <p>Case not found or details could not be loaded.</p>
-        <Link to="/cases">
+        <p>Matter not found or details could not be loaded.</p>
+        <Link to="/files">
           <Button variant="link" className="mt-4">
-            Go back to Cases
+            Go back to Matters
           </Button>
         </Link>
       </div>
@@ -88,19 +88,19 @@ const CaseDetail: React.FC = () => {
 
   return (
     <div className="container mx-auto p-4 md:p-6">
-      <Link to="/cases" className="mb-4 inline-block">
+      <Link to="/files" className="mb-4 inline-block">
         <Button variant="outline" size="sm">
           <ArrowLeft className="mr-2 h-4 w-4" />
-          Back to Cases
+          Back to Matters
         </Button>
       </Link>
 
       <Card className="mb-6">
         <CardHeader>
-          <CardTitle>{caseDetails.name || 'Case Details'}</CardTitle>
+          <CardTitle>{caseDetails.name || 'Matter Details'}</CardTitle>
         </CardHeader>
         <CardContent>
-          <p><strong>Case Number:</strong> {caseDetails.case_number || 'N/A'}</p>
+          <p><strong>Matter Number:</strong> {caseDetails.case_number || 'N/A'}</p>
           <p><strong>Status:</strong> <span className="capitalize">{caseDetails.status || 'N/A'}</span></p>
           <p><strong>Description:</strong> {caseDetails.description || 'No description available.'}</p>
         </CardContent>
@@ -109,15 +109,15 @@ const CaseDetail: React.FC = () => {
       <h2 className="text-xl font-semibold mb-4">Documents</h2>
       <div className="p-4 border rounded-md bg-muted/40">
           <p className="text-sm text-muted-foreground">
-              Document management for this case is now handled in the 
+              Document management for this matter is now handled in the 
               <Link to="/files" className="text-primary underline hover:no-underline mx-1">
                   File Manager
               </Link>.
-              You can select the case there to view its documents.
+              You can select the matter there to view its documents.
           </p>
            <Link to={`/files?caseId=${caseId}`}> 
              <Button variant="secondary" size="sm" className="mt-3">
-               Go to Case in File Manager
+               Go to Matter in File Manager
             </Button>
            </Link>
        </div>

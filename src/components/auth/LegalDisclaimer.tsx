@@ -11,14 +11,14 @@ const LegalDisclaimer: React.FC = () => {
   return (
     // Use Accordion component, allow multiple open or just one with type="single"
     <Accordion type="single" collapsible className="w-full">
-      <AccordionItem value="disclaimer" className="border border-border rounded-lg bg-muted/30 px-4 mb-4">
-        <AccordionTrigger className="text-sm font-medium text-foreground hover:no-underline py-3">
+      <AccordionItem value="disclaimer" className="border border-border dark:border-purple-gray rounded-lg bg-muted/30 dark:bg-deep-violet/30 px-4 mb-4">
+        <AccordionTrigger className="text-sm font-medium text-foreground dark:text-off-white hover:no-underline py-3">
           <div className="flex items-center">
-             <AlertTriangle className="h-4 w-4 mr-2 text-primary" /> {/* Changed color to primary */}
+             <AlertTriangle className="h-4 w-4 mr-2 text-primary dark:text-legal-purple" /> {/* Changed color to primary */}
              Important Legal Disclaimer
           </div>
         </AccordionTrigger>
-        <AccordionContent className="text-sm text-muted-foreground pt-0 pb-3 space-y-2">
+        <AccordionContent className="text-sm text-muted-foreground dark:text-soft-purple pt-0 pb-3 space-y-2">
           <p>
             BenchWise (Alpha) is designed to assist legal professionals by providing document analysis and organization tools. It is not a substitute for professional legal advice.
           </p>

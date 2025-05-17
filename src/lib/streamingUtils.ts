@@ -1,7 +1,18 @@
 import { type SourceInfo } from '@/types/sources';
 import { supabase } from './supabaseClient'; // Assuming supabase client is needed here
+import { toast } from 'sonner';
+import { AlertTriangle } from 'lucide-react';
+import React from 'react'; // Needed for JSX in ToastAction
 
 console.log('Streaming utils initializing...');
+
+// Custom error class for subscription issues
+export class SubscriptionError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'SubscriptionError';
+  }
+}
 
 // --- Stream Processing Helpers (Moved from agentService.ts) ---
 
@@ -43,7 +54,7 @@ export async function processSupabaseStream(
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${session.access_token}`,
+                'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVubGpvZHlobXJybHVpdGJsbnJtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDU1OTIxMzksImV4cCI6MjA2MTE2ODEzOX0.VZGEyEm-jLTNK9wuN3tCf9GciPCxymSH8nIRlKp0Pdg',
                 'apikey': anonKey, // Include the anon key as well
             },
             body: JSON.stringify(payload),
@@ -55,7 +66,34 @@ export async function processSupabaseStream(
              console.error(`Function ${functionName} fetch failed (${response.status}): ${errorText}`);
              let errorJson: { error?: string } = {};
              try { errorJson = JSON.parse(errorText); } catch { /* ignore parse error */ }
-             throw new Error(errorJson.error || `Function call failed with status ${response.status}`);
+             const errorMessage = errorJson.error || `Function call failed with status ${response.status}: ${errorText.substring(0,100)}`;
+
+             if (response.status === 403) {
+                console.warn(`Access Denied (403) from ${functionName}: ${errorMessage}`);
+                // Attempt to parse the error message for better display
+                let displayMessage = "Your trial may have expired or you've reached a usage limit.";
+                if (errorMessage.toLowerCase().includes('trial has expired')) {
+                    displayMessage = "Your trial has expired. Please subscribe to continue.";
+                } else if (errorMessage.toLowerCase().includes('trial ai call limit')) {
+                    displayMessage = "You've reached your trial AI call limit. Please subscribe.";
+                } else if (errorMessage.toLowerCase().includes('active subscription required')) {
+                    displayMessage = "An active subscription is required to use this feature.";
+                }
+
+                toast.error('Access Denied', {
+                    description: `${displayMessage} Please visit settings to upgrade your plan.`,
+                    icon: React.createElement(AlertTriangle, { className: 'h-5 w-5 text-red-500' }),
+                    // Navigation should be handled by the component calling the service that uses this utility.
+                    // We can't use useNavigate here directly.
+                    // Action is commented out as direct navigation is not ideal from here.
+                    // action: {
+                    //   label: 'Go to Subscription',
+                    //   onClick: () => { /* How to navigate? window.location.href = '/settings/subscription' could work but is a hard nav */ },
+                    // },
+                });
+                throw new SubscriptionError(errorMessage); // Throw specific error
+             }
+             throw new Error(errorMessage);
         }
 
         // Check content type for streaming

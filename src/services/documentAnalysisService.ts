@@ -1,9 +1,10 @@
-import { supabase } from '../lib/supabaseClient';
+import { supabase } from '@/lib/supabaseClient';
 import { useSetAtom } from 'jotai'; // Import useSetAtom
 import { BackgroundTask, TaskStatus, addTaskAtom, updateTaskAtom, removeTaskAtom } from '@/atoms/appAtoms'; // Import task atoms
 import { v4 as uuidv4 } from 'uuid'; // Import uuid
 // Remove OPENAI_CONFIG import as it's no longer used client-side
 // import { OPENAI_CONFIG } from '../config/apiConfig'; 
+import { type Case } from '../types'; // Ensure this path is correct if used
 
 // --- Structured Result Types ---
 
@@ -255,3 +256,112 @@ export const getDocumentAnalyses = async (
 // analysisType = 'timeline'. The backend function returns parsed JSON.
 // Client-side code that previously called extractTimelineEvents should now call
 // analyzeDocument('documentId', 'timeline') and handle the returned JSON data.
+
+export interface SummarizeTextPayload {
+  textToSummarize: string;
+  instructions?: string;
+  surroundingContext?: string;
+  stream?: boolean;
+}
+
+export interface SummarizeTextResponse {
+  result?: string; // For non-streamed
+  // Streaming handled by direct EventSource usage on client if needed
+  error?: string;
+}
+
+export interface RewriteTextPayload {
+  textToRewrite: string;
+  mode: 'improve' | 'shorten' | 'expand' | 'professional' | 'formal' | 'simple' | 'custom';
+  instructions?: string; // Required if mode is 'custom'
+  surroundingContext?: string;
+  stream?: boolean;
+}
+
+export interface RewriteTextResponse {
+  result?: string; // For non-streamed
+  error?: string;
+}
+
+export interface GenerateInlineTextPayload {
+  instructions: string;
+  selectedText?: string;
+  surroundingContext?: string;
+  // stream parameter is implicit for this service, always true for the function call
+}
+
+export interface GenerateInlineTextResponse { // This is for a non-streaming scenario, less relevant here.
+  result?: string;
+  error?: string;
+}
+
+/**
+ * Calls the 'summarize-text' Supabase edge function.
+ */
+export const summarizeTextService = async (payload: SummarizeTextPayload): Promise<SummarizeTextResponse> => {
+  // For summarization, streaming might be less critical for a modal display, 
+  // but the function supports it. Let's default to non-stream for simplicity here.
+  const { data, error } = await supabase.functions.invoke('summarize-text', {
+    body: { ...payload, stream: payload.stream === undefined ? false : payload.stream },
+  });
+
+  if (error) {
+    console.error('Error summarizing text:', error);
+    return { error: error.message };
+  }
+  return data as SummarizeTextResponse; // Assuming non-streamed response structure
+};
+
+/**
+ * Calls the 'rewrite-text' Supabase edge function.
+ */
+export const rewriteTextService = async (payload: RewriteTextPayload): Promise<RewriteTextResponse> => {
+  // Default to non-stream for now, suggestion UI might not need streaming initially.
+  const { data, error } = await supabase.functions.invoke('rewrite-text', {
+    body: { ...payload, stream: payload.stream === undefined ? false : payload.stream },
+  });
+
+  if (error) {
+    console.error('Error rewriting text:', error);
+    return { error: error.message };
+  }
+  return data as RewriteTextResponse;
+};
+
+/**
+ * Calls the 'generate-inline-text' Supabase edge function for streaming.
+ * Returns an object containing a ReadableStreamDefaultReader or an error message.
+ */
+export const generateInlineTextService = async (
+  payload: GenerateInlineTextPayload
+): Promise<{ reader: ReadableStreamDefaultReader<Uint8Array> | null; error: string | null }> => {
+  try {
+    // Invoke the function. The Supabase client handles the stream.
+    // The `data` field in the response should be a ReadableStream.
+    const { data, error: invokeError } = await supabase.functions.invoke('generate-inline-text', {
+      body: { ...payload, stream: true }, // Ensure the edge function expects `stream: true`
+    });
+
+    if (invokeError) {
+      console.error('Error invoking generate-inline-text function:', invokeError);
+      return { reader: null, error: invokeError.message };
+    }
+
+    // Check if the data is indeed a ReadableStream
+    if (data instanceof ReadableStream) {
+      return { reader: data.getReader(), error: null };
+    } else {
+      // This case should ideally not happen if the edge function streams correctly
+      // and the client interprets it as a stream.
+      console.error('generateInlineTextService: Expected a ReadableStream, but received:', typeof data, data);
+      // If `data` contains an error structure from the function itself (e.g., JSON error before streaming starts)
+      if (typeof data === 'object' && data !== null && data.error && typeof data.error === 'string') {
+         return { reader: null, error: `Function returned an error: ${data.error}` };
+      }
+      return { reader: null, error: 'Response was not a ReadableStream as expected.' };
+    }
+  } catch (err: any) {
+    console.error('Catch block error in generateInlineTextService:', err);
+    return { reader: null, error: err.message || 'An unexpected error occurred during stream setup.' };
+  }
+};

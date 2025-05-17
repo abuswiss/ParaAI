@@ -1,47 +1,36 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
-import { useAtom } from 'jotai';
-import {
-  Sidebar,
-  SidebarHeader,
-  SidebarContent,
-  SidebarMenu,
-  SidebarMenuItem,
-  SidebarMenuButton,
-  SidebarGroup,
-  SidebarGroupLabel,
-  SidebarSeparator,
-  SidebarProvider,
-  useSidebar,
-} from './Sidebar';
-import Header from './Header';
+import { useAtom, useAtomValue, useSetAtom } from 'jotai';
+import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
+import { Sidebar, SidebarBody, SidebarLink, SidebarProvider, useSidebar } from '@/components/ui/sidebar';
+import AppHeader from './AppHeader';
+import ClaudeChatInterface from '@/components/claude/ClaudeChatInterface';
 import { useAuth } from '@/hooks/useAuth';
 import {
   clearCompletedTasksAtom,
   uploadModalOpenAtom,
-  commandPaletteOpenAtom
+  commandPaletteOpenAtom,
+  deepResearchModeAtom,
+  themePreferenceAtom,
 } from '@/atoms/appAtoms';
 import { cn } from '@/lib/utils';
-import {
-  ResizableHandle,
-  ResizablePanel,
-  ResizablePanelGroup,
-} from "@/components/ui/resizable";
-import ChatInterface from '@/components/chat/ChatInterface';
 import { TooltipProvider } from "@/components/ui/Tooltip";
 import UploadModal from '@/components/documents/UploadModal';
-import { InlineSuggestionProvider } from '@/context/InlineSuggestionContext';
-import ChatHistoryList from '@/components/history/ChatHistoryList';
 import TaskStatusBar from '@/components/common/TaskStatusBar';
 import GlobalCommandPalette from '@/components/common/GlobalCommandPalette';
-import { Home, Files, LogOut, Settings, PanelLeft } from 'lucide-react';
+import { Home, Files, LogOut, Settings, UploadCloud, Moon, Sun, Brain } from 'lucide-react';
 import CaseSelector from './CaseSelector';
+import { motion } from 'framer-motion';
+import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { TrialStatusDisplay } from './TrialStatusDisplay';
 
 const AppLayout: React.FC = () => {
   const clearCompletedTasks = useAtom(clearCompletedTasksAtom)[1];
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true); // Default OPEN for testing
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isUploadModalOpen, setIsUploadModalOpen] = useAtom(uploadModalOpenAtom);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useAtom(commandPaletteOpenAtom);
+  const isDeepResearchModeActive = useAtomValue(deepResearchModeAtom);
 
   // Keyboard listener for Command Palette (Cmd+K / Ctrl+K)
   useEffect(() => {
@@ -70,168 +59,256 @@ const AppLayout: React.FC = () => {
 
   return (
     <TooltipProvider>
-      <SidebarProvider open={isSidebarOpen} onOpenChange={setIsSidebarOpen}>
-        <InlineSuggestionProvider editor={null}>
-          <LayoutContent />
-          <UploadModal
-            isOpen={isUploadModalOpen}
-            onClose={handleCloseUploadModal}
-          />
-          <GlobalCommandPalette
-            open={isCommandPaletteOpen}
-            onOpenChange={setIsCommandPaletteOpen}
-          />
-        </InlineSuggestionProvider>
-      </SidebarProvider>
+      <LayoutContent isSidebarOpen={isSidebarOpen} setIsSidebarOpen={setIsSidebarOpen} />
+      <UploadModal
+        isOpen={isUploadModalOpen}
+        onClose={handleCloseUploadModal}
+      />
+      <GlobalCommandPalette
+        open={isCommandPaletteOpen}
+        onOpenChange={setIsCommandPaletteOpen}
+      />
     </TooltipProvider>
   );
 };
 
-const LayoutContent: React.FC = () => {
+interface LayoutContentProps {
+  isSidebarOpen: boolean;
+  setIsSidebarOpen: React.Dispatch<React.SetStateAction<boolean>>;
+}
+
+const LayoutContent: React.FC<LayoutContentProps> = ({ isSidebarOpen, setIsSidebarOpen }) => {
   const location = useLocation();
   const navigate = useNavigate();
-  const { user, signOut } = useAuth();
-  const { toggleSidebar, state: sidebarState } = useSidebar();
+  const { user, signOut, userProfile } = useAuth();
+  const setUploadModalOpen = useSetAtom(uploadModalOpenAtom);
+  const [theme, setTheme] = useAtom(themePreferenceAtom);
+  const [mounted, setMounted] = React.useState(false);
+  const isDeepResearchModeActive = useAtomValue(deepResearchModeAtom);
+
+  React.useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  // Theme effect from old SidebarFooter
+  React.useEffect(() => {
+    if (mounted) {
+      const root = window.document.documentElement;
+      root.classList.remove('light', 'dark');
+      if (theme === 'light' || theme === 'dark') {
+        root.classList.add(theme);
+      } else {
+        // Default to light if system or undefined
+        root.classList.add('light'); 
+      }
+    }
+  }, [theme, mounted]);
+
+  const cycleTheme = () => {
+    setTheme(prev => prev === 'light' ? 'dark' : 'light');
+  };
 
   const handleLogout = async () => {
     await signOut();
     navigate('/auth');
   };
 
-  const toggleTooltip = sidebarState === 'expanded' ? 'Collapse Sidebar' : 'Expand Sidebar';
+  const handleOpenUploadModal = () => {
+    setUploadModalOpen(true);
+  };
+
+  // Define links for the new sidebar structure, similar to SidebarDemo
+  const navLinks = [
+    {
+      label: "Dashboard",
+      href: "/app/dashboard",
+      icon: <Home className="text-neutral-700 dark:text-neutral-200 h-5 w-5 flex-shrink-0" />
+    },
+    {
+      label: "Files & Matters",
+      href: "/app/files",
+      icon: <Files className="text-neutral-700 dark:text-neutral-200 h-5 w-5 flex-shrink-0" />
+    },
+    // Example of re-adding a previously removed link, if desired.
+    // {
+    //   label: "Legal Assistant",
+    //   href: "/app/claude",
+    //   icon: <Brain className="text-neutral-700 dark:text-neutral-200 h-5 w-5 flex-shrink-0" />
+    // }
+  ];
+
+  // User-specific links (Settings, Logout)
+  const userLinks = [
+    {
+      label: "Settings",
+      href: "/app/settings",
+      icon: <Settings className="text-neutral-700 dark:text-neutral-200 h-5 w-5 flex-shrink-0" />
+    },
+    {
+      label: "Logout",
+      href: "#", // Or handle via onClick
+      action: handleLogout,
+      icon: <LogOut className="text-neutral-700 dark:text-neutral-200 h-5 w-5 flex-shrink-0" />
+    }
+  ];
+  
+  const ThemeIcon = theme === 'dark' ? Moon : Sun;
+  const themeTooltip = `Switch to ${theme === 'dark' ? 'Light' : 'Dark'} mode`;
+
+  if (!mounted && (theme === 'dark' || theme === 'light')) { // Avoid rendering theme toggle server-side if theme is set
+    return null; 
+  }
 
   return (
-    <div className="flex h-screen overflow-hidden">
-      <div className="flex-shrink-0 bg-background border-r h-full flex flex-col group/sidebar">
-        <Sidebar collapsible="icon" className="h-full flex flex-col">
-          <SidebarHeader>
-            <div className="p-2 font-semibold text-lg flex items-center justify-center h-12">
-              {sidebarState === 'expanded' ? (
-                  <span>BenchWise</span>
-              ) : (
-                  <span className="text-xl font-bold">B</span>
-              )}
-            </div>
-          </SidebarHeader>
-          <SidebarContent className="flex flex-col h-full p-2 space-y-2">
-            {/* Conditionally render CaseSelector only when expanded */}
-            {sidebarState === 'expanded' && (
-              <div className={cn("px-2", sidebarState === 'collapsed' && "px-0")}>
+    <div className="flex flex-col h-screen w-full overflow-hidden">
+      <AppHeader />
+      <PanelGroup 
+        direction="horizontal" 
+        className="flex flex-1 w-full overflow-hidden bg-background text-foreground dark:bg-dark-background dark:text-dark-foreground min-h-0"
+      >
+        <Sidebar open={isSidebarOpen} setOpen={setIsSidebarOpen} animate={true}>
+          <SidebarBody className="justify-between gap-10 bg-background dark:bg-neutral-800">
+            <div className="flex flex-col flex-1 overflow-y-auto">
+              <div className="p-4">
+                {isSidebarOpen ? <AppLogo /> : <AppLogoIcon />}
+              </div>
+
+              <div className={cn(
+                "px-4 my-1 transition-opacity duration-300 ease-in-out", 
+                isSidebarOpen ? "opacity-100" : "opacity-0 h-0 overflow-hidden pointer-events-none"
+              )}>
                 <CaseSelector />
               </div>
-            )}
-            {/* Top Navigation */}
-            <SidebarGroup>
-              <SidebarGroupLabel>Workspace</SidebarGroupLabel>
-              <SidebarMenu>
-                <SidebarMenuItem>
-                  <SidebarMenuButton asChild isActive={location.pathname === '/dashboard'} tooltip="Dashboard">
-                    <Link to="/dashboard">
-                      <Home />
-                      <span>Dashboard</span>
-                    </Link>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-                <SidebarMenuItem>
-                  <SidebarMenuButton asChild isActive={location.pathname.startsWith('/files') || location.pathname.startsWith('/documents') || location.pathname.startsWith('/cases')} tooltip="Files & Cases">
-                    <Link to="/files">
-                      <Files />
-                      <span>Files & Cases</span>
-                    </Link>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              </SidebarMenu>
-            </SidebarGroup>
+              
+              <div className="mt-2 flex flex-col gap-1 px-2">
+                {navLinks.map((link, idx) => (
+                  <SidebarLink key={`nav-${idx}`} link={link} />
+                ))}
+              </div>
 
-            {/* Chat History Section - Only visible when expanded */}
-            {sidebarState === 'expanded' && (
-              <>
-                <SidebarSeparator className="my-2" />
-                <SidebarGroup className="overflow-y-auto min-h-0">
-                  <SidebarGroupLabel>Recent Chats</SidebarGroupLabel>
-                  <div className="mt-1">
-                    <ChatHistoryList />
-                  </div>
-                </SidebarGroup>
-              </>
-            )}
+              <div className="mt-2 px-2">
+                 <SidebarLink
+                  link={{
+                    label: "Upload Document",
+                    href: "#",
+                    icon: <UploadCloud className="text-neutral-700 dark:text-neutral-200 h-5 w-5 flex-shrink-0" />
+                  }}
+                  onClick={handleOpenUploadModal}
+                />
+              </div>
+            </div>
 
-            {/* Spacer to push account section to the bottom */}
-            <div className="flex-grow" />
-
-            {/* User account and settings section at the bottom */}
-            <div className="border-t pt-2 pb-2">
-              <SidebarMenu>
-                {user && (
-                  <SidebarMenuItem>
-                    <SidebarMenuButton
-                      className="cursor-default hover:bg-transparent h-auto justify-start px-2 py-1.5"
-                      tooltip={{ content: user.email || 'Account', side: 'right', align: 'center' }}
-                    >
-                      <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-sidebar text-primary-foreground group-data-[state=expanded]:h-7 group-data-[state=expanded]:w-7">
+            <div className="px-2 pb-2 mt-auto">
+              <div className="flex items-center justify-center my-2">
+                  <TooltipProvider>
+                      <Tooltip>
+                          <TooltipTrigger asChild>
+                              <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={cycleTheme}
+                                  className="h-8 w-8"
+                                  aria-label={themeTooltip}
+                              >
+                                  <ThemeIcon className="h-5 w-5" />
+                                  <span className="sr-only">{themeTooltip}</span>
+                              </Button>
+                          </TooltipTrigger>
+                          <TooltipContent side="right" align="center">
+                              {themeTooltip}
+                          </TooltipContent>
+                      </Tooltip>
+                  </TooltipProvider>
+              </div>
+              
+              {user && (
+                <SidebarLink
+                  link={{
+                    label: user.email || "Account",
+                    href: "#",
+                    icon: (
+                      <div className="flex h-7 w-7 min-w-7 items-center justify-center rounded-full bg-secondary dark:bg-dark-secondary text-secondary-foreground dark:text-dark-secondary-foreground">
                         <span className="text-sm font-medium">{user.email?.charAt(0).toUpperCase() || 'U'}</span>
                       </div>
-                      <span className="ml-2 text-sm font-medium text-foreground truncate max-w-[140px] group-data-[state=collapsed]:hidden">
-                        {user.email || 'Account'}
-                      </span>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                )}
-                <SidebarMenuItem>
-                  <SidebarMenuButton
-                    onClick={() => navigate('/settings')}
-                    tooltip={{ content: 'Settings', side: 'right', align: 'center' }}
-                  >
-                    <Settings />
-                    <span>Settings</span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-                <SidebarMenuItem>
-                  <SidebarMenuButton
-                    onClick={handleLogout}
-                    tooltip={{ content: 'Logout', side: 'right', align: 'center' }}
-                  >
-                    <LogOut />
-                    <span>Logout</span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-                <SidebarSeparator className="my-1" />
-                <SidebarMenuItem>
-                  <SidebarMenuButton
-                    onClick={toggleSidebar}
-                    tooltip={{ content: toggleTooltip, side: 'right', align: 'center' }}
-                  >
-                    <PanelLeft />
-                    <span>Collapse</span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              </SidebarMenu>
+                    ),
+                  }}
+                  className="cursor-default hover:bg-transparent"
+                />
+              )}
+              {userLinks.map((link, idx) => (
+                <SidebarLink 
+                  key={`user-${idx}`} 
+                  link={link} 
+                  onClick={link.action ? (e) => { e.preventDefault(); link.action(); } : undefined} 
+                />
+              ))}
             </div>
-          </SidebarContent>
+          </SidebarBody>
         </Sidebar>
-      </div>
-      {/* Resizable Area (Main + Chat) */}
-      <ResizablePanelGroup direction="horizontal" className="flex-grow">
-        <ResizablePanel order={1} defaultSize={80} minSize={30}>
-          <div className={cn("flex flex-col h-full")}> 
-            <Header />
-            <main className="flex-1 overflow-auto p-4 md:p-6 bg-muted/40">
+
+        <Panel defaultSize={85} minSize={30} className="flex-grow flex flex-col h-full min-w-0 bg-background dark:bg-dark-purple text-foreground dark:text-dark-foreground">
+          <div className="p-2 sm:p-3 md:p-4 border-b border-border dark:border-dark-border">
+            <TrialStatusDisplay />
+          </div>
+          <main className="flex-1 h-full min-h-0 w-full relative">
+            <div className="w-full h-full absolute inset-0 overflow-y-auto pt-0 px-4 pb-4 md:px-6 md:pb-6">
               <Outlet />
-            </main>
-            <TaskStatusBar />
-          </div>
-        </ResizablePanel>
-        <ResizableHandle withHandle />
-        <ResizablePanel order={2} defaultSize={20} minSize={20} maxSize={75} collapsible={false}>
-          <div className="h-full border-l flex flex-col">
-            {/* Always render ChatInterface here */}
-            <ChatInterface />
-          </div>
-        </ResizablePanel>
-      </ResizablePanelGroup>
-      {/* Command Palette is now rendered in AppLayout */}
+            </div>
+          </main>
+          <TaskStatusBar />
+        </Panel>
+
+        <PanelResizeHandle 
+          id="chat-resize-handle" 
+          className="w-4 bg-border/30 dark:bg-purple-gray/50 hover:bg-primary/70 dark:hover:bg-legal-purple/70 transition-colors cursor-col-resize z-20 flex items-center justify-center"
+        >
+          <div className="h-16 w-1 bg-border/70 dark:bg-purple-gray rounded-full hover:bg-primary dark:hover:bg-legal-purple transition-colors" />
+        </PanelResizeHandle>
+
+        <Panel 
+          id="chat-panel" 
+          defaultSize={20} 
+          minSize={15} 
+          maxSize={50} 
+          className={cn(
+            "flex flex-col h-full flex-shrink-0",
+            isDeepResearchModeActive 
+              ? "bg-orange-100/50 dark:bg-orange-900/30"
+              : "bg-background dark:bg-dark-purple"
+          )}
+          onResize={(size) => console.log('Chat panel resized to:', size)}
+        >
+          <ClaudeChatInterface />
+        </Panel>
+      </PanelGroup>
     </div>
   );
 }
+
+// Helper components for Logo (can be moved to a different file if preferred)
+const AppLogo = () => (
+  <Link
+    to="/"
+    className="font-normal flex space-x-2 items-center text-sm text-black dark:text-white py-1 relative z-20"
+  >
+    <div className="h-5 w-6 bg-primary dark:bg-primary rounded-br-lg rounded-tr-sm rounded-tl-lg rounded-bl-sm flex-shrink-0" />
+    <motion.span
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      className="font-medium text-black dark:text-white whitespace-pre text-lg"
+    >
+      BenchWise
+    </motion.span>
+  </Link>
+);
+
+const AppLogoIcon = () => (
+  <Link
+    to="/"
+    className="font-normal flex space-x-2 items-center text-sm text-black dark:text-white py-1 relative z-20"
+  >
+    <div className="h-6 w-7 bg-primary dark:bg-primary rounded-lg flex-shrink-0 flex items-center justify-center text-primary-foreground font-bold text-lg">B</div>
+  </Link>
+);
 
 export default AppLayout; 

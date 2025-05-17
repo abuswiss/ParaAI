@@ -6,7 +6,7 @@ import { BackgroundTask, backgroundTasksAtom, removeTaskAtom } from '@/atoms/app
 import { Button } from '@/components/ui/Button';
 import { cn } from '@/lib/utils';
 
-// Define props if needed, but mainly relies on Jotai atom
+// TaskStatusBarProps can be empty if all data comes from Jotai atoms
 interface TaskStatusBarProps {}
 
 const TaskStatusBar: React.FC<TaskStatusBarProps> = () => {
@@ -14,19 +14,19 @@ const TaskStatusBar: React.FC<TaskStatusBarProps> = () => {
   const [, removeTask] = useAtom(removeTaskAtom);
 
   if (tasks.length === 0) {
-    return null; // Don't render anything if there are no tasks
+    return null;
   }
 
   const getIcon = (status: BackgroundTask['status']) => {
     switch (status) {
       case 'running':
-        return <Loader className="h-4 w-4 animate-spin text-blue-500" />;
+        return <Loader className="h-4 w-4 animate-spin text-info dark:text-dark-info" />;
       case 'success':
-        return <CheckCircle className="h-4 w-4 text-green-500" />;
+        return <CheckCircle className="h-4 w-4 text-success dark:text-dark-success" />;
       case 'error':
-        return <AlertCircle className="h-4 w-4 text-red-500" />;
+        return <AlertCircle className="h-4 w-4 text-destructive dark:text-dark-destructive" />;
       case 'pending':
-        return <Loader className="h-4 w-4 text-muted-foreground" />;
+        return <Loader className="h-4 w-4 text-muted-foreground dark:text-dark-muted-foreground" />;
       default:
         return null;
     }
@@ -45,8 +45,8 @@ const TaskStatusBar: React.FC<TaskStatusBarProps> = () => {
               exit={{ opacity: 0, scale: 0.5, transition: { duration: 0.2 } }}
               className={cn(
                 "flex items-center justify-between gap-2 p-3 rounded-lg shadow-lg border pointer-events-auto",
-                "bg-background/90 backdrop-blur-sm", // Theme background with blur
-                task.status === 'error' ? 'border-red-500/50' : 'border-border'
+                "bg-popover/90 dark:bg-dark-popover/90 backdrop-blur-sm",
+                task.status === 'error' ? 'border-destructive/50 dark:border-dark-destructive/50' : 'border-popover-border dark:border-dark-popover-border'
               )}
             >
               <div className="flex items-center gap-2 flex-grow overflow-hidden">
@@ -54,25 +54,16 @@ const TaskStatusBar: React.FC<TaskStatusBarProps> = () => {
                   {getIcon(task.status)}
                 </div>
                 <div className="flex-grow overflow-hidden">
-                  <p className="text-sm font-medium text-foreground truncate" title={task.name}>
-                    {task.name}
+                  <p className="text-sm font-medium text-popover-foreground dark:text-dark-popover-foreground truncate" title={task.description}>
+                    {task.description}
                   </p>
-                  {task.message && (
-                    <p className="text-xs text-muted-foreground truncate" title={task.message}>
-                      {task.message}
-                    </p>
-                  )}
                 </div>
               </div>
-              {/* Optional: Add progress bar if task.progress exists */}
-              {/* {typeof task.progress === 'number' && ... } */}
-
-              {/* Close button */} 
               {(task.status === 'success' || task.status === 'error') && (
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="h-6 w-6 flex-shrink-0 text-muted-foreground hover:text-foreground"
+                  className="h-6 w-6 flex-shrink-0 text-muted-foreground dark:text-dark-muted-foreground hover:text-foreground dark:hover:text-dark-foreground"
                   onClick={() => removeTask(task.id)}
                 >
                   <X className="h-4 w-4" />
