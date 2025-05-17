@@ -212,13 +212,13 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         
         console.log(`AuthContext: onAuthStateChange event: ${_event}. Session user: ${currentSession?.user?.id || 'None'}.`);
         
-        // Set loading to true before any async profile operations if not already true.
-        // This ensures that even if a quick SIGNED_OUT followed by SIGNED_IN occurs,
-        // the loading state is correctly managed.
-        if (!loading) { // Only set to true if it was false, to avoid redundant logging if already true
-            setLoading(true);
-            console.log("AuthContext: onAuthStateChange - setting loading to true before processing.");
-        }
+        // Always ensure loading state reflects that auth processing is happening.
+        setLoading(prev => {
+            if (!prev) {
+                console.log("AuthContext: onAuthStateChange - setting loading to true before processing.");
+            }
+            return true;
+        });
 
         setSession(currentSession);
         const currentUser = currentSession?.user ?? null;
