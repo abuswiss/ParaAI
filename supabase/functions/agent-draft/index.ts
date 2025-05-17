@@ -1,18 +1,7 @@
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { corsHeaders } from '../_shared/cors.ts';
 import { OpenAI } from 'https://deno.land/x/openai/mod.ts';
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-
-// Function to get Supabase client (respecting user auth)
-function getSupabaseClient(req) {
-  return createClient(Deno.env.get('SUPABASE_URL') ?? '', Deno.env.get('SUPABASE_ANON_KEY') ?? '', {
-    global: {
-      headers: {
-        Authorization: req.headers.get('Authorization')
-      }
-    }
-  });
-}
+import { createSupabaseAdminClient } from '../_shared/supabaseAdmin.ts';
 
 serve(async (req)=>{
   if (req.method === 'OPTIONS') {
@@ -31,6 +20,44 @@ serve(async (req)=>{
 
     const openaiApiKey = Deno.env.get('OPENAI_API_KEY');
     if (!openaiApiKey) throw new Error('OPENAI_API_KEY not set.');
+
+    const supabaseAdmin = createSupabaseAdminClient();
+    const { data: profile, error: profileError } = await supabaseAdmin
+      .from('profiles')
+      .select('subscription_status, trial_ends_at, trial_ai_calls_used')
+      .eq('id', userId)
+      .single();
+
+    if (profileError || !profile) {
+      console.error('Profile fetch error:', profileError);
+      return new Response(JSON.stringify({ error: 'User profile not found' }), {
+        status: 403,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+
+    const TRIAL_AI_CALL_LIMIT = 30;
+    const now = new Date();
+
+    if (profile.subscription_status === 'trialing') {
+      if (!profile.trial_ends_at || new Date(profile.trial_ends_at) < now) {
+        return new Response(JSON.stringify({ error: 'Trial expired' }), {
+          status: 403,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+      if ((profile.trial_ai_calls_used ?? 0) >= TRIAL_AI_CALL_LIMIT) {
+        return new Response(JSON.stringify({ error: 'Trial call limit reached' }), {
+          status: 403,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+    } else if (profile.subscription_status !== 'active') {
+      return new Response(JSON.stringify({ error: 'Subscription inactive' }), {
+        status: 403,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
 
     console.log(`Agent Draft Function: Case ${caseId || 'N/A'}`);
 
@@ -72,6 +99,13 @@ serve(async (req)=>{
             }
           }
           // Signal end of stream
+          if (profile.subscription_status === 'trialing') {
+            await supabaseAdmin
+              .from('profiles')
+              .update({ trial_ai_calls_used: (profile.trial_ai_calls_used ?? 0) + 1 })
+              .eq('id', userId);
+          }
+          
           controller.enqueue(encoder.encode('data: [DONE]\n\n'));
           controller.close();
         } catch (streamError) {

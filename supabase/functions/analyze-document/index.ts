@@ -1,6 +1,6 @@
 // supabase/functions/analyze-document/index.ts
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
-import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2'; // Use SupabaseClient type
+import { createSupabaseAdminClient } from '../_shared/supabaseAdmin.ts';
 import { OpenAI } from 'https://deno.land/x/openai@v4.52.7/mod.ts'; // Use specific version or ensure compatibility
 import { distance } from 'https://deno.land/x/fastest_levenshtein/mod.ts'; // Import for fuzzy matching
 // Define type for OpenAI API response usage
@@ -23,25 +23,6 @@ function createOpenAIClient(): OpenAI {
     throw new Error('Server configuration error: Missing OpenAI API Key.');
   }
   return new OpenAI({ apiKey });
-}
-
-// --- Helper: Create Supabase Admin Client (SERVICE_ROLE) ---
-function createSupabaseAdminClient(): SupabaseClient {
-  const supabaseUrl = Deno.env.get('SUPABASE_URL');
-  const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
-
-  if (!supabaseUrl || !supabaseServiceKey) {
-    console.error('Missing environment variables: SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY');
-    throw new Error('Server configuration error: Missing Supabase credentials.');
-  }
-  // Correctly call createClient with options object
-  return createClient(supabaseUrl!, supabaseServiceKey!, {
-    auth: {
-        persistSession: false,
-        autoRefreshToken: false,
-        detectSessionInUrl: false
-    }
-  });
 }
 
 
@@ -643,6 +624,44 @@ serve(async (req: Request) => {
     const openai = createOpenAIClient();
     console.log(`[${requestStartTime}] Clients initialized successfully.`);
 
+    // --- Trial and Subscription Check ---
+    const { data: profile, error: profileError } = await supabaseAdmin
+      .from('profiles')
+      .select('subscription_status, trial_ends_at, trial_ai_calls_used')
+      .eq('id', userId)
+      .single();
+
+    if (profileError || !profile) {
+      console.error('Profile fetch error:', profileError);
+      return new Response(JSON.stringify({ success: false, error: 'User profile not found' }), {
+        status: 403,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+
+    const TRIAL_AI_CALL_LIMIT = 30;
+    const now = new Date();
+
+    if (profile.subscription_status === 'trialing') {
+      if (!profile.trial_ends_at || new Date(profile.trial_ends_at) < now) {
+        return new Response(JSON.stringify({ success: false, error: 'Trial expired' }), {
+          status: 403,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+      if ((profile.trial_ai_calls_used ?? 0) >= TRIAL_AI_CALL_LIMIT) {
+        return new Response(JSON.stringify({ success: false, error: 'Trial call limit reached' }), {
+          status: 403,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+    } else if (profile.subscription_status !== 'active') {
+      return new Response(JSON.stringify({ success: false, error: 'Subscription inactive' }), {
+        status: 403,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+
     // 4. Get Prompts
     const { systemPrompt, userPrompt, responseFormat } = getPrompts(analysisType, documentText, customPrompt);
 
@@ -861,11 +880,19 @@ serve(async (req: Request) => {
     // 9. Return success response
     const requestEndTime = Date.now();
     console.log(`[${requestStartTime}] Returning success response (${requestEndTime - requestStartTime}ms total).`);
-    return new Response(JSON.stringify({ 
-      success: true, 
-      analysisId: analysisRecordId, 
+
+    if (profile.subscription_status === 'trialing') {
+      await supabaseAdmin
+        .from('profiles')
+        .update({ trial_ai_calls_used: (profile.trial_ai_calls_used ?? 0) + 1 })
+        .eq('id', userId);
+    }
+
+    return new Response(JSON.stringify({
+      success: true,
+      analysisId: analysisRecordId,
       result: processedResult // Return the result with accurate positions
-    }), { 
+    }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }, 
       status: 200 
     });

@@ -127,6 +127,14 @@ export const analyzeDocument = async ({
   const taskDescription = `Analyzing ${analysisType} for document...`;
 
   try {
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
+      updateTask({ id: taskId, status: 'error', description: 'Authentication error' });
+      setTimeout(() => removeTask(taskId), 15000);
+      return { data: null, error: new Error('User not authenticated'), analysisId: undefined };
+    }
+    const userId = user.id;
+
     console.log(`[SVC] Invoking analyze-document function for Doc ID: ${documentId}, Type: ${analysisType}`);
     
     addTask({ 
@@ -159,11 +167,12 @@ export const analyzeDocument = async ({
 
     // Now call the function with the document text
     const { data: invokeData, error: invokeError } = await supabase.functions.invoke<BackendAnalysisResponse>('analyze-document', {
-      body: { 
-        documentId, 
-        analysisType, 
+      body: {
+        documentId,
+        analysisType,
         customPrompt,
-        documentText: docData.extracted_text 
+        documentText: docData.extracted_text,
+        userId,
       },
     });
 
