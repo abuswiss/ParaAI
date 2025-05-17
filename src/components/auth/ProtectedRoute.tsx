@@ -3,9 +3,8 @@ import { Navigate, Outlet, useLocation } from 'react-router-dom';
 // import { useAuth } from '@/context/AuthContext'; // OLD PATH
 import { useAuth } from '@/hooks/useAuth'; // CORRECT PATH
 import { Spinner } from '@/components/ui/Spinner'; // Assuming a Spinner component exists
-
-// Define the trial AI call limit, or import from a shared constants file
-const TRIAL_AI_CALL_LIMIT = 30;
+import { TRIAL_AI_CALL_LIMIT } from '@/config/constants';
+import { isSubscriptionActive, isTrialValid } from '@/utils/subscription';
 
 const ProtectedRoute: React.FC = () => {
   const { user, userProfile, loading } = useAuth();
@@ -35,17 +34,8 @@ const ProtectedRoute: React.FC = () => {
   // If user is authenticated, check subscription/trial status
   if (userProfile) {
     const isTrialing = userProfile.subscription_status === 'trialing';
-    const isActiveSubscription = userProfile.subscription_status === 'active';
-
-    let trialIsValid = false;
-    if (isTrialing && userProfile.trial_ends_at) {
-      const trialEndDate = new Date(userProfile.trial_ends_at);
-      const now = new Date();
-      const callsUsed = userProfile.trial_ai_calls_used || 0;
-      if (now <= trialEndDate && callsUsed < TRIAL_AI_CALL_LIMIT) {
-        trialIsValid = true;
-      }
-    }
+    const isActiveSubscription = isSubscriptionActive(userProfile);
+    const trialIsValid = isTrialValid(userProfile);
 
     // Allow access if trial is valid OR subscription is active
     if (trialIsValid || isActiveSubscription) {

@@ -2,13 +2,14 @@ import React from 'react';
 import { useAuth } from '@/hooks/useAuth'; // Assuming useAuth hook is in @/hooks/useAuth
 import { Button } from '@/components/ui/Button'; // Assuming Button component is in @/components/ui/Button
 import { useNavigate } from 'react-router-dom';
-
-const TRIAL_AI_CALL_LIMIT = 30; // Defined in the user query
+import { TRIAL_AI_CALL_LIMIT } from '@/config/constants';
+import { isTrialValid } from '@/utils/subscription';
 
 export const TrialStatusDisplay: React.FC = () => {
   const { userProfile } = useAuth();
   const navigate = useNavigate();
 
+  const trialValid = isTrialValid(userProfile);
   if (!userProfile || userProfile.subscription_status !== 'trialing') {
     return null;
   }
@@ -29,7 +30,7 @@ export const TrialStatusDisplay: React.FC = () => {
   const callsUsed = userProfile.trial_ai_calls_used || 0;
   const callsRemaining = Math.max(0, TRIAL_AI_CALL_LIMIT - callsUsed); // Ensure not negative
 
-  if (daysLeft <= 0 || callsRemaining <= 0) {
+  if (!trialValid) {
     return (
       <div className="text-sm text-yellow-700 dark:text-yellow-300 p-3 bg-yellow-100 dark:bg-yellow-800 border border-yellow-300 dark:border-yellow-600 rounded-md shadow-sm flex items-center justify-between">
         <span>Your trial has ended.</span>
