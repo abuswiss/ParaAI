@@ -120,9 +120,15 @@ const DocumentComparisonView: React.FC<DocumentComparisonViewProps> = ({
       setAiAnalysis(null);
 
       try {
+        const { data: { user }, error: authError } = await supabase.auth.getUser();
+        if (authError || !user) {
+          throw new Error('User not authenticated');
+        }
+        const userId = user.id;
+
         console.log('Invoking compare-documents-ai function with goal:', submittedGoal);
         const { data, error: functionError } = await supabase.functions.invoke('compare-documents-ai', {
-          body: { text1: doc1Content, text2: doc2Content, goal: submittedGoal },
+          body: { text1: doc1Content, text2: doc2Content, goal: submittedGoal, userId },
         });
 
         if (functionError) {

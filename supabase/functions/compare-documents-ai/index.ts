@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
 import { corsHeaders } from "./cors.ts";
-import { OpenAI } from "https://deno.land/x/openai@v4.48.2/mod.ts"; 
+import { OpenAI } from "https://deno.land/x/openai@v4.48.2/mod.ts";
+import { createSupabaseAdminClient } from "../_shared/supabaseAdmin.ts";
 
 console.log("Compare-Documents-AI: Function script starting...");
 
@@ -32,7 +33,14 @@ serve(async (req) => {
     }
 
     // Parse request body
-    const { text1, text2, goal } = await req.json();
+    const { text1, text2, goal, userId } = await req.json();
+
+    if (!userId || typeof userId !== 'string') {
+      return new Response(JSON.stringify({ error: 'Missing or invalid userId' }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 400,
+      });
+    }
 
     // Validate input
     if (typeof text1 !== 'string' || typeof text2 !== 'string') {
@@ -51,6 +59,43 @@ serve(async (req) => {
     }
 
     const goalProvided = goal && goal.trim() !== "";
+
+    const supabaseAdmin = createSupabaseAdminClient();
+    const { data: profile, error: profileError } = await supabaseAdmin
+      .from('profiles')
+      .select('subscription_status, trial_ends_at, trial_ai_calls_used')
+      .eq('id', userId)
+      .single();
+
+    if (profileError || !profile) {
+      console.error('Profile fetch error:', profileError);
+      return new Response(JSON.stringify({ error: 'User profile not found' }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 403,
+      });
+    }
+
+    const TRIAL_AI_CALL_LIMIT = 30;
+    const now = new Date();
+    if (profile.subscription_status === 'trialing') {
+      if (!profile.trial_ends_at || new Date(profile.trial_ends_at) < now) {
+        return new Response(JSON.stringify({ error: 'Trial expired' }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 403,
+        });
+      }
+      if ((profile.trial_ai_calls_used ?? 0) >= TRIAL_AI_CALL_LIMIT) {
+        return new Response(JSON.stringify({ error: 'Trial call limit reached' }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 403,
+        });
+      }
+    } else if (profile.subscription_status !== 'active') {
+      return new Response(JSON.stringify({ error: 'Subscription inactive' }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 403,
+      });
+    }
 
     // --- Construct Comparison Prompt --- 
     const systemPrompt = `You are an expert legal AI assistant specializing in document comparison.
@@ -148,6 +193,13 @@ Return your analysis as a JSON object with "summary" and "focusedDifferences" ke
             console.warn("Compare-Documents-AI: First item in 'focusedDifferences' might be missing expected string fields. Please verify structure.", firstDiff);
             // Not throwing an error here, but logging a warning. Could be made stricter.
         }
+    }
+
+    if (profile.subscription_status === 'trialing') {
+      await supabaseAdmin
+        .from('profiles')
+        .update({ trial_ai_calls_used: (profile.trial_ai_calls_used ?? 0) + 1 })
+        .eq('id', userId);
     }
 
     return new Response(JSON.stringify(parsedResponse), {
