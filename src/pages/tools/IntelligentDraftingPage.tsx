@@ -112,12 +112,17 @@ const IntelligentDraftingPage: React.FC = () => {
     setGeneratedDraft('');
 
     try {
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      if (authError || !user) {
+        throw new Error('User not authenticated');
+      }
       const params = {
         draft_type: draftType,
         prompt_details: promptDetails,
         document_context: documentContext.trim() || undefined,
         tone: toneOptions[toneIndex].value,
         length_preference: lengthOptions[lengthIndex].value,
+        userId: user.id,
       };
 
       const { data, error: funcError } = await supabase.functions.invoke(
