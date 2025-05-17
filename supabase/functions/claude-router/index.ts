@@ -471,7 +471,10 @@ async function handleSimpleQuery(
   messages: MessageParam[],
   documentContext = '',
   streamThoughts = false,
-  preloadedContextSnippet?: string // Added for the specific snippet
+  preloadedContextSnippet?: string, // Added for the specific snippet
+  userId?: string,
+  profile?: { subscription_status: string; trial_ai_calls_used?: number },
+  supabaseAdmin?: SupabaseClient
 ): Promise<DenoReadableStream<Uint8Array>> {
   console.log('--- handleSimpleQuery called ---');
   console.log('streamThoughts parameter value:', streamThoughts);
@@ -595,6 +598,13 @@ If you are referencing information directly from the document context provided b
           content: thinkingBuffer.trim()
         })}\n\n`));
       }
+
+      if (profile && userId && supabaseAdmin && profile.subscription_status === 'trialing') {
+        await supabaseAdmin
+          .from('profiles')
+          .update({ trial_ai_calls_used: (profile.trial_ai_calls_used ?? 0) + 1 })
+          .eq('id', userId);
+      }
     } catch (error) {
       console.error('Stream processing error:', error);
       await writer.write(encoder.encode(`data: ${JSON.stringify({ 
@@ -615,7 +625,10 @@ async function handleComplexQuery(
   messages: MessageParam[],
   documentContext = '',
   streamThoughts = true,
-  preloadedContextSnippet?: string // Added for the specific snippet
+  preloadedContextSnippet?: string,
+  userId?: string,
+  profile?: { subscription_status: string; trial_ai_calls_used?: number },
+  supabaseAdmin?: SupabaseClient
 ): Promise<DenoReadableStream<Uint8Array>> {
   console.log('--- handleComplexQuery called ---');
   console.log('streamThoughts parameter value:', streamThoughts);
@@ -735,6 +748,13 @@ If you are referencing information directly from the document context provided b
           content: thinkingBuffer.trim()
         })}\n\n`));
       }
+
+      if (profile && userId && supabaseAdmin && profile.subscription_status === 'trialing') {
+        await supabaseAdmin
+          .from('profiles')
+          .update({ trial_ai_calls_used: (profile.trial_ai_calls_used ?? 0) + 1 })
+          .eq('id', userId);
+      }
     } catch (error) {
       console.error('Stream processing error:', error);
       await writer.write(encoder.encode(`data: ${JSON.stringify({ 
@@ -755,7 +775,10 @@ async function handleResearchQuery(
   messages: MessageParam[],
   documentContext = '',
   streamThoughts = true,
-  preloadedContextSnippet?: string // Added for the specific snippet
+  preloadedContextSnippet?: string,
+  userId?: string,
+  profile?: { subscription_status: string; trial_ai_calls_used?: number },
+  supabaseAdmin?: SupabaseClient
 ): Promise<DenoReadableStream<Uint8Array>> {
   console.log('--- handleResearchQuery called ---');
   console.log('streamThoughts parameter value:', streamThoughts);
@@ -997,6 +1020,13 @@ Please provide a detailed and well-cited answer.`;
           content: thinkingBuffer.trim()
         })}\n\n`));
       }
+
+      if (profile && userId && supabaseAdmin && profile.subscription_status === 'trialing') {
+        await supabaseAdmin
+          .from('profiles')
+          .update({ trial_ai_calls_used: (profile.trial_ai_calls_used ?? 0) + 1 })
+          .eq('id', userId);
+      }
     } catch (error) {
       console.error('Stream processing error:', error);
       await writer.write(encoder.encode(`data: ${JSON.stringify({ 
@@ -1044,6 +1074,43 @@ serve(async (req: Request) => {
     
     const userId = user.id;
     console.log('User authenticated:', userId);
+
+    const { data: profile, error: profileError } = await supabaseAdmin
+      .from('profiles')
+      .select('subscription_status, trial_ends_at, trial_ai_calls_used')
+      .eq('id', userId)
+      .single();
+
+    if (profileError || !profile) {
+      console.error('Profile fetch error:', profileError);
+      return new Response(JSON.stringify({ error: 'User profile not found' }), {
+        status: 403,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+
+    const TRIAL_AI_CALL_LIMIT = 30;
+    const now = new Date();
+
+    if (profile.subscription_status === 'trialing') {
+      if (!profile.trial_ends_at || new Date(profile.trial_ends_at) < now) {
+        return new Response(JSON.stringify({ error: 'Trial expired' }), {
+          status: 403,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+      if ((profile.trial_ai_calls_used ?? 0) >= TRIAL_AI_CALL_LIMIT) {
+        return new Response(JSON.stringify({ error: 'Trial call limit reached' }), {
+          status: 403,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+    } else if (profile.subscription_status !== 'active') {
+      return new Response(JSON.stringify({ error: 'Subscription inactive' }), {
+        status: 403,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
 
     // --- Request Body Parsing ---
     const {
@@ -1230,13 +1297,40 @@ serve(async (req: Request) => {
     
     if (queryType === 'simple') {
       console.log('Routing to simple query handler');
-      responseStream = await handleSimpleQuery(queryContent, messages, fetchedContextText, streamThoughts, specificSnippetText);
+      responseStream = await handleSimpleQuery(
+        queryContent,
+        messages,
+        fetchedContextText,
+        streamThoughts,
+        specificSnippetText,
+        userId,
+        profile,
+        supabaseAdmin
+      );
     } else if (queryType === 'research_needed') {
       console.log('Routing to research query handler');
-      responseStream = await handleResearchQuery(queryContent, messages, fetchedContextText, streamThoughts, specificSnippetText);
+      responseStream = await handleResearchQuery(
+        queryContent,
+        messages,
+        fetchedContextText,
+        streamThoughts,
+        specificSnippetText,
+        userId,
+        profile,
+        supabaseAdmin
+      );
     } else { // 'complex' or default
       console.log('Routing to complex query handler');
-      responseStream = await handleComplexQuery(queryContent, messages, fetchedContextText, streamThoughts, specificSnippetText);
+      responseStream = await handleComplexQuery(
+        queryContent,
+        messages,
+        fetchedContextText,
+        streamThoughts,
+        specificSnippetText,
+        userId,
+        profile,
+        supabaseAdmin
+      );
     }
     
     // Launch citation verification in background if we have a conversation ID
