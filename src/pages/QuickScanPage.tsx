@@ -154,30 +154,52 @@ const QuickScanPage: React.FC = () => {
 
     try {
       const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-      
+
       const requestBody = { documentId: documentIdToScan, caseId: activeCaseId };
       console.log(`Scanning existing document ID: ${documentIdToScan}`);
 
-      const response = await fetch(`${supabaseUrl}/functions/v1/quick-scan-document`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session.access_token}`,
-        },
-        body: JSON.stringify(requestBody),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+      let response: Response;
+      try {
+        response = await fetch(`${supabaseUrl}/functions/v1/quick-scan-document`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify(requestBody),
+        });
+      } catch (networkErr) {
+        console.error('Network error while performing quick scan:', networkErr);
+        setError('Network error. Please check your connection and try again.');
+        return;
       }
 
-      const result = await response.json();
+      if (!response.ok) {
+        let errorMessage = `HTTP error! status: ${response.status}`;
+        try {
+          const errorData = await response.json();
+          if (errorData && errorData.error) {
+            errorMessage = errorData.error;
+          }
+        } catch (parseErr) {
+          console.error('Failed to parse error response:', parseErr);
+        }
+        throw new Error(errorMessage);
+      }
+
+      let result: ScanResult;
+      try {
+        result = await response.json();
+      } catch (parseErr) {
+        console.error('Failed to parse scan result:', parseErr);
+        setError('Received malformed response from the service.');
+        return;
+      }
       setScanResult(result);
 
     } catch (err) {
       console.error("Error performing quick scan:", err);
-      setError(err instanceof Error ? err.message : "An unknown error occurred.");
+      setError(err instanceof Error ? err.message : "An unknown service error occurred.");
     } finally {
       setIsLoading(false);
     }
