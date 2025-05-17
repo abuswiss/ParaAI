@@ -3,7 +3,8 @@ import { corsHeaders } from '../_shared/cors.ts';
 import { OpenAI } from "npm:openai@^4.0.0";
 // Remove Vercel AI library stream helpers
 // import { OpenAIStream, StreamingTextResponse } from 'npm:ai@^3.1.32'; 
-import { createClient, SupabaseClient } from 'npm:@supabase/supabase-js@^2.0.0';
+import { createSupabaseAdminClient } from '../_shared/supabaseAdmin.ts';
+import type { SupabaseClient } from 'npm:@supabase/supabase-js@^2.0.0';
 import { v4 as uuidv4 } from "npm:uuid"; // Import uuid
 
 // --- Database Interaction Types (Moved to top level) ---
@@ -74,15 +75,7 @@ function formatAnalysisItem(item: any, type: string): string {
 console.log('Generic Chat Agent function initializing (Refactored)...')
 
 // Initialize Supabase client (unchanged)
-const supabaseUrl = Deno.env.get('SUPABASE_URL')
-const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
-if (!supabaseUrl || !supabaseServiceKey) {
-    console.error('Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY');
-}
-const supabaseAdmin: SupabaseClient = createClient(supabaseUrl!, supabaseServiceKey!, {
-    global: { headers: { Authorization: `Bearer ${supabaseServiceKey!}` } },
-    auth: { persistSession: false }
-});
+const supabaseAdmin: SupabaseClient = createSupabaseAdminClient();
 
 // --- Main Serve Function --- 
 serve(async (req: Request) => {
@@ -113,6 +106,39 @@ serve(async (req: Request) => {
     }
     userId = user.id;
     console.log('User authenticated:', userId);
+
+    const { data: profile, error: profileError } = await supabaseAdmin
+      .from('profiles')
+      .select('subscription_status, trial_ends_at, trial_ai_calls_used')
+      .eq('id', userId)
+      .single();
+
+    if (profileError || !profile) {
+        console.error('Profile fetch error:', profileError);
+        return new Response(JSON.stringify({ error: 'User profile not found' }), {
+            status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+    }
+
+    const TRIAL_AI_CALL_LIMIT = 30;
+    const now = new Date();
+
+    if (profile.subscription_status === 'trialing') {
+        if (!profile.trial_ends_at || new Date(profile.trial_ends_at) < now) {
+            return new Response(JSON.stringify({ error: 'Trial expired' }), {
+                status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+            });
+        }
+        if ((profile.trial_ai_calls_used ?? 0) >= TRIAL_AI_CALL_LIMIT) {
+            return new Response(JSON.stringify({ error: 'Trial call limit reached' }), {
+                status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+            });
+        }
+    } else if (profile.subscription_status !== 'active') {
+        return new Response(JSON.stringify({ error: 'Subscription inactive' }), {
+            status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+    }
 
     // --- Request Body Parsing --- 
     const { 
@@ -472,6 +498,12 @@ FINAL_ANSWER: Based on the statutes of [Jurisdiction], ...`;
             } finally {
               controller.close();
               console.log('DEBUG: Stream adapter controller closed (finally block).');
+              if (profile.subscription_status === 'trialing') {
+                await supabaseAdmin
+                  .from('profiles')
+                  .update({ trial_ai_calls_used: (profile.trial_ai_calls_used ?? 0) + 1 })
+                  .eq('id', userId!);
+              }
             }
           },
           cancel(reason) {
