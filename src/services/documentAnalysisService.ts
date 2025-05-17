@@ -345,10 +345,16 @@ export const generateInlineTextService = async (
   payload: GenerateInlineTextPayload
 ): Promise<{ reader: ReadableStreamDefaultReader<Uint8Array> | null; error: string | null }> => {
   try {
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+
+    if (authError || !user) {
+      console.error('generateInlineTextService: User not authenticated.', authError);
+      return { reader: null, error: 'User not authenticated' };
+    }
+
     // Invoke the function. The Supabase client handles the stream.
-    // The `data` field in the response should be a ReadableStream.
     const { data, error: invokeError } = await supabase.functions.invoke('generate-inline-text', {
-      body: { ...payload, stream: true }, // Ensure the edge function expects `stream: true`
+      body: { ...payload, stream: true, userId: user.id },
     });
 
     if (invokeError) {
