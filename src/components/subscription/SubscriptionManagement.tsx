@@ -7,11 +7,12 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { toast } from 'sonner'; // Assuming you use sonner for toasts
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Loader2 } from 'lucide-react';
+import { TRIAL_AI_CALL_LIMIT } from '@/config/constants';
+import { isSubscriptionActive, isTrialValid } from '@/utils/subscription';
 
 // Replace with your actual Price IDs from Stripe Dashboard
 const MONTHLY_PRICE_ID = import.meta.env.VITE_STRIPE_MONTHLY_PRICE_ID || 'price_xxxxxxxxxxxxxx_monthly';
 const ANNUAL_PRICE_ID = import.meta.env.VITE_STRIPE_ANNUAL_PRICE_ID || 'price_yyyyyyyyyyyyyy_annual';
-const TRIAL_AI_CALL_LIMIT = 30; // Define the trial AI call limit
 
 export const SubscriptionManagement: React.FC = () => {
   const stripe = useStripe();
@@ -191,14 +192,13 @@ export const SubscriptionManagement: React.FC = () => {
     );
   }
 
-  const isActiveSub = userProfile?.subscription_status === 'active';
+  const isActiveSub = isSubscriptionActive(userProfile);
   const isTrialing = userProfile?.subscription_status === 'trialing';
   const trialEndsAt = userProfile?.trial_ends_at ? new Date(userProfile.trial_ends_at) : null;
-  const isTrialExpired = isTrialing && trialEndsAt && trialEndsAt.getTime() < new Date().getTime();
   const trialCallsUsed = userProfile?.trial_ai_calls_used || 0;
+  const isTrialExpired = isTrialing && trialEndsAt && trialEndsAt.getTime() < Date.now();
   const trialCallLimitReached = trialCallsUsed >= TRIAL_AI_CALL_LIMIT;
-
-  const isCurrentlyValidTrial = isTrialing && trialEndsAt && !isTrialExpired && !trialCallLimitReached;
+  const isCurrentlyValidTrial = isTrialValid(userProfile);
 
   // Condition to show "Start Trial" button:
   // User exists, profile might or might not exist yet (or has no status)
