@@ -1,6 +1,6 @@
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts';
 import { corsHeaders } from '../_shared/cors.ts';
-import { createClient } from 'npm:@supabase/supabase-js@^2.0.0';
+import { createSupabaseAdminClient } from '../_shared/supabaseAdmin.ts';
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@^2.0.0';
 import { v4 as uuidv4 } from "npm:uuid";
 // import Anthropic from 'npm:@anthropic-ai/sdk@0.19.0'; // Will be replaced by Perplexity
@@ -50,16 +50,8 @@ interface SourceInfo {
 
 console.log('Deep Research Agent function initializing...');
 
-// Initialize Supabase client (remains the same)
-const supabaseUrl = Deno.env.get('SUPABASE_URL') || '';
-const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
-if (!supabaseUrl || !supabaseServiceKey) {
-  console.error('Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY');
-}
-const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
-  global: { headers: { Authorization: `Bearer ${supabaseServiceKey}` } },
-  auth: { persistSession: false }
-});
+// Initialize Supabase admin client
+const supabaseAdmin = createSupabaseAdminClient();
 
 const perplexityApiKey = Deno.env.get('PERPLEXITY_API_TOKEN') || '';
 if (!perplexityApiKey) {
@@ -76,7 +68,10 @@ async function handleDeepResearchQuery(
   query: string,
   // deno-lint-ignore no-explicit-any
   messages: any[], // Adjust type based on Perplexity's message format
-  documentContext = ''
+  documentContext = '',
+  supabaseAdmin?: SupabaseClient,
+  userId?: string,
+  profile?: { subscription_status: string; trial_ai_calls_used?: number }
 ): Promise<DenoReadableStream<Uint8Array>> {
   console.log('--- handleDeepResearchQuery called ---');
   const model = "sonar-reasoning-pro"; // Use reasoning model
@@ -244,6 +239,13 @@ ${documentContext}`;
       // Send final complete event
       await writer.write(encoder.encode(`data: ${JSON.stringify({ type: 'complete' })}\n\n`));
 
+      if (profile && userId && supabaseAdmin && profile.subscription_status === 'trialing') {
+        await supabaseAdmin
+          .from('profiles')
+          .update({ trial_ai_calls_used: (profile.trial_ai_calls_used ?? 0) + 1 })
+          .eq('id', userId);
+      }
+
     } catch (error) {
       console.error('Deep research stream processing error:', error);
       await writer.write(encoder.encode(`data: ${JSON.stringify({ 
@@ -286,6 +288,43 @@ serve(async (req: Request) => {
     
     const userId = user.id;
     console.log('User authenticated for Deep Research:', userId);
+
+    const { data: profile, error: profileError } = await supabaseAdmin
+      .from('profiles')
+      .select('subscription_status, trial_ends_at, trial_ai_calls_used')
+      .eq('id', userId)
+      .single();
+
+    if (profileError || !profile) {
+      console.error('Profile fetch error:', profileError);
+      return new Response(JSON.stringify({ error: 'User profile not found' }), {
+        status: 403,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+
+    const TRIAL_AI_CALL_LIMIT = 30;
+    const now = new Date();
+
+    if (profile.subscription_status === 'trialing') {
+      if (!profile.trial_ends_at || new Date(profile.trial_ends_at) < now) {
+        return new Response(JSON.stringify({ error: 'Trial expired' }), {
+          status: 403,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+      if ((profile.trial_ai_calls_used ?? 0) >= TRIAL_AI_CALL_LIMIT) {
+        return new Response(JSON.stringify({ error: 'Trial call limit reached' }), {
+          status: 403,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+    } else if (profile.subscription_status !== 'active') {
+      return new Response(JSON.stringify({ error: 'Subscription inactive' }), {
+        status: 403,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
 
     const {
       messages,
@@ -384,7 +423,14 @@ ${(doc.extracted_text || '').substring(0, 5000)}
     }
     
     // Call the Perplexity handler
-    const responseStream = await handleDeepResearchQuery(queryContent, messages, fetchedContextText);
+    const responseStream = await handleDeepResearchQuery(
+      queryContent,
+      messages,
+      fetchedContextText,
+      supabaseAdmin,
+      userId,
+      profile
+    );
     
     const responseHeadersInit: HeadersInit = { 
       ...corsHeaders, 
